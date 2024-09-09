@@ -1,0 +1,5 @@
+0001-install_in_usr_share.patch
+0002-do_not_use_version_number_in_system_path.patch
+0003-locales_directory_install.patch
+0004-double-promotion-not-error.patch
+0005-device-pointer-type.patch

@@ -1,0 +1,24 @@
+From: "Matteo F. Vescovi" <mfv@debian.org>
+Date: Sun, 20 Aug 2023 16:49:34 +0200
+Forwarded: not-needed
+Subject: install_in_usr_share
+
+---
+ source/creator/CMakeLists.txt | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/source/creator/CMakeLists.txt b/source/creator/CMakeLists.txt
+index 7e3235e..3fe3416 100644
+--- a/source/creator/CMakeLists.txt
++++ b/source/creator/CMakeLists.txt
+@@ -441,8 +441,8 @@ if(WITH_PYTHON)
+   endif()
+ 
+   install(
+-    DIRECTORY ${CMAKE_SOURCE_DIR}/scripts
+-    DESTINATION ${TARGETDIR_VER}
++    DIRECTORY ${CMAKE_SOURCE_DIR}/scripts/
++    DESTINATION ${CMAKE_INSTALL_PREFIX}/share/blender/scripts/
+     PATTERN ".git" EXCLUDE
+     PATTERN ".gitignore" EXCLUDE
+     PATTERN ".gitea" EXCLUDE
