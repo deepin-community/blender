@@ -1,0 +1,33 @@
+Description: Device pointers should be long long also in s390x and riscv64.
+ .
+ They are uint64_t after all.
+ .
+ The error raised otherwise is "cast from ‘void*’ to ‘CUdeviceptr’
+ {aka ‘unsigned int’} loses precision".
+ .
+Author: Nathan Pratta Teodosio <nathan.teodosio@canonical.com>
+Forwarded: not-yet
+
+https://launchpadlibrarian.net/685011549/buildlog_ubuntu-mantic-riscv64.blender_3.6.2+dfsg-1_BUILDING.txt.gz
+--- blender-3.6.2+dfsg.orig/extern/cuew/include/cuew.h
++++ blender-3.6.2+dfsg/extern/cuew/include/cuew.h
+@@ -127,7 +127,7 @@ typedef uint32_t cuuint32_t;
+ typedef uint64_t cuuint64_t;
+ #endif
+ 
+-#if defined(__x86_64) || defined(AMD64) || defined(_M_AMD64) || defined (__aarch64__) || defined(__ppc64__) || defined(__PPC64__)
++#if SIZE_MAX == UINT64_MAX
+ typedef unsigned long long CUdeviceptr;
+ #else
+ typedef unsigned int CUdeviceptr;
+--- blender-3.6.2+dfsg.orig/extern/hipew/include/hipew.h
++++ blender-3.6.2+dfsg/extern/hipew/include/hipew.h
+@@ -86,7 +86,7 @@ typedef uint32_t hipuint32_t;
+ typedef uint64_t hipuint64_t;
+ #endif
+ 
+-#if defined(__x86_64) || defined(AMD64) || defined(_M_AMD64) || defined (__aarch64__) || defined(__ppc64__) || defined(__PPC64__)
++#if SIZE_MAX == UINT64_MAX
+ typedef unsigned long long hipDeviceptr_t;
+ #else
+ typedef unsigned int hipDeviceptr_t;
