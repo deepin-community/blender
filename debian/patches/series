@@ -5,3 +5,4 @@
 0005-fix_FTBFS_ffmpeg7.patch
 0006-fix_FTBFS_py313.patch
 0007-fix_FTBFS_on_riscv64.patch
+0008-fix-FTBFS-on-loongarch64.patch
