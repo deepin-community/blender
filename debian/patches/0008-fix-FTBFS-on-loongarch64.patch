@@ -1,0 +1,74 @@
+From 2b463afc2d8badd4cecb3f518aa4cb3c62e1937c Mon Sep 17 00:00:00 2001
+From: lhdjply <lhdjply@126.com>
+Date: Tue, 22 Jul 2025 15:14:14 +0800
+Subject: [PATCH] fix FTBFS on loongarch64
+
+Signed-off-by: lhdjply <lhdjply@126.com>
+---
+ intern/libmv/libmv/build/build_config.h   |  8 ++++++++
+ source/blender/blenlib/BLI_build_config.h | 11 +++++++++++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/intern/libmv/libmv/build/build_config.h b/intern/libmv/libmv/build/build_config.h
+index 09e67e2d..52fed072 100644
+--- a/intern/libmv/libmv/build/build_config.h
++++ b/intern/libmv/libmv/build/build_config.h
+@@ -362,6 +362,11 @@
+ #  else
+ #    define ARCH_CPU_BIG_ENDIAN 1
+ #  endif
++#elif defined(__loongarch64)
++#  define ARCH_CPU_LOONGARCH_FAMILY 1
++#  define ARCH_CPU_LOONGARCH64 1
++#  define ARCH_CPU_64_BITS 1
++#  define ARCH_CPU_LITTLE_ENDIAN 1
+ #else
+ #  error Please add support for your architecture in build/build_config.h
+ #endif
+@@ -401,5 +406,8 @@
+ #if !defined(ARCH_CPU_RISCV_FAMILY)
+ #  define ARCH_CPU_RISCV_FAMILY 0
+ #endif
++#if !defined(ARCH_CPU_LOONGARCH_FAMILY)
++#  define ARCH_CPU_LOONGARCH_FAMILY 0
++#endif
+ 
+ #endif  // LIBMV_BUILD_BUILD_CONFIG_H_
+diff --git a/source/blender/blenlib/BLI_build_config.h b/source/blender/blenlib/BLI_build_config.h
+index c45d5b06..6cdd6503 100644
+--- a/source/blender/blenlib/BLI_build_config.h
++++ b/source/blender/blenlib/BLI_build_config.h
+@@ -354,6 +354,11 @@
+ #  else
+ #    define ARCH_CPU_BIG_ENDIAN 1
+ #  endif
++#elif defined(__loongarch64)
++#  define ARCH_CPU_LOONGARCH_FAMILY 1
++#  define ARCH_CPU_LOONGARCH64 1
++#  define ARCH_CPU_64_BITS 1
++#  define ARCH_CPU_LITTLE_ENDIAN 1
+ #else
+ #  error Please add support for your architecture in BLI_build_config.h
+ #endif
+@@ -396,6 +401,9 @@
+ #if !defined(ARCH_CPU_RISCV_FAMILY)
+ #  define ARCH_CPU_RISCV_FAMILY 0
+ #endif
++#if !defined(ARCH_CPU_LOONGARCH_FAMILY)
++#  define ARCH_CPU_LOONGARCH_FAMILY 0
++#endif
+ 
+ #if !defined(ARCH_CPU_ARM64)
+ #  define ARCH_CPU_ARM64 0
+@@ -439,5 +447,8 @@
+ #if !defined(ARCH_CPU_RISCV128)
+ #  define ARCH_CPU_RISCV128 0
+ #endif
++#if !defined(ARCH_CPU_LOONGARCH64)
++#  define ARCH_CPU_LOONGARCH64 0
++#endif
+ 
+ /** \} */
+-- 
+2.50.0
+

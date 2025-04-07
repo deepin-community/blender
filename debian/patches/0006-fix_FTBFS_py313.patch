@@ -238,7 +238,7 @@ index 3311064..74c829d 100644
  #  include "BLI_math_base.h" /* isfinite() */
  #endif
  
-+#if PY_VERSION_HEX <= 0x030c0000 /* <=3.12 */
++#if PY_VERSION_HEX < 0x030D0000 /* <3.13 */
 +#  define PyLong_AsInt _PyLong_AsInt
 +#  define PyUnicode_CompareWithASCIIString _PyUnicode_EqualToASCIIString
 +#endif
@@ -352,7 +352,7 @@ index 4a641f7..81740e0 100644
  /* inline so type signatures match as expected */
  Py_LOCAL_INLINE(int32_t) PyC_Long_AsI32(PyObject *value)
  {
-+#if PY_VERSION_HEX <= 0x030c0000 /* <=3.12 */
++#if PY_VERSION_HEX < 0x030D0000 /* <3.13 */
    return (int32_t)_PyLong_AsInt(value);
 +#else
 +  return (int32_t)PyLong_AsInt(value);

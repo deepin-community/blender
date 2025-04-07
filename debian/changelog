@@ -1,3 +1,10 @@
+blender (4.3.2+dfsg-2deepin1) unstable; urgency=medium
+
+  * fix error on python3.12.
+  * fix build in loongarch64
+
+ -- lhdjply <lhdjply@126.com>  Tue, 22 Jul 2025 15:14:14 +0800
+
 blender (4.3.2+dfsg-2) unstable; urgency=medium
 
   * debian/patches/: patchset updated
