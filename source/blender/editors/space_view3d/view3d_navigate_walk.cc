@@ -27,10 +27,7 @@
 
 #include "BKE_context.hh"
 #include "BKE_lib_id.hh"
-#include "BKE_main.hh"
-#include "BKE_report.h"
-
-#include "BLT_translation.h"
+#include "BKE_report.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
@@ -38,18 +35,16 @@
 #include "ED_screen.hh"
 #include "ED_space_api.hh"
 #include "ED_transform_snap_object_context.hh"
+#include "ED_undo.hh"
 
-#include "UI_interface.hh"
 #include "UI_resources.hh"
 
-#include "GPU_immediate.h"
+#include "GPU_immediate.hh"
 
-#include "DEG_depsgraph.hh"
-
-#include "view3d_intern.h" /* own include */
+#include "view3d_intern.hh" /* own include */
 #include "view3d_navigate.hh"
 
-#include "BLI_strict_flags.h"
+#include "BLI_strict_flags.h" /* Keep last. */
 
 #ifdef WITH_INPUT_NDOF
 // #  define NDOF_WALK_DEBUG
@@ -358,7 +353,7 @@ static void drawWalkPixel(const bContext * /*C*/, ARegion *region, void *arg)
 
   if (ED_view3d_cameracontrol_object_get(walk->v3d_camera_control)) {
     ED_view3d_calc_camera_border(
-        walk->scene, walk->depsgraph, region, walk->v3d, walk->rv3d, &viewborder, false);
+        walk->scene, walk->depsgraph, region, walk->v3d, walk->rv3d, false, &viewborder);
     xoff = int(viewborder.xmin + BLI_rctf_size_x(&viewborder) * 0.5f);
     yoff = int(viewborder.ymin + BLI_rctf_size_y(&viewborder) * 0.5f);
   }
@@ -623,7 +618,7 @@ static bool initWalkInfo(bContext *C, WalkInfo *walk, wmOperator *op, const int 
   walk->need_rotation_keyframe = false;
   walk->need_translation_keyframe = false;
 
-  walk->time_lastdraw = BLI_check_seconds_timer();
+  walk->time_lastdraw = BLI_time_now_seconds();
 
   walk->draw_handle_pixel = ED_region_draw_cb_activate(
       walk->region->type, drawWalkPixel, walk, REGION_DRAW_POST_PIXEL);
@@ -764,7 +759,7 @@ static void walkEvent(WalkInfo *walk, const wmEvent *event)
         }
 
         /* Update the time else the view will jump when 2D mouse/timer resume. */
-        walk->time_lastdraw = BLI_check_seconds_timer();
+        walk->time_lastdraw = BLI_time_now_seconds();
 
         break;
       }
@@ -885,7 +880,7 @@ static void walkEvent(WalkInfo *walk, const wmEvent *event)
           float t;
 
           /* Delta time. */
-          t = float(BLI_check_seconds_timer() - walk->teleport.initial_time);
+          t = float(BLI_time_now_seconds() - walk->teleport.initial_time);
 
           /* Reduce the velocity, if JUMP wasn't hold for long enough. */
           t = min_ff(t, JUMP_TIME_MAX);
@@ -910,7 +905,7 @@ static void walkEvent(WalkInfo *walk, const wmEvent *event)
           walk->gravity_state = WALK_GRAVITY_STATE_JUMP;
           walk->speed_jump = JUMP_SPEED_MAX;
 
-          walk->teleport.initial_time = BLI_check_seconds_timer();
+          walk->teleport.initial_time = BLI_time_now_seconds();
           copy_v3_v3(walk->teleport.origin, walk->rv3d->viewinv[3]);
 
           /* Using previous vector because WASD keys are not called when SPACE is. */
@@ -938,7 +933,7 @@ static void walkEvent(WalkInfo *walk, const wmEvent *event)
             teleport->navigation_mode = walk->navigation_mode;
           }
           teleport->state = WALK_TELEPORT_STATE_ON;
-          teleport->initial_time = BLI_check_seconds_timer();
+          teleport->initial_time = BLI_time_now_seconds();
           teleport->duration = U.walk_navigation.teleport_time;
 
           walk_navigation_mode_set(walk, WALK_MODE_FREE);
@@ -1087,7 +1082,7 @@ static int walkApply(bContext *C, WalkInfo *walk, bool is_confirm)
 #ifdef NDOF_WALK_DRAW_TOOMUCH
       walk->redraw = true;
 #endif
-      time_current = BLI_check_seconds_timer();
+      time_current = BLI_time_now_seconds();
       time_redraw = float(time_current - walk->time_lastdraw);
 
       /* Clamp redraw time to avoid jitter in roll correction. */
@@ -1330,7 +1325,7 @@ static int walkApply(bContext *C, WalkInfo *walk, bool is_confirm)
         }
         else {
           /* Hijack the teleport variables. */
-          walk->teleport.initial_time = BLI_check_seconds_timer();
+          walk->teleport.initial_time = BLI_time_now_seconds();
           walk->gravity_state = WALK_GRAVITY_STATE_ON;
           walk->teleport.duration = 0.0f;
 
@@ -1343,7 +1338,7 @@ static int walkApply(bContext *C, WalkInfo *walk, bool is_confirm)
       if (ELEM(walk->gravity_state, WALK_GRAVITY_STATE_ON, WALK_GRAVITY_STATE_JUMP)) {
         float ray_distance, difference = -100.0f;
         /* Delta time. */
-        const float t = float(BLI_check_seconds_timer() - walk->teleport.initial_time);
+        const float t = float(BLI_time_now_seconds() - walk->teleport.initial_time);
 
         /* Keep moving if we were moving. */
         copy_v2_v2(dvec, walk->teleport.direction);
@@ -1386,7 +1381,7 @@ static int walkApply(bContext *C, WalkInfo *walk, bool is_confirm)
         float cur_loc[3];
 
         /* Linear interpolation. */
-        t = float(BLI_check_seconds_timer() - walk->teleport.initial_time);
+        t = float(BLI_time_now_seconds() - walk->teleport.initial_time);
         t /= walk->teleport.duration;
 
         /* Clamp so we don't go past our limit. */
@@ -1417,7 +1412,7 @@ static int walkApply(bContext *C, WalkInfo *walk, bool is_confirm)
     }
     else {
       /* We're not redrawing but we need to update the time else the view will jump. */
-      walk->time_lastdraw = BLI_check_seconds_timer();
+      walk->time_lastdraw = BLI_time_now_seconds();
     }
     /* End drawing. */
     copy_v3_v3(walk->dvec_prev, dvec);
@@ -1529,7 +1524,12 @@ static int walk_modal(bContext *C, wmOperator *op, const wmEvent *event)
     do_draw = true;
   }
   if (exit_code == OPERATOR_FINISHED) {
-    ED_view3d_camera_lock_undo_push(op->type->name, v3d, rv3d, C);
+    const bool is_undo_pushed = ED_view3d_camera_lock_undo_push(op->type->name, v3d, rv3d, C);
+    /* If generic 'locked camera' code did not push an undo, but there is a valid 'walking
+     * object', an undo push is still needed, since that object transform was modified. */
+    if (!is_undo_pushed && walk_object && ED_undo_is_memfile_compatible(C)) {
+      ED_undo_push(C, op->type->name);
+    }
   }
 
   if (do_draw) {

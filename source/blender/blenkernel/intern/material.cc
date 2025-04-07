@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <optional>
 
 #include "CLG_log.h"
 
@@ -42,9 +43,9 @@
 #include "BLI_string.h"
 #include "BLI_utildefines.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
-#include "BKE_anim_data.h"
+#include "BKE_anim_data.hh"
 #include "BKE_attribute.hh"
 #include "BKE_brush.hh"
 #include "BKE_curve.hh"
@@ -54,7 +55,7 @@
 #include "BKE_grease_pencil.hh"
 #include "BKE_icons.h"
 #include "BKE_idtype.hh"
-#include "BKE_image.h"
+#include "BKE_image.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_main.hh"
@@ -65,7 +66,7 @@
 #include "BKE_object.hh"
 #include "BKE_object_types.hh"
 #include "BKE_preview_image.hh"
-#include "BKE_scene.h"
+#include "BKE_scene.hh"
 #include "BKE_vfont.hh"
 
 #include "DEG_depsgraph.hh"
@@ -91,26 +92,34 @@ static void material_init_data(ID *id)
   *((short *)id->name) = ID_MA;
 }
 
-static void material_copy_data(Main *bmain, ID *id_dst, const ID *id_src, const int flag)
+static void material_copy_data(Main *bmain,
+                               std::optional<Library *> owner_library,
+                               ID *id_dst,
+                               const ID *id_src,
+                               const int flag)
 {
   Material *material_dst = (Material *)id_dst;
   const Material *material_src = (const Material *)id_src;
 
   const bool is_localized = (flag & LIB_ID_CREATE_LOCAL) != 0;
-  /* We always need allocation of our private ID data. */
-  const int flag_private_id_data = flag & ~LIB_ID_CREATE_NO_ALLOCATE;
+  /* Never handle user-count here for own sub-data. */
+  const int flag_subdata = flag | LIB_ID_CREATE_NO_USER_REFCOUNT;
+  /* Always need allocation of the embedded ID data. */
+  const int flag_embedded_id_data = flag_subdata & ~LIB_ID_CREATE_NO_ALLOCATE;
 
   if (material_src->nodetree != nullptr) {
     if (is_localized) {
-      material_dst->nodetree = ntreeLocalize(material_src->nodetree);
+      material_dst->nodetree = blender::bke::node_tree_localize(material_src->nodetree,
+                                                                &material_dst->id);
     }
     else {
-      BKE_id_copy_ex(bmain,
-                     (ID *)material_src->nodetree,
-                     (ID **)&material_dst->nodetree,
-                     flag_private_id_data);
+      BKE_id_copy_in_lib(bmain,
+                         owner_library,
+                         &material_src->nodetree->id,
+                         &material_dst->id,
+                         reinterpret_cast<ID **>(&material_dst->nodetree),
+                         flag_embedded_id_data);
     }
-    material_dst->nodetree->owner_id = &material_dst->id;
   }
 
   if ((flag & LIB_ID_COPY_NO_PREVIEW) == 0) {
@@ -146,7 +155,7 @@ static void material_free_data(ID *id)
 
   /* is no lib link block, but material extension */
   if (material->nodetree) {
-    ntreeFreeEmbeddedTree(material->nodetree);
+    blender::bke::node_tree_free_embedded_tree(material->nodetree);
     MEM_freeN(material->nodetree);
     material->nodetree = nullptr;
   }
@@ -200,7 +209,7 @@ static void material_blend_write(BlendWriter *writer, ID *id, const void *id_add
         temp_embedded_id_buffer, &ma->nodetree->id, BLO_write_is_undo(writer));
     BLO_write_struct_at_address(
         writer, bNodeTree, ma->nodetree, BLO_write_get_id_buffer_temp_id(temp_embedded_id_buffer));
-    ntreeBlendWrite(
+    blender::bke::node_tree_blend_write(
         writer,
         reinterpret_cast<bNodeTree *>(BLO_write_get_id_buffer_temp_id(temp_embedded_id_buffer)));
     BLO_write_destroy_id_buffer(&temp_embedded_id_buffer);
@@ -220,17 +229,18 @@ static void material_blend_read_data(BlendDataReader *reader, ID *id)
 
   ma->texpaintslot = nullptr;
 
-  BLO_read_data_address(reader, &ma->preview);
+  BLO_read_struct(reader, PreviewImage, &ma->preview);
   BKE_previewimg_blend_read(reader, ma->preview);
 
   BLI_listbase_clear(&ma->gpumaterial);
 
-  BLO_read_data_address(reader, &ma->gp_style);
+  BLO_read_struct(reader, MaterialGPencilStyle, &ma->gp_style);
 }
 
 IDTypeInfo IDType_ID_MA = {
     /*id_code*/ ID_MA,
     /*id_filter*/ FILTER_ID_MA,
+    /*dependencies_id_types*/ FILTER_ID_TE | FILTER_ID_GR,
     /*main_listbase_index*/ INDEX_ID_MA,
     /*struct_size*/ sizeof(Material),
     /*name*/ "Material",
@@ -501,8 +511,6 @@ bool BKE_object_material_slot_used(Object *object, short actcol)
     case ID_MB:
       /* Meta-elements don't support materials at the moment. */
       return false;
-    case ID_GD_LEGACY:
-      return BKE_gpencil_material_index_used((bGPdata *)ob_data, actcol - 1);
     case ID_GP:
       return BKE_grease_pencil_material_index_used(reinterpret_cast<GreasePencil *>(ob_data),
                                                    actcol - 1);
@@ -550,7 +558,7 @@ void BKE_id_materials_copy(Main *bmain, ID *id_src, ID *id_dst)
       id_us_plus((ID *)(*matar_dst)[a]);
     }
 
-    DEG_id_tag_update(id_dst, ID_RECALC_COPY_ON_WRITE);
+    DEG_id_tag_update(id_dst, ID_RECALC_SYNC_TO_EVAL);
     DEG_relations_tag_update(bmain);
   }
 }
@@ -582,7 +590,7 @@ void BKE_id_material_resize(Main *bmain, ID *id, short totcol, bool do_id_user)
   }
   *totcolp = totcol;
 
-  DEG_id_tag_update(id, ID_RECALC_COPY_ON_WRITE);
+  DEG_id_tag_update(id, ID_RECALC_SYNC_TO_EVAL);
   DEG_relations_tag_update(bmain);
 }
 
@@ -605,7 +613,7 @@ void BKE_id_material_append(Main *bmain, ID *id, Material *ma)
     id_us_plus((ID *)ma);
     BKE_objects_materials_test_all(bmain, id);
 
-    DEG_id_tag_update(id, ID_RECALC_COPY_ON_WRITE);
+    DEG_id_tag_update(id, ID_RECALC_SYNC_TO_EVAL);
     DEG_relations_tag_update(bmain);
   }
 }
@@ -640,7 +648,7 @@ Material *BKE_id_material_pop(Main *bmain, ID *id, int index_i)
 
       material_data_index_remove_id(id, index);
 
-      DEG_id_tag_update(id, ID_RECALC_COPY_ON_WRITE);
+      DEG_id_tag_update(id, ID_RECALC_SYNC_TO_EVAL);
       DEG_relations_tag_update(bmain);
     }
   }
@@ -666,7 +674,7 @@ void BKE_id_material_clear(Main *bmain, ID *id)
     BKE_objects_materials_test_all(bmain, id);
     material_data_index_clear_id(id);
 
-    DEG_id_tag_update(id, ID_RECALC_COPY_ON_WRITE);
+    DEG_id_tag_update(id, ID_RECALC_SYNC_TO_EVAL);
     DEG_relations_tag_update(bmain);
   }
 }
@@ -717,17 +725,25 @@ Material **BKE_object_material_get_p(Object *ob, short act)
 Material *BKE_object_material_get(Object *ob, short act)
 {
   Material **ma_p = BKE_object_material_get_p(ob, act);
+  /* Grease Pencil objects currently make the assumption that the returned material has Grease
+   * Pencil settings. Ensure that this is the case otherwise return `nullptr`. */
+  if (ob->type == OB_GREASE_PENCIL && ma_p != nullptr) {
+    Material *ma = *ma_p;
+    if (ma != nullptr) {
+      return ma->gp_style != nullptr ? ma : nullptr;
+    }
+  }
   return ma_p ? *ma_p : nullptr;
 }
 
-static ID *get_evaluated_object_data_with_materials(Object *ob)
+static const ID *get_evaluated_object_data_with_materials(Object *ob)
 {
-  ID *data = static_cast<ID *>(ob->data);
+  const ID *data = static_cast<ID *>(ob->data);
   /* Meshes in edit mode need special handling. */
   if (ob->type == OB_MESH && ob->mode == OB_MODE_EDIT) {
-    Mesh *mesh = static_cast<Mesh *>(ob->data);
-    Mesh *editmesh_eval_final = BKE_object_get_editmesh_eval_final(ob);
-    if (mesh->edit_mesh && editmesh_eval_final) {
+    const Mesh *mesh = static_cast<const Mesh *>(ob->data);
+    const Mesh *editmesh_eval_final = BKE_object_get_editmesh_eval_final(ob);
+    if (mesh->runtime->edit_mesh && editmesh_eval_final) {
       data = &editmesh_eval_final->id;
     }
   }
@@ -738,8 +754,8 @@ Material *BKE_object_material_get_eval(Object *ob, short act)
 {
   BLI_assert(DEG_is_evaluated_object(ob));
 
-  ID *data = get_evaluated_object_data_with_materials(ob);
-  const short *tot_slots_data_ptr = BKE_id_material_len_p(data);
+  const ID *data = get_evaluated_object_data_with_materials(ob);
+  const short *tot_slots_data_ptr = BKE_id_material_len_p(const_cast<ID *>(data));
   const int tot_slots_data = tot_slots_data_ptr ? *tot_slots_data_ptr : 0;
 
   if (tot_slots_data == 0) {
@@ -750,7 +766,7 @@ Material *BKE_object_material_get_eval(Object *ob, short act)
   const int slot_index = clamp_i(act - 1, 0, tot_slots_data - 1);
   const int tot_slots_object = ob->totcol;
 
-  Material ***materials_data_ptr = BKE_id_material_array_p(data);
+  Material ***materials_data_ptr = BKE_id_material_array_p(const_cast<ID *>(data));
   Material **materials_data = materials_data_ptr ? *materials_data_ptr : nullptr;
   Material **materials_object = ob->mat;
 
@@ -823,7 +839,7 @@ void BKE_id_material_eval_ensure_default_slot(ID *id)
   }
 }
 
-int BKE_object_material_index_get(Object *ob, Material *ma)
+int BKE_object_material_index_get(Object *ob, const Material *ma)
 {
   short *totcol = BKE_object_material_len_p(ob);
   Material *read_ma = nullptr;
@@ -834,6 +850,17 @@ int BKE_object_material_index_get(Object *ob, Material *ma)
     }
   }
   return -1;
+}
+
+int BKE_object_material_index_get_with_hint(Object *ob, const Material *ma, const int hint_index)
+{
+  short *totcol = BKE_object_material_len_p(ob);
+  if ((hint_index >= 0) && (hint_index < *totcol)) {
+    if (ma == BKE_object_material_get(ob, hint_index + 1)) {
+      return hint_index;
+    }
+  }
+  return BKE_object_material_index_get(ob, ma);
 }
 
 int BKE_object_material_ensure(Main *bmain, Object *ob, Material *material)
@@ -915,7 +942,7 @@ void BKE_object_material_resize(Main *bmain, Object *ob, const short totcol, boo
     ob->actcol = ob->totcol;
   }
 
-  DEG_id_tag_update(&ob->id, ID_RECALC_COPY_ON_WRITE | ID_RECALC_GEOMETRY);
+  DEG_id_tag_update(&ob->id, ID_RECALC_SYNC_TO_EVAL | ID_RECALC_GEOMETRY);
   DEG_relations_tag_update(bmain);
 }
 
@@ -928,7 +955,7 @@ void BKE_object_materials_test(Main *bmain, Object *ob, ID *id)
     return;
   }
 
-  if ((ob->id.tag & LIB_TAG_MISSING) == 0 && (id->tag & LIB_TAG_MISSING) != 0) {
+  if ((ob->id.tag & ID_TAG_MISSING) == 0 && (id->tag & ID_TAG_MISSING) != 0) {
     /* Exception: In case the object is a valid data, but its obdata is an empty place-holder,
      * use object's material slots amount as reference.
      * This avoids losing materials in a local object when its linked obdata goes missing.
@@ -1143,9 +1170,6 @@ void BKE_object_material_remap(Object *ob, const uint *remap)
   else if (ELEM(ob->type, OB_CURVES_LEGACY, OB_SURF, OB_FONT)) {
     BKE_curve_material_remap(static_cast<Curve *>(ob->data), remap, ob->totcol);
   }
-  else if (ob->type == OB_GPENCIL_LEGACY) {
-    BKE_gpencil_material_remap(static_cast<bGPdata *>(ob->data), remap, ob->totcol);
-  }
   else if (ob->type == OB_GREASE_PENCIL) {
     BKE_grease_pencil_material_remap(static_cast<GreasePencil *>(ob->data), remap, ob->totcol);
   }
@@ -1226,7 +1250,7 @@ void BKE_object_material_from_eval_data(Main *bmain, Object *ob_orig, const ID *
 
   /* Create new material slots based on materials on evaluated geometry. */
   *orig_totcol = *eval_totcol;
-  *orig_mat = MEM_cnew_array<Material *>(*eval_totcol, __func__);
+  *orig_mat = *eval_totcol > 0 ? MEM_cnew_array<Material *>(*eval_totcol, __func__) : nullptr;
   for (int i = 0; i < *eval_totcol; i++) {
     Material *material_eval = (*eval_mat)[i];
     if (material_eval != nullptr) {
@@ -1397,10 +1421,6 @@ bool BKE_object_material_slot_remove(Main *bmain, Object *ob)
     if (ob->runtime->curve_cache) {
       BKE_displist_free(&ob->runtime->curve_cache->disp);
     }
-  }
-  /* check indices from gpencil legacy. */
-  else if (ob->type == OB_GPENCIL_LEGACY) {
-    BKE_gpencil_material_index_reassign((bGPdata *)ob->data, ob->totcol, actcol - 1);
   }
 
   return true;
@@ -1597,7 +1617,7 @@ void BKE_texpaint_slot_refresh_cache(Scene *scene, Material *ma, const Object *o
       ma->texpaintslot = static_cast<TexPaintSlot *>(
           MEM_callocN(sizeof(TexPaintSlot) * count, "texpaint_slots"));
 
-      bNode *active_node = blender::bke::nodeGetActivePaintCanvas(ma->nodetree);
+      bNode *active_node = blender::bke::node_get_active_paint_canvas(ma->nodetree);
 
       fill_texpaint_slots_recursive(ma->nodetree, active_node, ob, ma, count, slot_filter);
 
@@ -1613,7 +1633,7 @@ void BKE_texpaint_slot_refresh_cache(Scene *scene, Material *ma, const Object *o
     }
   }
 
-  /* COW needed when adding texture slot on an object with no materials.
+  /* Copy-on-eval needed when adding texture slot on an object with no materials.
    * But do it only when slots actually change to avoid continuous depsgraph updates. */
   if (ma->tot_slots != prev_tot_slots || ma->paint_active_slot != prev_paint_active_slot ||
       ma->paint_clone_slot != prev_paint_clone_slot ||
@@ -1621,7 +1641,7 @@ void BKE_texpaint_slot_refresh_cache(Scene *scene, Material *ma, const Object *o
        memcmp(ma->texpaintslot, prev_texpaintslot, sizeof(*ma->texpaintslot) * ma->tot_slots) !=
            0))
   {
-    DEG_id_tag_update(&ma->id, ID_RECALC_SHADING | ID_RECALC_COPY_ON_WRITE);
+    DEG_id_tag_update(&ma->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
   }
 
   MEM_SAFE_FREE(prev_texpaintslot);
@@ -1977,78 +1997,79 @@ static void material_default_surface_init(Material *ma)
 {
   BLI_strncpy(ma->id.name + 2, "Default Surface", MAX_NAME);
 
-  bNodeTree *ntree = blender::bke::ntreeAddTreeEmbedded(
+  bNodeTree *ntree = blender::bke::node_tree_add_tree_embedded(
       nullptr, &ma->id, "Shader Nodetree", ntreeType_Shader->idname);
   ma->use_nodes = true;
 
-  bNode *principled = nodeAddStaticNode(nullptr, ntree, SH_NODE_BSDF_PRINCIPLED);
-  bNodeSocket *base_color = nodeFindSocket(principled, SOCK_IN, "Base Color");
+  bNode *principled = blender::bke::node_add_static_node(nullptr, ntree, SH_NODE_BSDF_PRINCIPLED);
+  bNodeSocket *base_color = blender::bke::node_find_socket(principled, SOCK_IN, "Base Color");
   copy_v3_v3(((bNodeSocketValueRGBA *)base_color->default_value)->value, &ma->r);
 
-  bNode *output = nodeAddStaticNode(nullptr, ntree, SH_NODE_OUTPUT_MATERIAL);
+  bNode *output = blender::bke::node_add_static_node(nullptr, ntree, SH_NODE_OUTPUT_MATERIAL);
 
-  nodeAddLink(ntree,
-              principled,
-              nodeFindSocket(principled, SOCK_OUT, "BSDF"),
-              output,
-              nodeFindSocket(output, SOCK_IN, "Surface"));
+  blender::bke::node_add_link(ntree,
+                              principled,
+                              blender::bke::node_find_socket(principled, SOCK_OUT, "BSDF"),
+                              output,
+                              blender::bke::node_find_socket(output, SOCK_IN, "Surface"));
 
   principled->locx = 10.0f;
   principled->locy = 300.0f;
   output->locx = 300.0f;
   output->locy = 300.0f;
 
-  nodeSetActive(ntree, output);
+  blender::bke::node_set_active(ntree, output);
 }
 
 static void material_default_volume_init(Material *ma)
 {
   BLI_strncpy(ma->id.name + 2, "Default Volume", MAX_NAME);
 
-  bNodeTree *ntree = blender::bke::ntreeAddTreeEmbedded(
+  bNodeTree *ntree = blender::bke::node_tree_add_tree_embedded(
       nullptr, &ma->id, "Shader Nodetree", ntreeType_Shader->idname);
   ma->use_nodes = true;
 
-  bNode *principled = nodeAddStaticNode(nullptr, ntree, SH_NODE_VOLUME_PRINCIPLED);
-  bNode *output = nodeAddStaticNode(nullptr, ntree, SH_NODE_OUTPUT_MATERIAL);
+  bNode *principled = blender::bke::node_add_static_node(
+      nullptr, ntree, SH_NODE_VOLUME_PRINCIPLED);
+  bNode *output = blender::bke::node_add_static_node(nullptr, ntree, SH_NODE_OUTPUT_MATERIAL);
 
-  nodeAddLink(ntree,
-              principled,
-              nodeFindSocket(principled, SOCK_OUT, "Volume"),
-              output,
-              nodeFindSocket(output, SOCK_IN, "Volume"));
+  blender::bke::node_add_link(ntree,
+                              principled,
+                              blender::bke::node_find_socket(principled, SOCK_OUT, "Volume"),
+                              output,
+                              blender::bke::node_find_socket(output, SOCK_IN, "Volume"));
 
   principled->locx = 10.0f;
   principled->locy = 300.0f;
   output->locx = 300.0f;
   output->locy = 300.0f;
 
-  nodeSetActive(ntree, output);
+  blender::bke::node_set_active(ntree, output);
 }
 
 static void material_default_holdout_init(Material *ma)
 {
   BLI_strncpy(ma->id.name + 2, "Default Holdout", MAX_NAME);
 
-  bNodeTree *ntree = blender::bke::ntreeAddTreeEmbedded(
+  bNodeTree *ntree = blender::bke::node_tree_add_tree_embedded(
       nullptr, &ma->id, "Shader Nodetree", ntreeType_Shader->idname);
   ma->use_nodes = true;
 
-  bNode *holdout = nodeAddStaticNode(nullptr, ntree, SH_NODE_HOLDOUT);
-  bNode *output = nodeAddStaticNode(nullptr, ntree, SH_NODE_OUTPUT_MATERIAL);
+  bNode *holdout = blender::bke::node_add_static_node(nullptr, ntree, SH_NODE_HOLDOUT);
+  bNode *output = blender::bke::node_add_static_node(nullptr, ntree, SH_NODE_OUTPUT_MATERIAL);
 
-  nodeAddLink(ntree,
-              holdout,
-              nodeFindSocket(holdout, SOCK_OUT, "Holdout"),
-              output,
-              nodeFindSocket(output, SOCK_IN, "Surface"));
+  blender::bke::node_add_link(ntree,
+                              holdout,
+                              blender::bke::node_find_socket(holdout, SOCK_OUT, "Holdout"),
+                              output,
+                              blender::bke::node_find_socket(output, SOCK_IN, "Surface"));
 
   holdout->locx = 10.0f;
   holdout->locy = 300.0f;
   output->locx = 300.0f;
   output->locy = 300.0f;
 
-  nodeSetActive(ntree, output);
+  blender::bke::node_set_active(ntree, output);
 }
 
 Material *BKE_material_default_empty()

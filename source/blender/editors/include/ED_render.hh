@@ -23,6 +23,7 @@ struct ScrArea;
 struct bContext;
 struct bScreen;
 struct PreviewImage;
+struct uiPreview;
 struct ViewLayer;
 struct World;
 struct wmWindow;
@@ -54,16 +55,15 @@ void ED_render_view3d_update(Depsgraph *depsgraph, wmWindow *window, ScrArea *ar
 Scene *ED_render_job_get_scene(const bContext *C);
 Scene *ED_render_job_get_current_scene(const bContext *C);
 
-/* Render the preview
- *
- * pr_method:
- * - PR_BUTS_RENDER: preview is rendered for buttons window
- * - PR_ICON_RENDER: preview is rendered for icons. hopefully fast enough for at least 32x32
- * - PR_ICON_DEFERRED: No render, we just ensure deferred icon data gets generated.
+/**
+ * Render the preview method.
  */
 enum ePreviewRenderMethod {
+  /** Preview is rendered for buttons window. */
   PR_BUTS_RENDER = 0,
+  /** Preview is rendered for icons. hopefully fast enough for at least 32x32. */
   PR_ICON_RENDER = 1,
+  /** No render, we just ensure deferred icon data gets generated. */
   PR_ICON_DEFERRED = 2,
 };
 
@@ -76,7 +76,7 @@ void ED_preview_free_dbase();
 /**
  * Check if \a id is supported by the automatic preview render.
  */
-bool ED_preview_id_is_supported(const ID *id);
+bool ED_preview_id_is_supported(const ID *id, const char **r_disabled_hint = nullptr);
 
 void ED_preview_set_visibility(Main *pr_main,
                                Scene *scene,
@@ -108,7 +108,14 @@ void ED_preview_restart_queue_work(const bContext *C);
 
 void ED_preview_kill_jobs(wmWindowManager *wm, Main *bmain);
 
-void ED_preview_draw(const bContext *C, void *idp, void *parentp, void *slot, rcti *rect);
+void ED_preview_draw(
+    const bContext *C, void *idp, void *parentp, void *slotp, uiPreview *ui_preview, rcti *rect);
+
+/**
+ * For UI previews (i.e. #uiPreview, not #PreviewImage): Tag all previews for \a id as dirty, so
+ * the next redraw triggers a re-render in #ED_preview_draw().
+ */
+void ED_previews_tag_dirty_by_id(const Main &bmain, const ID &id);
 
 void ED_render_clear_mtex_copybuf();
 

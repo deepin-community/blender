@@ -27,8 +27,8 @@ function(blender_test_set_envvars testname envvars_list)
   if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
     if(WITH_COMPILER_ASAN)
       set(_lsan_options "LSAN_OPTIONS=print_suppressions=false:suppressions=${CMAKE_SOURCE_DIR}/tools/config/analysis/lsan.supp")
-      # FIXME That `allocator_may_return_null=true` ASAN option is only needed for the `guardedalloc` test,
-      #       would be nice to allow tests definition to pass extra envvars better.
+      # FIXME: That `allocator_may_return_null=true` ASAN option is only needed for the
+      # `guardedalloc` test, would be nice to allow tests definition to pass extra envvars better.
       set(_asan_options "ASAN_OPTIONS=allocator_may_return_null=true")
       if(DEFINED ENV{LSAN_OPTIONS})
         set(_lsan_options "${_lsan_options}:$ENV{LSAN_OPTIONS}")
@@ -69,7 +69,7 @@ macro(blender_src_gtest_ex)
       ${CMAKE_SOURCE_DIR}/extern/gmock/include
     )
     unset(_current_include_directories)
-    if(WIN32)
+    if(WIN32 AND NOT WITH_WINDOWS_EXTERNAL_MANIFEST)
       set(MANIFEST "${CMAKE_BINARY_DIR}/tests.exe.manifest")
     else()
       set(MANIFEST "")
@@ -124,6 +124,13 @@ macro(blender_src_gtest_ex)
                           RUNTIME_OUTPUT_DIRECTORY_DEBUG   "${TESTS_OUTPUT_DIR}")
     if(WIN32)
       set_target_properties(${TARGET_NAME} PROPERTIES VS_GLOBAL_VcpkgEnabled "false")
+
+      if(WITH_WINDOWS_EXTERNAL_MANIFEST)
+        add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/tests.exe.manifest ${TESTS_OUTPUT_DIR}/${TARGET_NAME}.exe.manifest
+          DEPENDS ${CMAKE_BINARY_DIR}/tests.exe.manifest
+        )
+      endif()
     endif()
     unset(MANIFEST)
     unset(TEST_INC)
@@ -346,19 +353,23 @@ function(blender_add_test_suite_executable
           DISCOVER_TESTS FALSE
          )
 
-         # Work-around run-time dynamic loader error
-         #   symbol not found in flat namespace '_PyBaseObject_Type'
-         #
-         # Some tests are testing modules which are linked against Python, while some of unit
-         # tests might not use code path which uses Python functionality. In this case linker
-         # will optimize out all symbols from Python since it decides they are not used. This
-         # somehow conflicts with other libraries which are linked against the test binary and
-         # perform search of _PyBaseObject_Type on startup.
-         #
-         # Work-around by telling the linker that the python libraries should not be stripped.
-         if(APPLE)
-           target_link_libraries("${_test_name}_test" PRIVATE "-Wl,-force_load,${PYTHON_LIBRARIES}")
-         endif()
+        # Work-around run-time dynamic loader error
+        #   symbol not found in flat namespace '_PyBaseObject_Type'
+        #
+        # Some tests are testing modules which are linked against Python, while some of unit
+        # tests might not use code path which uses Python functionality. In this case linker
+        # will optimize out all symbols from Python since it decides they are not used. This
+        # somehow conflicts with other libraries which are linked against the test binary and
+        # perform search of _PyBaseObject_Type on startup.
+        #
+        # Work-around by telling the linker that the python libraries should not be stripped.
+        if(APPLE)
+          target_link_libraries("${_test_name}_test" PRIVATE "-Wl,-force_load,${PYTHON_LIBRARIES}")
+        endif()
+
+        if(WITH_BUILDINFO)
+          target_link_libraries("${_test_name}_test" PRIVATE buildinfoobj)
+        endif()
       endif()
     endforeach()
   endif()

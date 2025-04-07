@@ -10,9 +10,9 @@
  *  according to the definition of MD5 in RFC 1321 from April 1992.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <sys/types.h>
 
 #include "BLI_hash_md5.hh" /* own include */
@@ -78,7 +78,7 @@ struct md5_ctx {
 
 /* This array contains the bytes used to pad the buffer to the next 64-byte boundary.
  * (RFC 1321, 3.1: Step 1) */
-static const unsigned char fillbuf[64] = {0x80, 0 /* , 0, 0, ... */};
+static const uchar fillbuf[64] = {0x80, 0 /* , 0, 0, ... */};
 
 /**
  * Initialize structure containing state of computation.
@@ -103,7 +103,7 @@ static void md5_process_block(const void *buffer, size_t len, md5_ctx *ctx)
  * RFC 1321. The first function is a little bit optimized
  * (as found in Colin Plumbs public domain implementation).
  */
-/* #define FF(b, c, d) ((b & c) | (~b & d)) */
+// #define FF(b, c, d) ((b & c) | (~b & d))
 #define FF(b, c, d) (d ^ (b & (c ^ d)))
 #define FG(b, c, d) FF(d, b, c)
 #define FH(b, c, d) (b ^ c ^ d)
@@ -268,8 +268,7 @@ static void *md5_read_ctx(const md5_ctx *ctx, void *resbuf)
   return resbuf;
 }
 
-/*
-Top level public functions. */
+/* Top level public functions. */
 
 int BLI_hash_md5_stream(FILE *stream, void *resblock)
 {
@@ -286,7 +285,7 @@ int BLI_hash_md5_stream(FILE *stream, void *resblock)
   len[1] = 0;
 
   /* Iterate over full file contents. */
-  while (1) {
+  while (true) {
     /* We read the file in blocks of BLOCKSIZE bytes.
      * One call of the computation function processes the whole buffer
      * so that with the next round of the loop another block can be read.
@@ -383,12 +382,12 @@ void *BLI_hash_md5_buffer(const char *buffer, size_t len, void *resblock)
 char *BLI_hash_md5_to_hexdigest(const void *resblock, char r_hex_digest[33])
 {
   static const char hex_map[17] = "0123456789abcdef";
-  const unsigned char *p;
+  const uchar *p;
   char *q;
   short len;
 
-  for (q = r_hex_digest, p = (const unsigned char *)resblock, len = 0; len < 16; p++, len++) {
-    const unsigned char c = *p;
+  for (q = r_hex_digest, p = (const uchar *)resblock, len = 0; len < 16; p++, len++) {
+    const uchar c = *p;
     *q++ = hex_map[c >> 4];
     *q++ = hex_map[c & 15];
   }

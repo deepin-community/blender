@@ -15,7 +15,7 @@
 
 namespace blender::gpu {
 
-VKStorageBuffer::VKStorageBuffer(int size, GPUUsageType usage, const char *name)
+VKStorageBuffer::VKStorageBuffer(size_t size, GPUUsageType usage, const char *name)
     : StorageBuf(size, name), usage_(usage)
 {
 }
@@ -25,7 +25,7 @@ void VKStorageBuffer::update(const void *data)
   VKContext &context = *VKContext::get();
   ensure_allocated();
   VKStagingBuffer staging_buffer(buffer_, VKStagingBuffer::Direction::HostToDevice);
-  staging_buffer.host_buffer_get().update(data);
+  staging_buffer.host_buffer_get().update_immediately(data);
   staging_buffer.copy_to_device(context);
 }
 
@@ -50,28 +50,16 @@ void VKStorageBuffer::allocate()
 void VKStorageBuffer::bind(int slot)
 {
   VKContext &context = *VKContext::get();
-  context.state_manager_get().storage_buffer_bind(*this, slot);
-}
-
-void VKStorageBuffer::bind(int slot,
-                           shader::ShaderCreateInfo::Resource::BindType bind_type,
-                           const GPUSamplerState /*sampler_state*/)
-{
-  VKContext &context = *VKContext::get();
-  VKShader *shader = static_cast<VKShader *>(context.shader);
-  ensure_allocated();
-  const VKShaderInterface &shader_interface = shader->interface_get();
-  const std::optional<VKDescriptorSet::Location> location =
-      shader_interface.descriptor_set_location(bind_type, slot);
-  if (location) {
-    VKDescriptorSetTracker &descriptor_set = context.descriptor_set_get();
-    descriptor_set.bind(*this, *location);
-  }
+  context.state_manager_get().storage_buffer_bind(
+      BindSpaceStorageBuffers::Type::StorageBuffer, this, slot);
 }
 
 void VKStorageBuffer::unbind()
 {
-  unbind_from_active_context();
+  VKContext *context = VKContext::get();
+  if (context) {
+    context->state_manager_get().storage_buffer_unbind(this);
+  }
 }
 
 void VKStorageBuffer::clear(uint32_t clear_value)
@@ -88,15 +76,15 @@ void VKStorageBuffer::copy_sub(VertBuf *src, uint dst_offset, uint src_offset, u
   VKVertexBuffer &src_vertex_buffer = *unwrap(src);
   src_vertex_buffer.upload();
 
-  VkBufferCopy region = {};
-  region.srcOffset = src_offset;
-  region.dstOffset = dst_offset;
-  region.size = copy_size;
+  render_graph::VKCopyBufferNode::CreateInfo copy_buffer = {};
+  copy_buffer.src_buffer = src_vertex_buffer.vk_handle();
+  copy_buffer.dst_buffer = vk_handle();
+  copy_buffer.region.srcOffset = src_offset;
+  copy_buffer.region.dstOffset = dst_offset;
+  copy_buffer.region.size = copy_size;
 
   VKContext &context = *VKContext::get();
-  VKCommandBuffers &command_buffers = context.command_buffers_get();
-  command_buffers.copy(buffer_, src_vertex_buffer.vk_handle(), Span<VkBufferCopy>(&region, 1));
-  context.flush();
+  context.render_graph.add_node(copy_buffer);
 }
 
 void VKStorageBuffer::async_flush_to_host()
@@ -108,11 +96,9 @@ void VKStorageBuffer::read(void *data)
 {
   ensure_allocated();
   VKContext &context = *VKContext::get();
-  context.flush();
-
   VKStagingBuffer staging_buffer(buffer_, VKStagingBuffer::Direction::DeviceToHost);
   staging_buffer.copy_from_device(context);
-  staging_buffer.host_buffer_get().read(data);
+  staging_buffer.host_buffer_get().read(context, data);
 }
 
 }  // namespace blender::gpu

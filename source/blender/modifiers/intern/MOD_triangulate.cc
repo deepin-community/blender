@@ -12,27 +12,22 @@
 
 #include "BLI_utildefines.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "DNA_defaults.h"
-#include "DNA_object_types.h"
 #include "DNA_screen_types.h"
 
-#include "BKE_context.hh"
 #include "BKE_mesh.hh"
 #include "BKE_modifier.hh"
-#include "BKE_screen.hh"
 
 #include "UI_interface.hh"
 #include "UI_resources.hh"
 
-#include "RNA_access.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "bmesh.hh"
 #include "bmesh_tools.hh"
 
-#include "MOD_modifiertypes.hh"
 #include "MOD_ui_common.hh"
 
 static Mesh *triangulate_mesh(Mesh *mesh,
@@ -74,7 +69,7 @@ static Mesh *triangulate_mesh(Mesh *mesh,
   if (keep_clnors) {
     float(*corner_normals)[3] = static_cast<float(*)[3]>(
         CustomData_get_layer_for_write(&result->corner_data, CD_NORMAL, result->corners_num));
-    BKE_mesh_set_custom_normals(result, corner_normals);
+    BKE_mesh_set_custom_normals_normalized(result, corner_normals);
     CustomData_free_layers(&result->corner_data, CD_NORMAL, result->corners_num);
   }
 

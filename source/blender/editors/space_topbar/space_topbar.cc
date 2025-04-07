@@ -14,11 +14,9 @@
 #include "BLI_blenlib.h"
 #include "BLI_utildefines.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
-#include "BKE_blendfile.hh"
 #include "BKE_context.hh"
-#include "BKE_global.h"
 #include "BKE_screen.hh"
 #include "BKE_undo_system.hh"
 
@@ -192,7 +190,7 @@ static void recent_files_menu_draw(const bContext * /*C*/, Menu *menu)
   uiLayoutSetOperatorContext(layout, WM_OP_INVOKE_DEFAULT);
   if (uiTemplateRecentFiles(layout, U.recent_files) != 0) {
     uiItemS(layout);
-    uiItemO(layout, nullptr, ICON_TRASH, "WM_OT_clear_recent_files");
+    uiItemO(layout, IFACE_("Clear Recent Files List..."), ICON_TRASH, "WM_OT_clear_recent_files");
   }
   else {
     uiItemL(layout, IFACE_("No Recent Files"), ICON_NONE);

@@ -7,7 +7,6 @@
  */
 
 #include <algorithm>
-#include <cstdio>
 #include <sstream>
 
 #include "BKE_attribute.hh"
@@ -17,7 +16,8 @@
 #include "BLI_color.hh"
 #include "BLI_enumerable_thread_specific.hh"
 #include "BLI_math_matrix.hh"
-#include "BLI_path_util.h"
+#include "BLI_path_utils.hh"
+#include "BLI_string.h"
 #include "BLI_task.hh"
 
 #include "IO_path_util.hh"
@@ -173,7 +173,7 @@ void OBJWriter::write_header() const
 
 void OBJWriter::write_mtllib_name(const StringRefNull mtl_filepath) const
 {
-  /* Split .MTL file path into parent directory and filename. */
+  /* Split `.MTL` file path into parent directory and filename. */
   char mtl_file_name[FILE_MAXFILE];
   char mtl_dir_name[FILE_MAXDIR];
   BLI_path_split_dir_file(mtl_filepath.data(),
@@ -386,12 +386,16 @@ void OBJWriter::write_face_elements(FormatHandler &fh,
     }
 
     /* Write material name and material group if different from previous. */
-    if (export_params_.export_materials && obj_mesh_data.tot_materials() > 0) {
+    if ((export_params_.export_materials || export_params_.export_material_groups) &&
+        obj_mesh_data.tot_materials() > 0)
+    {
       const int16_t prev_mat = idx == 0 ? NEGATIVE_INIT : std::max(0, material_indices[prev_i]);
       const int16_t mat = std::max(0, material_indices[i]);
       if (mat != prev_mat) {
         if (mat == NOT_FOUND) {
-          buf.write_obj_usemtl(MATERIAL_GROUP_DISABLED);
+          if (export_params_.export_materials) {
+            buf.write_obj_usemtl(MATERIAL_GROUP_DISABLED);
+          }
         }
         else {
           const char *mat_name = matname_fn(mat);
@@ -403,7 +407,9 @@ void OBJWriter::write_face_elements(FormatHandler &fh,
             spaces_to_underscores(object_name);
             buf.write_obj_group(object_name + "_" + mat_name);
           }
-          buf.write_obj_usemtl(mat_name);
+          if (export_params_.export_materials) {
+            buf.write_obj_usemtl(mat_name);
+          }
         }
       }
     }
@@ -497,7 +503,7 @@ void OBJWriter::write_nurbs_curve(FormatHandler &fh, const OBJCurve &obj_nurbs_d
 }
 
 /* -------------------------------------------------------------------- */
-/** \name .MTL writers.
+/** \name `.MTL` writers.
  * \{ */
 
 static const char *tex_map_type_to_string[] = {
@@ -526,16 +532,20 @@ static std::string float3_to_string(const float3 &numbers)
   return r_string.str();
 };
 
-MTLWriter::MTLWriter(const char *obj_filepath) noexcept(false)
+MTLWriter::MTLWriter(const char *obj_filepath, bool write_file) noexcept(false)
 {
-  mtl_filepath_ = obj_filepath;
-  /* It only makes sense to replace this extension if it's at least as long as the existing one. */
-  BLI_assert(strlen(BLI_path_extension(obj_filepath)) == 4);
-  const bool ok = BLI_path_extension_replace(
-      mtl_filepath_.data(), mtl_filepath_.size() + 1, ".mtl");
+  if (!write_file) {
+    return;
+  }
+  char mtl_path[FILE_MAX];
+  STRNCPY(mtl_path, obj_filepath);
+
+  const bool ok = BLI_path_extension_replace(mtl_path, sizeof(mtl_path), ".mtl");
   if (!ok) {
     throw std::system_error(ENAMETOOLONG, std::system_category(), "");
   }
+
+  mtl_filepath_ = mtl_path;
   outfile_ = BLI_fopen(mtl_filepath_.c_str(), "wb");
   if (!outfile_) {
     throw std::system_error(errno, std::system_category(), "Cannot open file " + mtl_filepath_);
@@ -676,8 +686,8 @@ void MTLWriter::write_materials(const char *blen_filepath,
     return;
   }
 
-  char blen_filedir[PATH_MAX];
-  BLI_path_split_dir_part(blen_filepath, blen_filedir, PATH_MAX);
+  char blen_filedir[FILE_MAX];
+  BLI_path_split_dir_part(blen_filepath, blen_filedir, sizeof(blen_filedir));
   BLI_path_slash_native(blen_filedir);
   BLI_path_normalize(blen_filedir);
 

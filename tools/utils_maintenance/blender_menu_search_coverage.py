@@ -197,7 +197,7 @@ def operator_list():
     def is_op_ok(op):
         for op_match in OPERATOR_IGNORE:
             if fnmatchcase(op, op_match):
-                print("    skipping: %s (%s)" % (op, op_match))
+                print("    skipping: {:s} ({:s})".format(op, op_match))
                 return False
         return True
 
@@ -210,7 +210,7 @@ def operator_list():
             if 'INTERNAL' in bl_options:
                 continue
 
-            op_id = "%s.%s" % (mod_name, submod_name)
+            op_id = "{:s}.{:s}".format(mod_name, submod_name)
             if not is_op_ok(op_id):
                 continue
 
@@ -480,23 +480,23 @@ def ctx_gpencil_edit():
 
 
 def ctx_gpencil_sculpt():
-    bpy.ops.object.gpencil_add(type='STROKE')
-    bpy.ops.object.mode_set(mode='SCULPT_GPENCIL')
+    bpy.ops.object.grease_pencil_add(type='STROKE')
+    bpy.ops.object.mode_set(mode='SCULPT_GREASE_PENCIL')
 
 
 def ctx_gpencil_paint_weight():
-    bpy.ops.object.gpencil_add(type='STROKE')
-    bpy.ops.object.mode_set(mode='WEIGHT_GPENCIL')
+    bpy.ops.object.grease_pencil_add(type='STROKE')
+    bpy.ops.object.mode_set(mode='WEIGHT_GREASE_PENCIL')
 
 
 def ctx_gpencil_paint_vertex():
-    bpy.ops.object.gpencil_add(type='STROKE')
-    bpy.ops.object.mode_set(mode='VERTEX_GPENCIL')
+    bpy.ops.object.grease_pencil_add(type='STROKE')
+    bpy.ops.object.mode_set(mode='VERTEX_GREASE_PENCIL')
 
 
 def ctx_gpencil_paint_draw():
-    bpy.ops.object.gpencil_add(type='STROKE')
-    bpy.ops.object.mode_set(mode='PAINT_GPENCIL')
+    bpy.ops.object.grease_pencil_add(type='STROKE')
+    bpy.ops.object.mode_set(mode='PAINT_GREASE_PENCIL')
 
 
 # ------------
@@ -642,7 +642,7 @@ def perform_coverage_test():
 
     # Report:
     print(
-        "Coverage %.2f%% (%d of %d)" % (
+        "Coverage {:.2f} ({:d} of {:d})".format(
             (len_op_menu / len_op) * 100.0,
             len_op_menu,
             len_op,

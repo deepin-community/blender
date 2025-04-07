@@ -64,7 +64,16 @@ ccl_device_intersect bool scene_intersect(KernelGlobals kg,
   return false;
 }
 
+ccl_device_intersect bool scene_intersect_shadow(KernelGlobals kg,
+                                                 ccl_private const Ray *ray,
+                                                 const uint visibility)
+{
+  Intersection isect;
+  return scene_intersect(kg, ray, visibility, &isect);
+}
+
 #ifdef __BVH_LOCAL__
+template<bool single_hit = false>
 ccl_device_intersect bool scene_intersect_local(KernelGlobals kg,
                                                 ccl_private const Ray *ray,
                                                 ccl_private LocalIntersection *local_isect,
@@ -116,7 +125,7 @@ ccl_device_intersect bool scene_intersect_local(KernelGlobals kg,
   void *local_geom = (void *)(kernel_data_fetch(blas_ptr, local_object));
   // we don't need custom intersection functions for SSR
 #  ifdef HIPRT_SHARED_STACK
-  hiprtGeomTraversalAnyHitCustomStack<Stack> traversal(local_geom,
+  hiprtGeomTraversalAnyHitCustomStack<Stack> traversal((hiprtGeometry)local_geom,
                                                        ray_hip,
                                                        stack,
                                                        hiprtTraversalHintDefault,

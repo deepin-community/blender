@@ -29,6 +29,7 @@
 #include "NOD_multi_function.hh"
 
 #include "BLI_compute_context.hh"
+#include "BLI_math_quaternion_types.hh"
 
 #include "BKE_bake_items.hh"
 #include "BKE_node_tree_zones.hh"
@@ -60,8 +61,9 @@ struct OutputCopy {
 };
 
 /**
- * Same as above, but the values can be output by move, instead of copy. This can reduce the amount
- * of unnecessary copies, when the old simulation state is not needed anymore.
+ * Same as #OutputCopy, but the values can be output by move, instead of copy.
+ * This can reduce the amount of unnecessary copies,
+ * when the old simulation state is not needed anymore.
  */
 struct OutputMove {
   float delta_time;
@@ -148,10 +150,10 @@ class GeoNodesBakeParams {
 struct GeoNodesSideEffectNodes {
   MultiValueMap<ComputeContextHash, const lf::FunctionNode *> nodes_by_context;
   /**
-   * The repeat zone is identified by the compute context of the parent and the identifier of the
-   * repeat output node.
+   * The repeat/foreach zone is identified by the compute context of the parent and the identifier
+   * of the repeat output node.
    */
-  MultiValueMap<std::pair<ComputeContextHash, int32_t>, int> iterations_by_repeat_zone;
+  MultiValueMap<std::pair<ComputeContextHash, int32_t>, int> iterations_by_iteration_zone;
 };
 
 /**
@@ -164,13 +166,45 @@ struct GeoNodesModifierData {
   Depsgraph *depsgraph = nullptr;
 };
 
+struct GeoNodesOperatorDepsgraphs {
+  /** Current evaluated depsgraph from the viewport. Shouldn't be null. */
+  const Depsgraph *active = nullptr;
+  /**
+   * Depsgraph containing IDs referenced by the node tree and the node tree itself and from node
+   * group inputs (the redo panel).
+   */
+  Depsgraph *extra = nullptr;
+
+  ~GeoNodesOperatorDepsgraphs();
+
+  /**
+   * The evaluated data-block might be in the scene's active depsgraph, in that case we should use
+   * it directly. Otherwise retrieve it from the extra depsgraph that was built for all other
+   * data-blocks. Return null if it isn't found, generally geometry nodes can handle null ID
+   * pointers.
+   */
+  const ID *get_evaluated_id(const ID &id_orig) const;
+};
+
 struct GeoNodesOperatorData {
   eObjectMode mode;
   /** The object currently effected by the operator. */
-  const Object *self_object = nullptr;
-  /** Current evaluated depsgraph. */
-  Depsgraph *depsgraph = nullptr;
-  Scene *scene = nullptr;
+  const Object *self_object_orig = nullptr;
+  const GeoNodesOperatorDepsgraphs *depsgraphs = nullptr;
+  Scene *scene_orig = nullptr;
+  int2 mouse_position;
+  int2 region_size;
+
+  float3 cursor_position;
+  math::Quaternion cursor_rotation;
+
+  float4x4 viewport_winmat;
+  float4x4 viewport_viewmat;
+  bool viewport_is_perspective;
+
+  int active_point_index = -1;
+  int active_edge_index = -1;
+  int active_face_index = -1;
 };
 
 struct GeoNodesCallData {
@@ -380,6 +414,7 @@ struct GeometryNodesLazyFunctionGraphInfo {
    * The actual lazy-function graph.
    */
   lf::Graph graph;
+  Map<int, const lf::Graph *> debug_zone_body_graphs;
   /**
    * Mappings between the lazy-function graph and the #bNodeTree.
    */
@@ -405,6 +440,7 @@ std::unique_ptr<LazyFunction> get_bake_lazy_function(
 std::unique_ptr<LazyFunction> get_menu_switch_node_lazy_function(
     const bNode &node, GeometryNodesLazyFunctionGraphInfo &lf_graph_info);
 std::unique_ptr<LazyFunction> get_menu_switch_node_socket_usage_lazy_function(const bNode &node);
+std::unique_ptr<LazyFunction> get_warning_node_lazy_function(const bNode &node);
 
 /**
  * Outputs the default value of each output socket that has not been output yet. This needs the
@@ -413,6 +449,10 @@ std::unique_ptr<LazyFunction> get_menu_switch_node_socket_usage_lazy_function(co
  * type is used for both.
  */
 void set_default_remaining_node_outputs(lf::Params &params, const bNode &node);
+
+std::string make_anonymous_attribute_socket_inspection_string(const bNodeSocket &socket);
+std::string make_anonymous_attribute_socket_inspection_string(StringRef node_name,
+                                                              StringRef socket_name);
 
 struct FoundNestedNodeID {
   int id;
@@ -424,28 +464,66 @@ std::optional<FoundNestedNodeID> find_nested_node_id(const GeoNodesLFUserData &u
                                                      const int node_id);
 
 /**
- * An anonymous attribute created by a node.
- */
-class NodeAnonymousAttributeID : public bke::AnonymousAttributeID {
-  std::string long_name_;
-  std::string socket_name_;
-
- public:
-  NodeAnonymousAttributeID(const Object &object,
-                           const ComputeContext &compute_context,
-                           const bNode &bnode,
-                           const StringRef identifier,
-                           const StringRef name);
-
-  std::string user_name() const override;
-};
-
-/**
  * Main function that converts a #bNodeTree into a lazy-function graph. If the graph has been
  * generated already, nothing is done. Under some circumstances a valid graph cannot be created. In
  * those cases null is returned.
  */
 const GeometryNodesLazyFunctionGraphInfo *ensure_geometry_nodes_lazy_function_graph(
     const bNodeTree &btree);
+
+/**
+ * Utility to measure the time that is spend in a specific compute context during geometry nodes
+ * evaluation.
+ */
+class ScopedComputeContextTimer {
+ private:
+  lf::Context &context_;
+  geo_eval_log::TimePoint start_;
+
+ public:
+  ScopedComputeContextTimer(lf::Context &entered_context) : context_(entered_context)
+  {
+    start_ = geo_eval_log::Clock::now();
+  }
+
+  ~ScopedComputeContextTimer()
+  {
+    const geo_eval_log::TimePoint end = geo_eval_log::Clock::now();
+    auto &user_data = static_cast<GeoNodesLFUserData &>(*context_.user_data);
+    auto &local_user_data = static_cast<GeoNodesLFLocalUserData &>(*context_.local_user_data);
+    if (geo_eval_log::GeoTreeLogger *tree_logger = local_user_data.try_get_tree_logger(user_data))
+    {
+      tree_logger->execution_time += (end - start_);
+    }
+  }
+};
+
+/**
+ * Utility to measure the time that is spend in a specific node during geometry nodes evaluation.
+ */
+class ScopedNodeTimer {
+ private:
+  const lf::Context &context_;
+  const bNode &node_;
+  geo_eval_log::TimePoint start_;
+
+ public:
+  ScopedNodeTimer(const lf::Context &context, const bNode &node) : context_(context), node_(node)
+  {
+    start_ = geo_eval_log::Clock::now();
+  }
+
+  ~ScopedNodeTimer()
+  {
+    const geo_eval_log::TimePoint end = geo_eval_log::Clock::now();
+    auto &user_data = static_cast<GeoNodesLFUserData &>(*context_.user_data);
+    auto &local_user_data = static_cast<GeoNodesLFLocalUserData &>(*context_.local_user_data);
+    if (geo_eval_log::GeoTreeLogger *tree_logger = local_user_data.try_get_tree_logger(user_data))
+    {
+      tree_logger->node_execution_times.append(*tree_logger->allocator,
+                                               {node_.identifier, start_, end});
+    }
+  }
+};
 
 }  // namespace blender::nodes

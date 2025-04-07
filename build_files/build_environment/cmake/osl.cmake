@@ -7,8 +7,18 @@ if(WIN32)
   set(OSL_FLEX_BISON -DFLEX_EXECUTABLE=${LIBDIR}/flexbison/win_flex.exe -DBISON_EXECUTABLE=${LIBDIR}/flexbison/win_bison.exe)
 else()
   set(OSL_CMAKE_CXX_STANDARD_LIBRARIES)
-  set(OSL_FLEX_BISON)
   set(OSL_OPENIMAGEIO_LIBRARY "${LIBDIR}/openimageio/lib/OpenImageIO${SHAREDLIBEXT};${LIBDIR}/png/lib/${LIBPREFIX}png16${LIBEXT};${LIBDIR}/jpeg/lib/${LIBPREFIX}jpeg${LIBEXT};${LIBDIR}/tiff/lib/${LIBPREFIX}tiff${LIBEXT};${LIBDIR}/openexr/lib/IlmImf${OPENEXR_VERSION_POSTFIX}${SHAREDLIBEXT}")
+
+  if(APPLE)
+    # Explicitly specify Homebrew path, so we don't use the old system one.
+    if(BLENDER_PLATFORM_ARM)
+      set(OSL_FLEX_BISON -DBISON_EXECUTABLE=/opt/homebrew/opt/bison/bin/bison)
+    else()
+      set(OSL_FLEX_BISON -DBISON_EXECUTABLE=/usr/local/opt/bison/bin/bison)
+    endif()
+  else()
+    set(OSL_FLEX_BISON)
+  endif()
 endif()
 
 set(OSL_EXTRA_ARGS
@@ -16,8 +26,6 @@ set(OSL_EXTRA_ARGS
   -DOpenEXR_ROOT=${LIBDIR}/openexr/
   -DOpenImageIO_ROOT=${LIBDIR}/openimageio/
   -DOSL_BUILD_TESTS=OFF
-  -DOSL_BUILD_MATERIALX=OFF
-  -DPNG_ROOT=${LIBDIR}/png
   -DZLIB_LIBRARY=${LIBDIR}/zlib/lib/${ZLIB_LIBRARY}
   -DZLIB_INCLUDE_DIR=${LIBDIR}/zlib/include/
   ${OSL_FLEX_BISON}
@@ -28,19 +36,17 @@ set(OSL_EXTRA_ARGS
   -DSTOP_ON_WARNING=OFF
   -DUSE_LLVM_BITCODE=OFF
   -DLLVM_ROOT=${LIBDIR}/llvm/
-  -DLLVM_DIRECTORY=${LIBDIR}/llvm/
+  -DLLVM_STATIC=ON
   -DUSE_PARTIO=OFF
   -DUSE_QT=OFF
-  -DUSE_Qt5=OFF
   -DINSTALL_DOCS=OFF
   -Dpugixml_ROOT=${LIBDIR}/pugixml
-  -DTIFF_ROOT=${LIBDIR}/tiff
-  -DJPEG_ROOT=${LIBDIR}/jpeg
   -DUSE_PYTHON=OFF
   -DImath_ROOT=${LIBDIR}/imath
   -DCMAKE_DEBUG_POSTFIX=_d
   -DPython_ROOT=${LIBDIR}/python
   -DPython_EXECUTABLE=${PYTHON_BINARY}
+  -Dlibdeflate_DIR=${LIBDIR}/deflate/lib/cmake/libdeflate
 )
 
 if(NOT APPLE)
@@ -54,8 +60,17 @@ ExternalProject_Add(external_osl
   LIST_SEPARATOR ^^
   URL_HASH ${OSL_HASH_TYPE}=${OSL_HASH}
   PREFIX ${BUILD_DIR}/osl
-  PATCH_COMMAND ${PATCH_CMD} -p 1 -d ${BUILD_DIR}/osl/src/external_osl < ${PATCH_DIR}/osl.diff
-  CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${LIBDIR}/osl -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} ${DEFAULT_CMAKE_FLAGS} ${OSL_EXTRA_ARGS}
+
+  PATCH_COMMAND ${PATCH_CMD} -p 1 -d
+    ${BUILD_DIR}/osl/src/external_osl <
+    ${PATCH_DIR}/osl.diff
+
+  CMAKE_ARGS
+    -DCMAKE_INSTALL_PREFIX=${LIBDIR}/osl
+    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+    ${DEFAULT_CMAKE_FLAGS}
+    ${OSL_EXTRA_ARGS}
+
   INSTALL_DIR ${LIBDIR}/osl
 )
 
@@ -83,21 +98,46 @@ endif()
 if(WIN32)
   if(BUILD_MODE STREQUAL Release)
     ExternalProject_Add_Step(external_osl after_install
-      COMMAND ${CMAKE_COMMAND} -E copy_directory ${LIBDIR}/osl/ ${HARVEST_TARGET}/osl
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${LIBDIR}/osl/
+        ${HARVEST_TARGET}/osl
+
       DEPENDEES install
     )
   endif()
   if(BUILD_MODE STREQUAL Debug)
     ExternalProject_Add_Step(external_osl after_install
-      COMMAND ${CMAKE_COMMAND} -E copy ${LIBDIR}/osl/lib/oslcomp_d.lib ${HARVEST_TARGET}/osl/lib/oslcomp_d.lib
-      COMMAND ${CMAKE_COMMAND} -E copy ${LIBDIR}/osl/lib/oslexec_d.lib ${HARVEST_TARGET}/osl/lib/oslexec_d.lib
-      COMMAND ${CMAKE_COMMAND} -E copy ${LIBDIR}/osl/lib/oslquery_d.lib ${HARVEST_TARGET}/osl/lib/oslquery_d.lib
-      COMMAND ${CMAKE_COMMAND} -E copy ${LIBDIR}/osl/lib/oslnoise_d.lib ${HARVEST_TARGET}/osl/lib/oslnoise_d.lib
-      COMMAND ${CMAKE_COMMAND} -E copy ${LIBDIR}/osl/bin/oslcomp_d.dll ${HARVEST_TARGET}/osl/bin/oslcomp_d.dll
-      COMMAND ${CMAKE_COMMAND} -E copy ${LIBDIR}/osl/bin/oslexec_d.dll ${HARVEST_TARGET}/osl/bin/oslexec_d.dll
-      COMMAND ${CMAKE_COMMAND} -E copy ${LIBDIR}/osl/bin/oslquery_d.dll ${HARVEST_TARGET}/osl/bin/oslquery_d.dll
-      COMMAND ${CMAKE_COMMAND} -E copy ${LIBDIR}/osl/bin/oslnoise_d.dll ${HARVEST_TARGET}/osl/bin/oslnoise_d.dll
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${LIBDIR}/osl/lib/oslcomp_d.lib
+        ${HARVEST_TARGET}/osl/lib/oslcomp_d.lib
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${LIBDIR}/osl/lib/oslexec_d.lib
+        ${HARVEST_TARGET}/osl/lib/oslexec_d.lib
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${LIBDIR}/osl/lib/oslquery_d.lib
+        ${HARVEST_TARGET}/osl/lib/oslquery_d.lib
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${LIBDIR}/osl/lib/oslnoise_d.lib
+        ${HARVEST_TARGET}/osl/lib/oslnoise_d.lib
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${LIBDIR}/osl/bin/oslcomp_d.dll
+        ${HARVEST_TARGET}/osl/bin/oslcomp_d.dll
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${LIBDIR}/osl/bin/oslexec_d.dll
+        ${HARVEST_TARGET}/osl/bin/oslexec_d.dll
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${LIBDIR}/osl/bin/oslquery_d.dll
+        ${HARVEST_TARGET}/osl/bin/oslquery_d.dll
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${LIBDIR}/osl/bin/oslnoise_d.dll
+        ${HARVEST_TARGET}/osl/bin/oslnoise_d.dll
+
       DEPENDEES install
     )
   endif()
+else()
+  harvest_rpath_bin(external_osl osl/bin osl/bin "oslc")
+  harvest(external_osl osl/include osl/include "*.h")
+  harvest_rpath_lib(external_osl osl/lib osl/lib "*${SHAREDLIBEXT}*")
+  harvest(external_osl osl/share/OSL/shaders osl/share/OSL/shaders "*.h")
 endif()

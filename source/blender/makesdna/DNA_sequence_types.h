@@ -28,6 +28,18 @@ struct SequenceLookup;
 struct VFont;
 struct bSound;
 
+#ifdef __cplusplus
+namespace blender::seq {
+struct MediaPresence;
+struct ThumbnailCache;
+}  // namespace blender::seq
+using MediaPresence = blender::seq::MediaPresence;
+using ThumbnailCache = blender::seq::ThumbnailCache;
+#else
+typedef struct MediaPresence MediaPresence;
+typedef struct ThumbnailCache ThumbnailCache;
+#endif
+
 /* -------------------------------------------------------------------- */
 /** \name Sequence & Editing Structs
  * \{ */
@@ -154,7 +166,7 @@ typedef struct SequenceRuntime {
  */
 typedef struct Sequence {
   struct Sequence *next, *prev;
-  /** Temp var for copying, and tagging for linked selection. */
+  /** Temp var for duplication, pointing to the newly duplicated Sequence. */
   void *tmp;
   /** Needed (to be like ipo), else it will raise libdata warnings, this should never be used. */
   void *lib;
@@ -182,16 +194,14 @@ typedef struct Sequence {
   float startstill, endstill;
   /** Machine: the strip channel */
   int machine;
-  int _pad;
   /** Starting and ending points of the effect strip. Undefined for other strip types. */
   int startdisp, enddisp;
   float sat;
   float mul;
-  float _pad1;
 
-  short anim_preseek; /* UNUSED. */
   /** Stream-index for movie or sound files with several streams. */
   short streamindex;
+  short _pad;
   /** For multi-camera source selection. */
   int multicam_source;
   /** MOVIECLIP render flags. */
@@ -219,21 +229,32 @@ typedef struct Sequence {
   float speed_fader;
 
   /* pointers for effects: */
-  struct Sequence *seq1, *seq2, *seq3;
+  struct Sequence *seq1, *seq2;
+
+  /* This strange padding is needed due to how seqbasep deserialization is
+   * done right now in #scene_blend_read_data. */
+  void *_pad7;
+  int _pad8[2];
 
   /** List of strips for meta-strips. */
   ListBase seqbase;
   ListBase channels; /* SeqTimelineChannel */
 
+  /* List of strip connections (one-way, not bidirectional). */
+  ListBase connections; /* SeqConnection */
+
   /** The linked "bSound" object. */
   struct bSound *sound;
-  /** Handle to #AUD_SequenceEntry*/
+  /** Handle to #AUD_SequenceEntry. */
   void *scene_sound;
   float volume;
 
   /** Pitch (-0.1..10), pan -2..2. */
   float pitch DNA_DEPRECATED, pan;
   float strobe;
+
+  float sound_offset;
+  char _pad4[4];
 
   /** Struct pointer for effect settings. */
   void *effectdata;
@@ -296,8 +317,16 @@ typedef struct SeqTimelineChannel {
   int flag;
 } SeqTimelineChannel;
 
+typedef struct SeqConnection {
+  struct SeqConnection *next, *prev;
+  Sequence *seq_ref;
+} SeqConnection;
+
 typedef struct EditingRuntime {
   struct SequenceLookup *sequence_lookup;
+  MediaPresence *media_presence;
+  ThumbnailCache *thumbnail_cache;
+  void *_pad;
 } EditingRuntime;
 
 typedef struct Editing {
@@ -325,6 +354,9 @@ typedef struct Editing {
   int overlay_frame_flag;
   rctf overlay_frame_rect;
 
+  int show_missing_media_flag;
+  int _pad1;
+
   struct SeqCache *cache;
 
   /* Cache control */
@@ -337,7 +369,6 @@ typedef struct Editing {
   int64_t disk_cache_timestamp;
 
   EditingRuntime runtime;
-  void *_pad1;
 } Editing;
 
 /** \} */
@@ -412,10 +443,14 @@ typedef struct TextVars {
   struct VFont *text_font;
   int text_blf_id;
   float text_size;
-  float color[4], shadow_color[4], box_color[4];
+  float color[4], shadow_color[4], box_color[4], outline_color[4];
   float loc[2];
   float wrap_width;
   float box_margin;
+  float shadow_angle;
+  float shadow_offset;
+  float shadow_blur;
+  float outline_width;
   char flag;
   char align, align_y;
   char _pad[5];
@@ -427,6 +462,7 @@ enum {
   SEQ_TEXT_BOX = (1 << 1),
   SEQ_TEXT_BOLD = (1 << 2),
   SEQ_TEXT_ITALIC = (1 << 3),
+  SEQ_TEXT_OUTLINE = (1 << 4),
 };
 
 /** #TextVars.align */
@@ -548,12 +584,15 @@ typedef struct SoundEqualizerModifierData {
 /** \name Flags & Types
  * \{ */
 
-#define MAXSEQ 128
-
 /** #Editor::overlay_frame_flag */
 enum {
   SEQ_EDIT_OVERLAY_FRAME_SHOW = 1,
   SEQ_EDIT_OVERLAY_FRAME_ABS = 2,
+};
+
+/** #Editing::show_missing_media_flag */
+enum {
+  SEQ_EDIT_SHOW_MISSING_MEDIA = 1 << 0,
 };
 
 #define SEQ_STRIP_OFSBOTTOM 0.05f
@@ -586,7 +625,7 @@ enum {
   SEQ_OVERLAP = (1 << 3),
   SEQ_FILTERY = (1 << 4),
   SEQ_MUTE = (1 << 5),
-  SEQ_FLAG_SKIP_THUMBNAILS = (1 << 6),
+  /* SEQ_FLAG_SKIP_THUMBNAILS = (1 << 6), */ /* no longer used */
   SEQ_REVERSE_FRAMES = (1 << 7),
   SEQ_IPO_FRAME_LOCKED = (1 << 8),
   SEQ_EFFECT_NOT_LOADED = (1 << 9),
@@ -658,10 +697,7 @@ enum {
 enum {
   SEQ_PROXY_TC_NONE = 0,
   SEQ_PROXY_TC_RECORD_RUN = 1 << 0,
-  SEQ_PROXY_TC_FREE_RUN = 1 << 1,
-  SEQ_PROXY_TC_INTERP_REC_DATE_FREE_RUN = 1 << 2,
-  SEQ_PROXY_TC_RECORD_RUN_NO_GAPS = 1 << 3,
-  SEQ_PROXY_TC_ALL = (1 << 4) - 1,
+  SEQ_PROXY_TC_RECORD_RUN_NO_GAPS = 1 << 1,
 };
 
 /** SeqProxy.build_flags */
@@ -806,16 +842,14 @@ enum {
 
   SEQ_CACHE_OVERRIDE = (1 << 4),
 
-  /* enable cache visualization overlay in timeline UI */
-  SEQ_CACHE_VIEW_ENABLE = (1 << 5),
-  SEQ_CACHE_VIEW_RAW = (1 << 6),
-  SEQ_CACHE_VIEW_PREPROCESSED = (1 << 7),
-  SEQ_CACHE_VIEW_COMPOSITE = (1 << 8),
-  SEQ_CACHE_VIEW_FINAL_OUT = (1 << 9),
+  SEQ_CACHE_UNUSED_5 = (1 << 5),
+  SEQ_CACHE_UNUSED_6 = (1 << 6),
+  SEQ_CACHE_UNUSED_7 = (1 << 7),
+  SEQ_CACHE_UNUSED_8 = (1 << 8),
+  SEQ_CACHE_UNUSED_9 = (1 << 9),
 
   SEQ_CACHE_PREFETCH_ENABLE = (1 << 10),
   SEQ_CACHE_DISK_CACHE_ENABLE = (1 << 11),
-  SEQ_CACHE_STORE_THUMBNAIL = (1 << 12),
 };
 
 /** #Sequence.color_tag. */

@@ -11,7 +11,7 @@
 
 #include "BLI_fileops.h"
 #include "BLI_listbase.h"
-#include "BLI_path_util.h"
+#include "BLI_path_utils.hh"
 #include "BLI_utildefines.h"
 
 #include "BKE_appdir.hh"
@@ -20,9 +20,9 @@
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
 #include "BKE_screen.hh"
-#include "BKE_workspace.h"
+#include "BKE_workspace.hh"
 
-#include "BLO_readfile.h"
+#include "BLO_readfile.hh"
 
 #include "DNA_screen_types.h"
 #include "DNA_windowmanager_types.h"
@@ -38,12 +38,14 @@
 #include "UI_interface.hh"
 #include "UI_resources.hh"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
 
-#include "screen_intern.h"
+#include "screen_intern.hh"
+
+using blender::Vector;
 
 /* -------------------------------------------------------------------- */
 /** \name Workspace API
@@ -143,7 +145,7 @@ static void workspace_change_update(WorkSpace *workspace_new,
   eObjectMode mode_new = workspace_new->object_mode;
 
   if (mode_old != mode_new) {
-    ED_object_mode_set(C, mode_new);
+    blender::ed::object::mode_set(C, mode_new);
   }
 #endif
 }
@@ -206,7 +208,7 @@ bool ED_workspace_change(WorkSpace *workspace_new, bContext *C, wmWindowManager 
 
   /* Automatic mode switching. */
   if (workspace_new->object_mode != workspace_old->object_mode) {
-    ED_object_mode_set(C, eObjectMode(workspace_new->object_mode));
+    blender::ed::object::mode_set(C, eObjectMode(workspace_new->object_mode));
   }
 
   return true;
@@ -242,24 +244,23 @@ bool ED_workspace_delete(WorkSpace *workspace, Main *bmain, bContext *C, wmWindo
     return false;
   }
 
-  ListBase ordered;
-  BKE_id_ordered_list(&ordered, &bmain->workspaces);
-  WorkSpace *prev = nullptr, *next = nullptr;
-  LISTBASE_FOREACH (LinkData *, link, &ordered) {
-    if (link->data == workspace) {
-      prev = static_cast<WorkSpace *>(link->prev ? link->prev->data : nullptr);
-      next = static_cast<WorkSpace *>(link->next ? link->next->data : nullptr);
-      break;
-    }
-  }
-  BLI_freelistN(&ordered);
-  BLI_assert((prev != nullptr) || (next != nullptr));
+  Vector<ID *> ordered = BKE_id_ordered_list(&bmain->workspaces);
+  const int index = ordered.first_index_of(&workspace->id);
+
+  WorkSpace *new_active = reinterpret_cast<WorkSpace *>(index == 0 ? ordered[1] :
+                                                                     ordered[index - 1]);
 
   LISTBASE_FOREACH (wmWindow *, win, &wm->windows) {
     WorkSpace *workspace_active = WM_window_get_active_workspace(win);
     if (workspace_active == workspace) {
-      ED_workspace_change((prev != nullptr) ? prev : next, C, wm, win);
+      ED_workspace_change(new_active, C, wm, win);
     }
+  }
+
+  /* Also delete managed sceens if they have no other users. */
+  LISTBASE_FOREACH (WorkSpaceLayout *, layout, &workspace->layouts) {
+    BKE_id_free_us(bmain, layout->screen);
+    layout->screen = nullptr;
   }
 
   BKE_id_free(bmain, &workspace->id);
@@ -366,7 +367,7 @@ static int workspace_append_activate_exec(bContext *C, wmOperator *op)
     if (BLT_translate_new_dataname()) {
       /* Translate workspace name */
       BKE_libblock_rename(
-          bmain, &appended_workspace->id, CTX_DATA_(BLT_I18NCONTEXT_ID_WORKSPACE, idname));
+          *bmain, appended_workspace->id, CTX_DATA_(BLT_I18NCONTEXT_ID_WORKSPACE, idname));
     }
 
     /* Set defaults. */

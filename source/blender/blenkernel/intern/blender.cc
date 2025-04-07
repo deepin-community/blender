@@ -22,30 +22,25 @@
 #include "IMB_moviecache.hh"
 
 #include "BKE_addon.h"
-#include "BKE_blender.h"            /* own include */
+#include "BKE_asset.hh"
+#include "BKE_blender.hh"           /* own include */
 #include "BKE_blender_user_menu.hh" /* own include */
 #include "BKE_blender_version.h"    /* own include */
-#include "BKE_blendfile.hh"
 #include "BKE_brush.hh"
-#include "BKE_cachefile.h"
-#include "BKE_callbacks.h"
-#include "BKE_global.h"
-#include "BKE_idprop.h"
-#include "BKE_image.h"
-#include "BKE_layer.hh"
+#include "BKE_cachefile.hh"
+#include "BKE_callbacks.hh"
+#include "BKE_global.hh"
+#include "BKE_idprop.hh"
 #include "BKE_main.hh"
-#include "BKE_node.h"
-#include "BKE_report.h"
-#include "BKE_scene.h"
+#include "BKE_node.hh"
+#include "BKE_report.hh"
 #include "BKE_screen.hh"
 #include "BKE_studiolight.h"
+#include "BKE_writeffmpeg.hh"
 
 #include "DEG_depsgraph.hh"
 
-#include "RE_pipeline.h"
 #include "RE_texture.h"
-
-#include "SEQ_sequencer.hh"
 
 #include "BLF_api.hh"
 
@@ -81,8 +76,11 @@ void BKE_blender_free()
   BKE_callback_global_finalize();
 
   IMB_moviecache_destruct();
+#ifdef WITH_FFMPEG
+  BKE_ffmpeg_exit();
+#endif
 
-  BKE_node_system_exit();
+  blender::bke::node_system_exit();
 }
 
 /** \} */
@@ -99,34 +97,43 @@ static char blender_version_string_compact[48] = "";
 static void blender_version_init()
 {
   const char *version_cycle = "";
+  const char *version_cycle_compact = "";
   if (STREQ(STRINGIFY(BLENDER_VERSION_CYCLE), "alpha")) {
     version_cycle = " Alpha";
+    version_cycle_compact = " a";
   }
   else if (STREQ(STRINGIFY(BLENDER_VERSION_CYCLE), "beta")) {
     version_cycle = " Beta";
+    version_cycle_compact = " b";
   }
   else if (STREQ(STRINGIFY(BLENDER_VERSION_CYCLE), "rc")) {
     version_cycle = " Release Candidate";
+    version_cycle_compact = " RC";
   }
   else if (STREQ(STRINGIFY(BLENDER_VERSION_CYCLE), "release")) {
     version_cycle = "";
+    version_cycle_compact = "";
   }
   else {
     BLI_assert_msg(0, "Invalid Blender version cycle");
   }
 
+  const char *version_suffix = BKE_blender_version_is_lts() ? " LTS" : "";
+
   SNPRINTF(blender_version_string,
+           "%d.%01d.%d%s%s",
+           BLENDER_VERSION / 100,
+           BLENDER_VERSION % 100,
+           BLENDER_VERSION_PATCH,
+           version_suffix,
+           version_cycle);
+
+  SNPRINTF(blender_version_string_compact,
            "%d.%01d.%d%s",
            BLENDER_VERSION / 100,
            BLENDER_VERSION % 100,
            BLENDER_VERSION_PATCH,
-           version_cycle);
-
-  SNPRINTF(blender_version_string_compact,
-           "%d.%01d%s",
-           BLENDER_VERSION / 100,
-           BLENDER_VERSION % 100,
-           version_cycle);
+           version_cycle_compact);
 }
 
 const char *BKE_blender_version_string()
@@ -163,6 +170,11 @@ bool BKE_blender_version_is_alpha()
 {
   bool is_alpha = STREQ(STRINGIFY(BLENDER_VERSION_CYCLE), "alpha");
   return is_alpha;
+}
+
+bool BKE_blender_version_is_lts()
+{
+  return STREQ(STRINGIFY(BLENDER_VERSION_SUFFIX), "LTS");
 }
 
 /** \} */
@@ -234,7 +246,7 @@ static void keymap_item_free(wmKeyMapItem *kmi)
     IDP_FreeProperty(kmi->properties);
   }
   if (kmi->ptr) {
-    MEM_freeN(kmi->ptr);
+    MEM_delete(kmi->ptr);
   }
 }
 
@@ -342,7 +354,19 @@ void BKE_blender_userdef_data_free(UserDef *userdef, bool clear_fonts)
   BLI_freelistN(&userdef->autoexec_paths);
   BLI_freelistN(&userdef->script_directories);
   BLI_freelistN(&userdef->asset_libraries);
-  BLI_freelistN(&userdef->extension_repos);
+
+  LISTBASE_FOREACH_MUTABLE (bUserExtensionRepo *, repo_ref, &userdef->extension_repos) {
+    MEM_SAFE_FREE(repo_ref->access_token);
+    MEM_freeN(repo_ref);
+  }
+  BLI_listbase_clear(&userdef->extension_repos);
+
+  LISTBASE_FOREACH_MUTABLE (bUserAssetShelfSettings *, settings, &userdef->asset_shelves_settings)
+  {
+    BKE_asset_catalog_path_list_free(settings->enabled_catalog_paths);
+    MEM_freeN(settings);
+  }
+  BLI_listbase_clear(&userdef->asset_shelves_settings);
 
   BLI_freelistN(&userdef->uistyles);
   BLI_freelistN(&userdef->uifonts);
@@ -362,6 +386,11 @@ void BKE_blender_userdef_app_template_data_swap(UserDef *userdef_a, UserDef *use
   /* TODO:
    * - various minor settings (add as needed).
    */
+
+#define VALUE_SWAP(id) \
+  { \
+    std::swap(userdef_a->id, userdef_b->id); \
+  }
 
 #define DATA_SWAP(id) \
   { \
@@ -383,12 +412,12 @@ void BKE_blender_userdef_app_template_data_swap(UserDef *userdef_a, UserDef *use
   } \
   ((void)0)
 
-  std::swap(userdef_a->uistyles, userdef_b->uistyles);
-  std::swap(userdef_a->uifonts, userdef_b->uifonts);
-  std::swap(userdef_a->themes, userdef_b->themes);
-  std::swap(userdef_a->addons, userdef_b->addons);
-  std::swap(userdef_a->user_keymaps, userdef_b->user_keymaps);
-  std::swap(userdef_a->user_keyconfig_prefs, userdef_b->user_keyconfig_prefs);
+  VALUE_SWAP(uistyles);
+  VALUE_SWAP(uifonts);
+  VALUE_SWAP(themes);
+  VALUE_SWAP(addons);
+  VALUE_SWAP(user_keymaps);
+  VALUE_SWAP(user_keyconfig_prefs);
 
   DATA_SWAP(font_path_ui);
   DATA_SWAP(font_path_ui_mono);
@@ -402,9 +431,8 @@ void BKE_blender_userdef_app_template_data_swap(UserDef *userdef_a, UserDef *use
 
   DATA_SWAP(ui_scale);
 
-#undef SWAP_TYPELESS
+#undef VALUE_SWAP
 #undef DATA_SWAP
-#undef LISTBASE_SWAP
 #undef FLAG_SWAP
 }
 

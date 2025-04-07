@@ -22,7 +22,7 @@ set(INC
   ../../../intern/memutil
   ../bmesh
 
-  # RNA_prototypes.h
+  # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
 set(INC_SYS
@@ -49,6 +49,7 @@ set(SRC
   intern/wm_operator_utils.cc
   intern/wm_operators.cc
   intern/wm_panel_type.cc
+  intern/wm_platform.cc
   intern/wm_platform_support.cc
   intern/wm_playanim.cc
   intern/wm_splash_screen.cc
@@ -100,6 +101,7 @@ set(LIB
   PRIVATE bf::depsgraph
   PRIVATE bf::dna
   bf_editor_screen
+  bf_editor_undo
   PRIVATE bf::extern::fmtlib
   PRIVATE bf::intern::clog
   PRIVATE bf::intern::guardedalloc
@@ -208,7 +210,7 @@ endif()
 
 blender_add_lib_nolist(bf_windowmanager "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 
-# RNA_prototypes.h
+# RNA_prototypes.hh
 add_dependencies(bf_windowmanager bf_rna)
 
 if(WITH_GTESTS)

@@ -27,7 +27,6 @@
 #include "DNA_effect_types.h"
 #include "DNA_key_types.h"
 #include "DNA_lattice_types.h"
-#include "DNA_light_types.h"
 #include "DNA_material_types.h"
 #include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
@@ -53,18 +52,18 @@
 #include "BLI_time.h"
 #include "BLI_utildefines.h"
 
-#include "BKE_action.h"
+#include "BKE_action.hh"
 #include "BKE_armature.hh"
 #include "BKE_constraint.h"
 #include "BKE_customdata.hh"
 #include "BKE_deform.hh"
-#include "BKE_fcurve.h"
+#include "BKE_fcurve.hh"
 #include "BKE_lattice.hh"
 #include "BKE_main.hh" /* for Main */
 #include "BKE_mesh.hh" /* for ME_ defines (patching) */
 #include "BKE_mesh_legacy_convert.hh"
 #include "BKE_modifier.hh"
-#include "BKE_node.h"
+#include "BKE_node.hh"
 #include "BKE_object.hh"
 #include "BKE_particle.h"
 #include "BKE_pointcache.h"
@@ -72,7 +71,7 @@
 #include "SEQ_iterator.hh"
 #include "SEQ_sequencer.hh"
 
-#include "BLO_readfile.h"
+#include "BLO_readfile.hh"
 
 #include "readfile.hh"
 
@@ -488,7 +487,7 @@ void blo_do_versions_pre250(FileData *fd, Library *lib, Main *bmain)
     /* tex->extend and tex->imageflag have changed: */
     Tex *tex = static_cast<Tex *>(bmain->textures.first);
     while (tex) {
-      if (tex->id.tag & LIB_TAG_NEED_LINK) {
+      if (tex->id.tag & ID_TAG_NEED_LINK) {
 
         if (tex->extend == 0) {
           if (tex->xrepeat || tex->yrepeat) {
@@ -618,8 +617,8 @@ void blo_do_versions_pre250(FileData *fd, Library *lib, Main *bmain)
   if (bmain->versionfile <= 153) {
     Scene *sce = static_cast<Scene *>(bmain->scenes.first);
     while (sce) {
-      if (sce->r.blurfac == 0.0f) {
-        sce->r.blurfac = 1.0f;
+      if (sce->r.motion_blur_shutter == 0.0f) {
+        sce->r.motion_blur_shutter = 1.0f;
       }
       sce = static_cast<Scene *>(sce->id.next);
     }
@@ -781,7 +780,7 @@ void blo_do_versions_pre250(FileData *fd, Library *lib, Main *bmain)
       sound = static_cast<bSound *>(sound->id.next);
     }
 
-    /* `mesh->subdiv` changed to reflect the actual reparametization
+    /* `mesh->subdiv` changed to reflect the actual reparametrization
      * better, and S-meshes were removed - if it was a S-mesh make
      * it a subsurf, and reset the subdivision level because subsurf
      * takes a lot more work to calculate. */
@@ -1601,9 +1600,9 @@ void blo_do_versions_pre250(FileData *fd, Library *lib, Main *bmain)
       }
 
       /* uv calculation options moved to toolsettings */
-      if (sce->toolsettings->unwrapper == 0) {
+      if (sce->toolsettings->unwrapper == UVCALC_UNWRAP_METHOD_ANGLE) {
+        sce->toolsettings->unwrapper = UVCALC_UNWRAP_METHOD_CONFORMAL;
         sce->toolsettings->uvcalc_flag = UVCALC_FILLHOLES;
-        sce->toolsettings->unwrapper = 1;
       }
     }
 
@@ -2263,14 +2262,17 @@ void blo_do_versions_pre250(FileData *fd, Library *lib, Main *bmain)
             MEM_callocN(sizeof(ParticleSystem), "particle_system"));
         psys->pointcache = BKE_ptcache_add(&psys->ptcaches);
 
+        /* Bad, but better not try to change this prehistorical code nowadays. */
+        bmain->is_locked_for_linking = false;
         part = psys->part = BKE_particlesettings_add(bmain, "ParticleSettings");
+        bmain->is_locked_for_linking = true;
 
         /* needed for proper libdata lookup */
         blo_do_versions_oldnewmap_insert(fd->libmap, psys->part, psys->part, 0);
         part->id.lib = ob->id.lib;
 
         part->id.us--;
-        part->id.tag |= (ob->id.tag & LIB_TAG_NEED_LINK);
+        part->id.tag |= (ob->id.tag & ID_TAG_NEED_LINK);
 
         psys->totpart = 0;
         psys->flag = PSYS_CURRENT;
@@ -2593,7 +2595,7 @@ void blo_do_versions_pre250(FileData *fd, Library *lib, Main *bmain)
          ob = static_cast<Object *>(ob->id.next))
     {
       if (ob->pd) {
-        ob->pd->seed = (uint(ceil(BLI_check_seconds_timer())) + 1) % 128;
+        ob->pd->seed = (uint(ceil(BLI_time_now_seconds())) + 1) % 128;
       }
     }
   }

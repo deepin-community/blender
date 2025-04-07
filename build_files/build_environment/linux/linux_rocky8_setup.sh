@@ -40,7 +40,15 @@ yum -y install scl-utils-build
 yum -y install gcc-toolset-11
 
 # Repository for CUDA (`nvcc`).
-dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel8/$(uname -i)/cuda-rhel8.repo
+CUDA_ARCH=$(uname -i)
+
+# For RHEL8 there is no aarch64 repo, instead use sbsa which works for device binaries.
+# For RHEL9 there is an aarch64 repo, and this fallback will no longer be needed.
+if [ "$CUDA_ARCH" = "aarch64" ]; then
+    CUDA_ARCH="sbsa"
+fi
+
+dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel8/$CUDA_ARCH/cuda-rhel8.repo
 
 # Install packages needed for Blender's dependencies.
 PACKAGES_FOR_LIBS=(
@@ -90,6 +98,11 @@ PACKAGES_FOR_LIBS=(
     texinfo
 
     # NOTE(@ideasman42): `nvcc` will *not* be added to the `PATH`, must be done manually.
+    # Commands from:
+    # https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html#environment-setup
+    # Can be added to `~/.bash_profile`.
+    # `export LD_LIBRARY_PATH=/usr/local/cuda-12.5/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}`
+    # `export PATH=/usr/local/cuda-12.5/bin${PATH:+:${PATH}}`
     # Required by `external_openimagedenoise` (`nvcc` command)
     cuda-toolkit
 
@@ -112,6 +125,9 @@ PACKAGES_FOR_LIBS=(
     python3
     # Required by: `external_mesa`.
     python3-mako
+
+    # Required by: `external_igc`.
+    python3-pyyaml
 
     # Required by: `external_mesa`.
     expat-devel
@@ -175,3 +191,24 @@ yum -y install -y  \
 
 # Required by Blender build option: `WITH_JACK`.
 yum -y install jack-audio-connection-kit-devel
+
+# AMD's ROCM
+# Based on instructions from:
+# https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/native-install/rhel.html
+# NOTE: the following steps have intentionally been skipped as they aren't needed:
+# - "Register kernel-mode driver".
+# - "Install kernel driver".
+
+# Register ROCm packages
+rm -f /etc/yum.repos.d/rocm.repo
+tee --append /etc/yum.repos.d/rocm.repo <<EOF
+[ROCm-6.1.3]
+name=ROCm6.1.3
+baseurl=https://repo.radeon.com/rocm/rhel8/6.1.3/main
+enabled=1
+priority=50
+gpgcheck=1
+gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+EOF
+yum -y update
+yum -y install rocm

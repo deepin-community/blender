@@ -8,15 +8,14 @@
 
 #pragma once
 
-#include "gpu_vertex_buffer_private.hh"
+#include "GPU_vertex_buffer.hh"
 
-#include "vk_bindable_resource.hh"
 #include "vk_buffer.hh"
 #include "vk_data_conversion.hh"
 
 namespace blender::gpu {
 
-class VKVertexBuffer : public VertBuf, public VKBindableResource {
+class VKVertexBuffer : public VertBuf {
   VKBuffer buffer_;
   /** When a vertex buffer is used as a UNIFORM_TEXEL_BUFFER the buffer requires a buffer view. */
   VkBufferView vk_buffer_view_ = VK_NULL_HANDLE;
@@ -28,9 +27,6 @@ class VKVertexBuffer : public VertBuf, public VKBindableResource {
 
   void bind_as_ssbo(uint binding) override;
   void bind_as_texture(uint binding) override;
-  void bind(int binding,
-            shader::ShaderCreateInfo::Resource::BindType bind_type,
-            const GPUSamplerState sampler_state) override;
   void wrap_handle(uint64_t handle) override;
 
   void update_sub(uint start, uint len, const void *data) override;
@@ -50,6 +46,8 @@ class VKVertexBuffer : public VertBuf, public VKBindableResource {
 
   void device_format_ensure();
   const GPUVertFormat &device_format_get() const;
+  void ensure_updated();
+  void ensure_buffer_view();
 
  protected:
   void acquire_data() override;

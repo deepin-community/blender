@@ -60,6 +60,8 @@ private:
 	 */
 	volatile bool m_playback;
 
+	bool m_corked;
+
 	pa_threaded_mainloop* m_mainloop;
 	pa_context* m_context;
 	pa_stream* m_stream;
@@ -128,7 +130,7 @@ public:
 	 * \note The specification really used for opening the device may differ.
 	 * \exception Exception Thrown if the audio device cannot be opened.
 	 */
-	PulseAudioDevice(std::string name, DeviceSpecs specs, int buffersize = AUD_DEFAULT_BUFFER_SIZE);
+	PulseAudioDevice(const std::string &name, DeviceSpecs specs, int buffersize = AUD_DEFAULT_BUFFER_SIZE);
 
 	/**
 	 * Closes the PulseAudio audio device.

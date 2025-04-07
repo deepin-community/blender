@@ -173,6 +173,21 @@ TEST(math_base, ClampInt)
   EXPECT_EQ(math::clamp(111, -50, 101), 101);
 }
 
+TEST(math_base, StepLessThan)
+{
+  EXPECT_EQ(math::step(0.5f, 0.3f), 0.0f);
+}
+
+TEST(math_base, StepGreaterThan)
+{
+  EXPECT_EQ(math::step(0.5f, 0.6f), 1.0f);
+}
+
+TEST(math_base, StepExact)
+{
+  EXPECT_EQ(math::step(0.5f, 0.5f), 1.0f);
+}
+
 TEST(math_base, Midpoint)
 {
   EXPECT_NEAR(math::midpoint(100.0f, 200.0f), 150.0f, 1e-4f);
@@ -194,6 +209,42 @@ TEST(math_base, FlooredFMod)
   EXPECT_FLOAT_EQ(floored_fmod(12345.1f, 12345.0f), 0.099609375f);
   EXPECT_FLOAT_EQ(floored_fmod(12344.999f, 12345.0f), 12344.999f);
   EXPECT_FLOAT_EQ(floored_fmod(12345.0f, 12345.0f), 0.0f);
+}
+
+TEST(math_base, ModPeriodic)
+{
+  EXPECT_FLOAT_EQ(math::mod_periodic(3.27f, 1.57f), 0.12999988f);
+  EXPECT_FLOAT_EQ(math::mod_periodic(327.f, 47.f), 45.f);
+  EXPECT_FLOAT_EQ(math::mod_periodic(-0.1f, 1.0f), 0.9f);
+  EXPECT_FLOAT_EQ(math::mod_periodic(-0.9f, 1.0f), 0.1f);
+  EXPECT_FLOAT_EQ(math::mod_periodic(-100.1f, 1.0f), 0.90000153f);
+  EXPECT_FLOAT_EQ(math::mod_periodic(-0.1f, 12345.0f), 12344.9f);
+  EXPECT_FLOAT_EQ(math::mod_periodic(12345.1f, 12345.0f), 0.099609375f);
+  EXPECT_FLOAT_EQ(math::mod_periodic(12344.999f, 12345.0f), 12344.999f);
+  EXPECT_FLOAT_EQ(math::mod_periodic(12345.0f, 12345.0f), 0.0f);
+
+  EXPECT_EQ(math::mod_periodic(1, 10), 1);
+  EXPECT_EQ(math::mod_periodic(11, 10), 1);
+  EXPECT_EQ(math::mod_periodic(-1, 10), 9);
+  EXPECT_EQ(math::mod_periodic(-11, 10), 9);
+  EXPECT_EQ(math::mod_periodic(1, 1), 0);
+  EXPECT_EQ(math::mod_periodic(0, 99999), 0);
+  EXPECT_EQ(math::mod_periodic(99999, 99999), 0);
+
+  EXPECT_EQ(
+      math::mod_periodic(std::numeric_limits<int>::max() / 2, std::numeric_limits<int>::max() / 2),
+      0);
+  EXPECT_EQ(
+      math::mod_periodic(std::numeric_limits<int>::min() / 2, std::numeric_limits<int>::max() / 2),
+      std::numeric_limits<int>::max() / 2 - 1);
+
+  EXPECT_EQ(math::mod_periodic<int64_t>(1, 10), 1);
+  EXPECT_EQ(math::mod_periodic<int64_t>(11, 10), 1);
+  EXPECT_EQ(math::mod_periodic<int64_t>(-1, 10), 9);
+  EXPECT_EQ(math::mod_periodic<int64_t>(-11, 10), 9);
+  EXPECT_EQ(math::mod_periodic<int64_t>(1, 1), 0);
+  EXPECT_EQ(math::mod_periodic<int64_t>(0, 99999), 0);
+  EXPECT_EQ(math::mod_periodic<int64_t>(99999, 99999), 0);
 }
 
 }  // namespace blender::tests

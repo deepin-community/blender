@@ -11,7 +11,7 @@ from bpy.app.translations import (
 )
 
 
-def add_node_type(layout, node_type, *, label=None, poll=None):
+def add_node_type(layout, node_type, *, label=None, poll=None, search_weight=0.0):
     """Add a node type to a menu."""
     bl_rna = bpy.types.Node.bl_rna_get_subclass(node_type)
     if not label:
@@ -19,7 +19,7 @@ def add_node_type(layout, node_type, *, label=None, poll=None):
 
     if poll is True or poll is None:
         translation_context = bl_rna.translation_context if bl_rna else i18n_contexts.default
-        props = layout.operator("node.add_node", text=label, text_ctxt=translation_context)
+        props = layout.operator("node.add_node", text=label, text_ctxt=translation_context, search_weight=search_weight)
         props.type = node_type
         props.use_transform = True
         return props
@@ -51,7 +51,10 @@ def draw_node_group_add_menu(context, layout):
                 props = add_node_type(layout, node_tree_group_type[group.bl_idname], label=group.name)
                 ops = props.settings.add()
                 ops.name = "node_tree"
-                ops.value = "bpy.data.node_groups[%r]" % group.name
+                ops.value = "bpy.data.node_groups[{!r}]".format(group.name)
+                ops = props.settings.add()
+                ops.name = "width"
+                ops.value = repr(group.default_group_node_width)
 
 
 def draw_assets_for_catalog(layout, catalog_path):
@@ -71,6 +74,13 @@ def add_simulation_zone(layout, label):
 
 def add_repeat_zone(layout, label):
     props = layout.operator("node.add_repeat_zone", text=label, text_ctxt=i18n_contexts.default)
+    props.use_transform = True
+    return props
+
+
+def add_foreach_geometry_element_zone(layout, label):
+    props = layout.operator(
+        "node.add_foreach_geometry_element_zone", text=label, text_ctxt=i18n_contexts.default)
     props.use_transform = True
     return props
 

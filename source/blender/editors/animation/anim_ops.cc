@@ -13,13 +13,17 @@
 
 #include "BLI_math_base.h"
 #include "BLI_utildefines.h"
+#include "BLI_vector.hh"
 
 #include "DNA_scene_types.h"
 
+#include "BKE_anim_data.hh"
 #include "BKE_context.hh"
-#include "BKE_global.h"
-#include "BKE_report.h"
-#include "BKE_scene.h"
+#include "BKE_global.hh"
+#include "BKE_lib_id.hh"
+#include "BKE_lib_query.hh"
+#include "BKE_report.hh"
+#include "BKE_scene.hh"
 
 #include "UI_view2d.hh"
 
@@ -35,12 +39,16 @@
 #include "ED_time_scrub_ui.hh"
 
 #include "DEG_depsgraph.hh"
+#include "DEG_depsgraph_build.hh"
 
 #include "SEQ_iterator.hh"
 #include "SEQ_sequencer.hh"
 #include "SEQ_time.hh"
 
-#include "anim_intern.h"
+#include "ANIM_action.hh"
+#include "ANIM_animdata.hh"
+
+#include "anim_intern.hh"
 
 /* -------------------------------------------------------------------- */
 /** \name Frame Change Operator
@@ -222,6 +230,27 @@ static bool use_sequencer_snapping(bContext *C)
          (snap_flag & SEQ_SNAP_CURRENT_FRAME_TO_STRIPS);
 }
 
+static bool sequencer_skip_for_handle_tweak(const bContext *C, const wmEvent *event)
+{
+  if ((U.sequencer_editor_flag & USER_SEQ_ED_SIMPLE_TWEAKING) == 0) {
+    return false;
+  }
+
+  const Scene *scene = CTX_data_scene(C);
+  if (!SEQ_editing_get(scene)) {
+    return false;
+  }
+
+  const View2D *v2d = UI_view2d_fromcontext(C);
+
+  float mouse_co[2];
+  UI_view2d_region_to_view(v2d, event->mval[0], event->mval[1], &mouse_co[0], &mouse_co[1]);
+
+  StripSelection selection = ED_sequencer_pick_strip_and_handle(scene, v2d, mouse_co);
+
+  return selection.handle != SEQ_HANDLE_NONE;
+}
+
 /* Modal Operator init */
 static int change_frame_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
@@ -229,6 +258,9 @@ static int change_frame_invoke(bContext *C, wmOperator *op, const wmEvent *event
   bScreen *screen = CTX_wm_screen(C);
   if (CTX_wm_space_seq(C) != nullptr && region->regiontype == RGN_TYPE_PREVIEW) {
     return OPERATOR_CANCELLED;
+  }
+  if (sequencer_skip_for_handle_tweak(C, event)) {
+    return OPERATOR_CANCELLED | OPERATOR_PASS_THROUGH;
   }
 
   /* Change to frame that mouse is over before adding modal handler,
@@ -647,6 +679,258 @@ static void ANIM_OT_previewrange_clear(wmOperatorType *ot)
 /** \} */
 
 /* -------------------------------------------------------------------- */
+/** \name Frame Scene/Preview Range Operator
+ * \{ */
+
+static int scene_range_frame_exec(bContext *C, wmOperator * /*op*/)
+{
+  ARegion *region = CTX_wm_region(C);
+  const Scene *scene = CTX_data_scene(C);
+  BLI_assert(region);
+  BLI_assert(scene);
+
+  View2D &v2d = region->v2d;
+  v2d.cur.xmin = PSFRA;
+  v2d.cur.xmax = PEFRA;
+
+  v2d.cur = ANIM_frame_range_view2d_add_xmargin(v2d, v2d.cur);
+
+  UI_view2d_sync(CTX_wm_screen(C), CTX_wm_area(C), &v2d, V2D_LOCK_COPY);
+  ED_area_tag_redraw(CTX_wm_area(C));
+
+  return OPERATOR_FINISHED;
+}
+
+static void ANIM_OT_scene_range_frame(wmOperatorType *ot)
+{
+  ot->name = "Frame Scene/Preview Range";
+  ot->idname = "ANIM_OT_scene_range_frame";
+  ot->description =
+      "Reset the horizontal view to the current scene frame range, taking the preview range into "
+      "account if it is active";
+
+  ot->exec = scene_range_frame_exec;
+  ot->poll = ED_operator_animview_active;
+
+  ot->flag = OPTYPE_REGISTER;
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Conversion
+ * \{ */
+
+static bool slot_new_for_object_poll(bContext *C)
+{
+  using namespace blender;
+
+  Object *object = CTX_data_active_object(C);
+  if (!object) {
+    return false;
+  }
+  animrig::Action *action = animrig::get_action(object->id);
+  if (!action) {
+    CTX_wm_operator_poll_msg_set(
+        C, "Creating a new Action Slot is only possible when an Action is already assigned");
+    return false;
+  }
+  return action->is_action_layered();
+}
+
+static int slot_new_for_object_exec(bContext *C, wmOperator * /*op*/)
+{
+  using namespace blender::animrig;
+
+  Object *object = CTX_data_active_object(C);
+  Action *action = get_action(object->id);
+  BLI_assert_msg(action, "The poll function should have ensured the Action is not NULL");
+
+  Slot &slot = action->slot_add_for_id(object->id);
+  { /* Assign the newly created slot. */
+    const ActionSlotAssignmentResult result = assign_action_slot(&slot, object->id);
+    BLI_assert_msg(result == ActionSlotAssignmentResult::OK,
+                   "Assigning a slot that was made for this ID should always work");
+    UNUSED_VARS_NDEBUG(result);
+  }
+
+  DEG_relations_tag_update(CTX_data_main(C));
+  WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN, nullptr);
+  return OPERATOR_FINISHED;
+}
+
+static void ANIM_OT_slot_new_for_object(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "New Slot";
+  ot->idname = "ANIM_OT_slot_new_for_object";
+  ot->description = "Create a new Slot for this object, on the Action already assigned to it";
+
+  /* api callbacks */
+  ot->exec = slot_new_for_object_exec;
+  ot->poll = slot_new_for_object_poll;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+static int convert_action_exec(bContext *C, wmOperator * /*op*/)
+{
+  using namespace blender;
+
+  Object *object = CTX_data_active_object(C);
+  AnimData *adt = BKE_animdata_from_id(&object->id);
+  BLI_assert(adt != nullptr);
+  BLI_assert(adt->action != nullptr);
+
+  animrig::Action &legacy_action = adt->action->wrap();
+  Main *bmain = CTX_data_main(C);
+
+  animrig::Action *layered_action = animrig::convert_to_layered_action(*bmain, legacy_action);
+  /* We did already check if the action can be converted. */
+  BLI_assert(layered_action != nullptr);
+  const bool assign_ok = animrig::assign_action(layered_action, object->id);
+  BLI_assert_msg(assign_ok, "Expecting assigning a layered Action to always work");
+  UNUSED_VARS_NDEBUG(assign_ok);
+
+  BLI_assert(layered_action->slots().size() == 1);
+  animrig::Slot *slot = layered_action->slot(0);
+  layered_action->slot_name_set(*bmain, *slot, object->id.name);
+
+  const animrig::ActionSlotAssignmentResult result = animrig::assign_action_slot(slot, object->id);
+  BLI_assert(result == animrig::ActionSlotAssignmentResult::OK);
+  UNUSED_VARS_NDEBUG(result);
+
+  ANIM_id_update(bmain, &object->id);
+  DEG_relations_tag_update(bmain);
+  WM_main_add_notifier(NC_ANIMATION | ND_NLA_ACTCHANGE, nullptr);
+
+  return OPERATOR_FINISHED;
+}
+
+static bool convert_action_poll(bContext *C)
+{
+  Object *object = CTX_data_active_object(C);
+  if (!object) {
+    return false;
+  }
+
+  AnimData *adt = BKE_animdata_from_id(&object->id);
+  if (!adt || !adt->action) {
+    return false;
+  }
+
+  /* This will also convert empty actions to layered by just adding an empty slot. */
+  if (!adt->action->wrap().is_action_legacy()) {
+    CTX_wm_operator_poll_msg_set(C, "Action is already layered");
+    return false;
+  }
+
+  return true;
+}
+
+static void ANIM_OT_convert_legacy_action(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Convert Legacy Action";
+  ot->idname = "ANIM_OT_convert_legacy_action";
+  ot->description = "Convert a legacy Action to a layered Action on the active object";
+
+  /* api callbacks */
+  ot->exec = convert_action_exec;
+  ot->poll = convert_action_poll;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+static bool merge_actions_selection_poll(bContext *C)
+{
+  Object *object = CTX_data_active_object(C);
+  if (!object) {
+    CTX_wm_operator_poll_msg_set(C, "No active object");
+    return false;
+  }
+  blender::animrig::Action *action = blender::animrig::get_action(object->id);
+  if (!action) {
+    CTX_wm_operator_poll_msg_set(C, "Active object has no action");
+    return false;
+  }
+  if (!BKE_id_is_editable(CTX_data_main(C), &action->id)) {
+    return false;
+  }
+  return true;
+}
+
+static int merge_actions_selection_exec(bContext *C, wmOperator *op)
+{
+  using namespace blender::animrig;
+  Object *active_object = CTX_data_active_object(C);
+  /* Those cases are caught by the poll. */
+  BLI_assert(active_object != nullptr);
+  BLI_assert(active_object->adt->action != nullptr);
+
+  Action &active_action = active_object->adt->action->wrap();
+
+  blender::Vector<PointerRNA> selection;
+  if (!CTX_data_selected_objects(C, &selection)) {
+    return OPERATOR_CANCELLED;
+  }
+
+  Main *bmain = CTX_data_main(C);
+  for (const PointerRNA &ptr : selection) {
+    blender::Vector<ID *> related_ids = find_related_ids(*bmain, *ptr.owner_id);
+    for (ID *related_id : related_ids) {
+      Action *action = get_action(*related_id);
+      if (!action) {
+        continue;
+      }
+      if (action == &active_action) {
+        /* Object is already animated by the same action, no point in moving. */
+        continue;
+      }
+      if (action->is_action_legacy()) {
+        continue;
+      }
+      if (!BKE_id_is_editable(bmain, &action->id)) {
+        BKE_reportf(op->reports, RPT_WARNING, "The action %s is not editable", action->id.name);
+        continue;
+      }
+      AnimData *id_anim_data = BKE_animdata_ensure_id(related_id);
+      /* Since we already get an action from the ID the animdata has to exist. */
+      BLI_assert(id_anim_data);
+      Slot *slot = action->slot_for_handle(id_anim_data->slot_handle);
+      if (!slot) {
+        continue;
+      }
+      blender::animrig::move_slot(*bmain, *slot, *action, active_action);
+      ANIM_id_update(bmain, related_id);
+    }
+  }
+
+  DEG_relations_tag_update(bmain);
+  WM_main_add_notifier(NC_ANIMATION | ND_NLA_ACTCHANGE, nullptr);
+
+  return OPERATOR_FINISHED;
+}
+
+static void ANIM_OT_merge_animation(wmOperatorType *ot)
+{
+  ot->name = "Merge Animation";
+  ot->idname = "ANIM_OT_merge_animation";
+  ot->description =
+      "Merge the animation of the selected objects into the action of the active object. Actions "
+      "are not deleted by this, but might end up with zero users";
+
+  ot->exec = merge_actions_selection_exec;
+  ot->poll = merge_actions_selection_poll;
+
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
 /** \name Registration
  * \{ */
 
@@ -660,6 +944,8 @@ void ED_operatortypes_anim()
 
   WM_operatortype_append(ANIM_OT_previewrange_set);
   WM_operatortype_append(ANIM_OT_previewrange_clear);
+
+  WM_operatortype_append(ANIM_OT_scene_range_frame);
 
   /* Entire UI --------------------------------------- */
   WM_operatortype_append(ANIM_OT_keyframe_insert);
@@ -688,6 +974,10 @@ void ED_operatortypes_anim()
   WM_operatortype_append(ANIM_OT_keying_set_path_remove);
 
   WM_operatortype_append(ANIM_OT_keying_set_active_set);
+
+  WM_operatortype_append(ANIM_OT_slot_new_for_object);
+  WM_operatortype_append(ANIM_OT_convert_legacy_action);
+  WM_operatortype_append(ANIM_OT_merge_animation);
 }
 
 void ED_keymap_anim(wmKeyConfig *keyconf)

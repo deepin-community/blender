@@ -8,7 +8,7 @@
 
 #include <cstdlib>
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
@@ -20,7 +20,11 @@
 #include "rna_internal.hh"
 
 const EnumPropertyItem rna_enum_asset_library_type_items[] = {
-    {ASSET_LIBRARY_ALL, "ALL", 0, "All", "Show assets from all of the listed asset libraries"},
+    {ASSET_LIBRARY_ALL,
+     "ALL",
+     0,
+     "All Libraries",
+     "Show assets from all of the listed asset libraries"},
     {ASSET_LIBRARY_LOCAL,
      "LOCAL",
      0,
@@ -49,7 +53,7 @@ const EnumPropertyItem rna_enum_asset_library_type_items[] = {
 
 #  include "BKE_asset.hh"
 #  include "BKE_context.hh"
-#  include "BKE_idprop.h"
+#  include "BKE_idprop.hh"
 
 #  include "BLI_listbase.h"
 #  include "BLI_uuid.h"
@@ -109,7 +113,8 @@ static int rna_AssetTag_editable(const PointerRNA *ptr, const char **r_info)
     UNUSED_VARS_NDEBUG(asset_tag);
   }
 
-  return rna_AssetMetaData_editable_from_owner_id(ptr->owner_id, owner_id->asset_data, r_info) ?
+  return rna_AssetMetaData_editable_from_owner_id(
+             ptr->owner_id, owner_id ? owner_id->asset_data : nullptr, r_info) ?
              PROP_EDITABLE :
              PropertyFlag(0);
 }
@@ -364,7 +369,7 @@ void rna_AssetMetaData_catalog_id_update(bContext *C, PointerRNA *ptr)
   }
 
   AssetMetaData *asset_data = static_cast<AssetMetaData *>(ptr->data);
-  AS_asset_library_refresh_catalog_simplename(asset_library, asset_data);
+  asset_library->refresh_catalog_simplename(asset_data);
 }
 
 static PointerRNA rna_AssetHandle_file_data_get(PointerRNA *ptr)
@@ -430,28 +435,28 @@ static PointerRNA rna_AssetRepresentation_local_id_get(PointerRNA *ptr)
 static void rna_AssetRepresentation_full_library_path_get(PointerRNA *ptr, char *value)
 {
   const AssetRepresentation *asset = static_cast<const AssetRepresentation *>(ptr->data);
-  const std::string full_library_path = asset->get_identifier().full_library_path();
+  const std::string full_library_path = asset->full_library_path();
   BLI_strncpy(value, full_library_path.c_str(), full_library_path.size() + 1);
 }
 
 static int rna_AssetRepresentation_full_library_path_length(PointerRNA *ptr)
 {
   const AssetRepresentation *asset = static_cast<const AssetRepresentation *>(ptr->data);
-  const std::string full_library_path = asset->get_identifier().full_library_path();
+  const std::string full_library_path = asset->full_library_path();
   return full_library_path.size();
 }
 
 static void rna_AssetRepresentation_full_path_get(PointerRNA *ptr, char *value)
 {
   const AssetRepresentation *asset = static_cast<const AssetRepresentation *>(ptr->data);
-  const std::string full_path = asset->get_identifier().full_path();
+  const std::string full_path = asset->full_path();
   BLI_strncpy(value, full_path.c_str(), full_path.size() + 1);
 }
 
 static int rna_AssetRepresentation_full_path_length(PointerRNA *ptr)
 {
   const AssetRepresentation *asset = static_cast<const AssetRepresentation *>(ptr->data);
-  const std::string full_path = asset->get_identifier().full_path();
+  const std::string full_path = asset->full_path();
   return full_path.size();
 }
 
@@ -463,8 +468,8 @@ const EnumPropertyItem *rna_asset_library_reference_itemf(bContext * /*C*/,
   const EnumPropertyItem *items = blender::ed::asset::library_reference_to_rna_enum_itemf(true);
   if (!items) {
     *r_free = false;
+    return rna_enum_dummy_NULL_items;
   }
-
   *r_free = true;
   return items;
 }
@@ -563,7 +568,7 @@ static void rna_def_asset_data(BlenderRNA *brna)
       prop,
       "Copyright",
       "Copyright notice for this asset. An empty copyright notice does not necessarily indicate "
-      "that this is copyright-free. Contact the author if any clarification is needed");
+      "that this is copyright-free. Contact the author if any clarification is needed.");
 
   prop = RNA_def_property(srna, "license", PROP_STRING, PROP_NONE);
   RNA_def_property_editable_func(prop, "rna_AssetMetaData_editable");
@@ -575,7 +580,7 @@ static void rna_def_asset_data(BlenderRNA *brna)
                            "License",
                            "The type of license this asset is distributed under. An empty license "
                            "name does not necessarily indicate that this is free of licensing "
-                           "terms. Contact the author if any clarification is needed");
+                           "terms. Contact the author if any clarification is needed.");
 
   prop = RNA_def_property(srna, "tags", PROP_COLLECTION, PROP_NONE);
   RNA_def_property_struct_type(prop, "AssetTag");
@@ -600,7 +605,7 @@ static void rna_def_asset_data(BlenderRNA *brna)
   RNA_def_property_ui_text(prop,
                            "Catalog UUID",
                            "Identifier for the asset's catalog, used by Blender to look up the "
-                           "asset's catalog path. Must be a UUID according to RFC4122");
+                           "asset's catalog path. Must be a UUID according to RFC4122.");
 
   prop = RNA_def_property(srna, "catalog_simple_name", PROP_STRING, PROP_NONE);
   RNA_def_property_clear_flag(prop, PROP_EDITABLE);

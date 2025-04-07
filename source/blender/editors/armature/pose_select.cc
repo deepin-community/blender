@@ -19,15 +19,14 @@
 
 #include "BLI_blenlib.h"
 
-#include "BKE_action.h"
+#include "BKE_action.hh"
 #include "BKE_armature.hh"
 #include "BKE_constraint.h"
 #include "BKE_context.hh"
-#include "BKE_gpencil_modifier_legacy.h"
 #include "BKE_layer.hh"
 #include "BKE_modifier.hh"
 #include "BKE_object.hh"
-#include "BKE_report.h"
+#include "BKE_report.hh"
 
 #include "DEG_depsgraph.hh"
 
@@ -41,6 +40,7 @@
 #include "ED_keyframing.hh"
 #include "ED_mesh.hh"
 #include "ED_object.hh"
+#include "ED_object_vgroup.hh"
 #include "ED_outliner.hh"
 #include "ED_screen.hh"
 #include "ED_select_utils.hh"
@@ -48,6 +48,7 @@
 
 #include "ANIM_bone_collections.hh"
 #include "ANIM_bonecolor.hh"
+#include "ANIM_keyingsets.hh"
 
 #include "armature_intern.hh"
 
@@ -142,7 +143,7 @@ bool ED_armature_pose_select_pick_bone(const Scene *scene,
   bool found = false;
   bool changed = false;
 
-  if (ob || ob->pose) {
+  if (ob->pose) {
     if (bone && ((bone->flag & BONE_UNSELECTABLE) == 0)) {
       found = true;
     }
@@ -233,7 +234,7 @@ bool ED_armature_pose_select_pick_bone(const Scene *scene,
       /* In weight-paint we select the associated vertex group too. */
       if (ob_act->mode & OB_MODE_ALL_WEIGHT_PAINT) {
         if (bone == arm->act_bone) {
-          ED_vgroup_select_by_name(ob_act, bone->name);
+          blender::ed::object::vgroup_select_by_name(ob_act, bone->name);
           DEG_id_tag_update(&ob_act->id, ID_RECALC_GEOMETRY);
         }
       }
@@ -247,8 +248,8 @@ bool ED_armature_pose_select_pick_bone(const Scene *scene,
         DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
       }
 
-      /* Tag armature for copy-on-write update (since act_bone is in armature not object). */
-      DEG_id_tag_update(&arm->id, ID_RECALC_COPY_ON_WRITE);
+      /* Tag armature for copy-on-evaluation update (since act_bone is in armature not object). */
+      DEG_id_tag_update(&arm->id, ID_RECALC_SYNC_TO_EVAL);
     }
 
     changed = true;
@@ -290,45 +291,23 @@ void ED_armature_pose_select_in_wpaint_mode(const Scene *scene,
   Object *ob_active = BKE_view_layer_active_object_get(view_layer);
   BLI_assert(ob_active && (ob_active->mode & OB_MODE_ALL_WEIGHT_PAINT));
 
-  if (ob_active->type == OB_GPENCIL_LEGACY) {
-    GpencilVirtualModifierData virtual_modifier_data;
-    GpencilModifierData *md = BKE_gpencil_modifiers_get_virtual_modifierlist(
-        ob_active, &virtual_modifier_data);
-    for (; md; md = md->next) {
-      if (md->type == eGpencilModifierType_Armature) {
-        ArmatureGpencilModifierData *agmd = (ArmatureGpencilModifierData *)md;
-        Object *ob_arm = agmd->object;
-        if (ob_arm != nullptr) {
-          Base *base_arm = BKE_view_layer_base_find(view_layer, ob_arm);
-          if ((base_arm != nullptr) && (base_arm != base_select) &&
-              (base_arm->flag & BASE_SELECTED))
-          {
-            ED_object_base_select(base_arm, BA_DESELECT);
-          }
-        }
-      }
-    }
-  }
-  else {
-    VirtualModifierData virtual_modifier_data;
-    ModifierData *md = BKE_modifiers_get_virtual_modifierlist(ob_active, &virtual_modifier_data);
-    for (; md; md = md->next) {
-      if (md->type == eModifierType_Armature) {
-        ArmatureModifierData *amd = (ArmatureModifierData *)md;
-        Object *ob_arm = amd->object;
-        if (ob_arm != nullptr) {
-          Base *base_arm = BKE_view_layer_base_find(view_layer, ob_arm);
-          if ((base_arm != nullptr) && (base_arm != base_select) &&
-              (base_arm->flag & BASE_SELECTED))
-          {
-            ED_object_base_select(base_arm, BA_DESELECT);
-          }
+  VirtualModifierData virtual_modifier_data;
+  ModifierData *md = BKE_modifiers_get_virtual_modifierlist(ob_active, &virtual_modifier_data);
+  for (; md; md = md->next) {
+    if (md->type == eModifierType_Armature) {
+      ArmatureModifierData *amd = (ArmatureModifierData *)md;
+      Object *ob_arm = amd->object;
+      if (ob_arm != nullptr) {
+        Base *base_arm = BKE_view_layer_base_find(view_layer, ob_arm);
+        if ((base_arm != nullptr) && (base_arm != base_select) && (base_arm->flag & BASE_SELECTED))
+        {
+          blender::ed::object::base_select(base_arm, blender::ed::object::BA_DESELECT);
         }
       }
     }
   }
   if ((base_select->flag & BASE_SELECTED) == 0) {
-    ED_object_base_select(base_select, BA_SELECT);
+    blender::ed::object::base_select(base_select, blender::ed::object::BA_SELECT);
   }
 }
 
@@ -605,7 +584,7 @@ static int pose_de_select_all_exec(bContext *C, wmOperator *op)
         DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
       }
       /* need to tag armature for cow updates, or else selection doesn't update */
-      DEG_id_tag_update(&arm->id, ID_RECALC_COPY_ON_WRITE);
+      DEG_id_tag_update(&arm->id, ID_RECALC_SYNC_TO_EVAL);
       ob_prev = ob;
     }
   }
@@ -975,7 +954,7 @@ static bool pose_select_same_keyingset(bContext *C, ReportList *reports, bool ex
     BKE_report(reports, RPT_ERROR, "No active Keying Set to use");
     return false;
   }
-  if (ANIM_validate_keyingset(C, nullptr, ks) != 0) {
+  if (ANIM_validate_keyingset(C, nullptr, ks) != blender::animrig::ModifyKeyReturn::SUCCESS) {
     if (ks->paths.first == nullptr) {
       if ((ks->flag & KEYINGSET_ABSOLUTE) == 0) {
         BKE_report(reports,
@@ -1180,7 +1159,7 @@ static int pose_select_mirror_exec(bContext *C, wmOperator *op)
 
       /* In weight-paint we select the associated vertex group too. */
       if (is_weight_paint) {
-        ED_vgroup_select_by_name(ob_active, pchan_mirror_act->name);
+        blender::ed::object::vgroup_select_by_name(ob_active, pchan_mirror_act->name);
         DEG_id_tag_update(&ob_active->id, ID_RECALC_GEOMETRY);
       }
     }
@@ -1188,7 +1167,7 @@ static int pose_select_mirror_exec(bContext *C, wmOperator *op)
     WM_event_add_notifier(C, NC_OBJECT | ND_BONE_SELECT, ob);
 
     /* Need to tag armature for cow updates, or else selection doesn't update. */
-    DEG_id_tag_update(&arm->id, ID_RECALC_COPY_ON_WRITE);
+    DEG_id_tag_update(&arm->id, ID_RECALC_SYNC_TO_EVAL);
   }
 
   ED_outliner_select_sync_from_pose_bone_tag(C);

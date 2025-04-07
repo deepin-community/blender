@@ -75,7 +75,7 @@ void BKE_tracking_settings_init(struct MovieTracking *tracking);
  * Get transformation matrix for a given object which is used
  * for parenting motion tracker reconstruction to 3D world.
  */
-void BKE_tracking_get_camera_object_matrix(struct Object *camera_object, float mat[4][4]);
+void BKE_tracking_get_camera_object_matrix(const struct Object *camera_object, float mat[4][4]);
 /**
  * Get projection matrix for camera specified by given tracking object
  * and frame number.
@@ -528,9 +528,9 @@ struct ImBuf *BKE_tracking_distort_frame(struct MovieTracking *tracking,
 void BKE_tracking_max_distortion_delta_across_bound(struct MovieTracking *tracking,
                                                     int image_width,
                                                     int image_height,
-                                                    struct rcti *rect,
+                                                    const struct rcti *rect,
                                                     bool undistort,
-                                                    float delta[2]);
+                                                    float r_delta[2]);
 
 /* --------------------------------------------------------------------
  * Image sampling.

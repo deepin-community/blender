@@ -18,10 +18,9 @@
 #include "DNA_armature_types.h"
 #include "DNA_object_types.h"
 
-#include "BKE_action.h"
 #include "BKE_action.hh"
 #include "BKE_armature.hh"
-#include "BKE_idprop.h"
+#include "BKE_idprop.hh"
 #include "BKE_object_types.hh"
 
 using namespace blender::bke;
@@ -38,7 +37,7 @@ struct PoseChannelBackup {
 
 struct PoseBackup {
   bool is_bone_selection_relevant;
-  ListBase /* PoseChannelBackup* */ backups;
+  ListBase /*PoseChannelBackup*/ backups;
 };
 
 /**

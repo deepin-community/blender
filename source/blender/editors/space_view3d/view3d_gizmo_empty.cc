@@ -11,17 +11,15 @@
 #include "BLI_utildefines.h"
 
 #include "BKE_context.hh"
-#include "BKE_image.h"
+#include "BKE_image.hh"
 #include "BKE_layer.hh"
 #include "BKE_object.hh"
 
 #include "DEG_depsgraph.hh"
 
-#include "DNA_light_types.h"
 #include "DNA_object_types.h"
 
 #include "ED_gizmo_library.hh"
-#include "ED_screen.hh"
 
 #include "UI_resources.hh"
 
@@ -32,7 +30,7 @@
 #include "WM_api.hh"
 #include "WM_types.hh"
 
-#include "view3d_intern.h" /* own include */
+#include "view3d_intern.hh" /* own include */
 
 /* -------------------------------------------------------------------- */
 /** \name Empty Image Gizmos
@@ -82,6 +80,7 @@ static void gizmo_empty_image_prop_matrix_set(const wmGizmo *gz,
 
   ob->empty_drawsize = matrix[0][0];
   DEG_id_tag_update(&ob->id, ID_RECALC_TRANSFORM);
+  WM_main_add_notifier(NC_OBJECT | ND_TRANSFORM, ob);
 
   float dims[2];
   RNA_float_get_array(gz->ptr, "dimensions", dims);
@@ -133,6 +132,11 @@ static void WIDGETGROUP_empty_image_setup(const bContext * /*C*/, wmGizmoGroup *
 
   UI_GetThemeColor3fv(TH_GIZMO_PRIMARY, gz->color);
   UI_GetThemeColor3fv(TH_GIZMO_HI, gz->color_hi);
+
+  /* All gizmos must perform undo. */
+  LISTBASE_FOREACH (wmGizmo *, gz, &gzgroup->gizmos) {
+    WM_gizmo_set_flag(gz, WM_GIZMO_NEEDS_UNDO, true);
+  }
 }
 
 static void WIDGETGROUP_empty_image_refresh(const bContext *C, wmGizmoGroup *gzgroup)
@@ -144,7 +148,7 @@ static void WIDGETGROUP_empty_image_refresh(const bContext *C, wmGizmoGroup *gzg
   BKE_view_layer_synced_ensure(scene, view_layer);
   Object *ob = BKE_view_layer_active_object_get(view_layer);
 
-  copy_m4_m4(gz->matrix_basis, ob->object_to_world);
+  copy_m4_m4(gz->matrix_basis, ob->object_to_world().ptr());
 
   RNA_enum_set(gz->ptr,
                "transform",

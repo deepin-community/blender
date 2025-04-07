@@ -45,7 +45,7 @@ class HydraSceneDelegate : public pxr::HdSceneDelegate {
     float studiolight_rotation;
     float studiolight_intensity;
 
-    bool operator==(const ShadingSettings &other);
+    bool operator==(const ShadingSettings &other) const;
   };
 
   Depsgraph *depsgraph = nullptr;
@@ -63,7 +63,9 @@ class HydraSceneDelegate : public pxr::HdSceneDelegate {
   std::unique_ptr<WorldData> world_data_;
 
  public:
-  HydraSceneDelegate(pxr::HdRenderIndex *parent_index, pxr::SdfPath const &delegate_id);
+  HydraSceneDelegate(pxr::HdRenderIndex *parent_index,
+                     pxr::SdfPath const &delegate_id,
+                     bool use_materialx);
   ~HydraSceneDelegate() override = default;
 
   /* Delegate methods */

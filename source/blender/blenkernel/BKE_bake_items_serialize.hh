@@ -29,6 +29,8 @@ struct BlobSlice {
  */
 class BlobReader {
  public:
+  virtual ~BlobReader() = default;
+
   /**
    * Read the data from the given slice into the provided memory buffer.
    * \return True on success, otherwise false.
@@ -47,7 +49,12 @@ class BlobReader {
  * Abstract base class for writing binary data.
  */
 class BlobWriter {
+ protected:
+  int64_t total_written_size_ = 0;
+
  public:
+  virtual ~BlobWriter() = default;
+
   /**
    * Write the provided binary data.
    * \return Slice where the data has been written to.
@@ -62,6 +69,11 @@ class BlobWriter {
    */
   virtual BlobSlice write_as_stream(StringRef file_extension,
                                     FunctionRef<void(std::ostream &)> fn);
+
+  int64_t written_size() const
+  {
+    return total_written_size_;
+  }
 };
 
 /**
@@ -89,23 +101,11 @@ class BlobWriteSharing : NonCopyable, NonMovable {
    */
   Map<const ImplicitSharingInfo *, StoredByRuntimeValue> stored_by_runtime_;
 
-  struct SliceHash {
-    uint64_t a;
-    uint64_t b;
-
-    BLI_STRUCT_EQUALITY_OPERATORS_2(SliceHash, a, b)
-
-    uint64_t hash() const
-    {
-      return get_default_hash(this->a, this->b);
-    }
-  };
-
   /**
    * Remembers where data was stored based on the hash of the data. This allows us to skip writing
    * the same array again if it has the same hash.
    */
-  Map<SliceHash, BlobSlice> slice_by_content_hash_;
+  Map<uint64_t, BlobSlice> slice_by_content_hash_;
 
  public:
   ~BlobWriteSharing();
@@ -194,6 +194,49 @@ class DiskBlobWriter : public BlobWriter {
 
   BlobSlice write_as_stream(StringRef file_extension,
                             FunctionRef<void(std::ostream &)> fn) override;
+};
+
+/**
+ * A specific #BlobWriter that keeps all data in memory.
+ */
+class MemoryBlobWriter : public BlobWriter {
+ public:
+  struct OutputStream {
+    std::unique_ptr<std::ostringstream> stream;
+    int64_t offset = 0;
+  };
+
+ private:
+  std::string base_name_;
+  std::string blob_name_;
+  Map<std::string, OutputStream> stream_by_name_;
+  int independent_file_count_ = 0;
+
+ public:
+  MemoryBlobWriter(std::string base_name);
+
+  BlobSlice write(const void *data, int64_t size) override;
+
+  BlobSlice write_as_stream(StringRef file_extension,
+                            FunctionRef<void(std::ostream &)> fn) override;
+
+  const Map<std::string, OutputStream> &get_stream_by_name() const
+  {
+    return stream_by_name_;
+  }
+};
+
+/**
+ * A specific #BlobReader that reads data from in-memory buffers.
+ */
+class MemoryBlobReader : public BlobReader {
+ private:
+  Map<StringRef, Span<std::byte>> blob_by_name_;
+
+ public:
+  void add(StringRef name, Span<std::byte> blob);
+
+  [[nodiscard]] bool read(const BlobSlice &slice, void *r_data) const override;
 };
 
 void serialize_bake(const BakeState &bake_state,

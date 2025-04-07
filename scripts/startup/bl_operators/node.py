@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import bpy
 from bpy.types import (
+    FileHandler,
     Operator,
     PropertyGroup,
 )
@@ -58,8 +59,7 @@ class NodeAddOperator:
         # convert mouse position to the View2D for later node placement
         if context.region.type == 'WINDOW':
             # convert mouse position to the View2D for later node placement
-            space.cursor_location_from_region(
-                event.mouse_region_x, event.mouse_region_y)
+            space.cursor_location_from_region(event.mouse_region_x, event.mouse_region_y)
         else:
             space.cursor_location = tree.view_center
 
@@ -97,7 +97,7 @@ class NodeAddOperator:
             except AttributeError as ex:
                 self.report(
                     {'ERROR_INVALID_INPUT'},
-                    rpt_("Node has no attribute %s") % setting.name)
+                    rpt_("Node has no attribute {:s}").format(setting.name))
                 print(str(ex))
                 # Continue despite invalid attribute
 
@@ -111,7 +111,7 @@ class NodeAddOperator:
         space = context.space_data
         # needs active node editor and a tree to add nodes to
         return (space and (space.type == 'NODE_EDITOR') and
-                space.edit_tree and not space.edit_tree.library)
+                space.edit_tree and space.edit_tree.is_editable)
 
     # Default invoke stores the mouse position to place the node correctly
     # and optionally invokes the transform operator
@@ -149,7 +149,15 @@ class NODE_OT_add_node(NodeAddOperator, Operator):
 
     @classmethod
     def description(cls, _context, properties):
+        from nodeitems_builtins import node_tree_group_type
+
         nodetype = properties["type"]
+        if nodetype in node_tree_group_type.values():
+            for setting in properties.settings:
+                if setting.name == "node_tree":
+                    node_group = eval(setting.value)
+                    if node_group.description:
+                        return node_group.description
         bl_rna = bpy.types.Node.bl_rna_get_subclass(nodetype)
         if bl_rna is not None:
             return tip_(bl_rna.description)
@@ -164,6 +172,8 @@ class NodeAddZoneOperator(NodeAddOperator):
         size=2,
         default=(150, 0),
     )
+
+    add_default_geometry_link = True
 
     def execute(self, context):
         space = context.space_data
@@ -181,11 +191,12 @@ class NodeAddZoneOperator(NodeAddOperator):
         input_node.location -= Vector(self.offset)
         output_node.location += Vector(self.offset)
 
-        # Connect geometry sockets by default.
-        # Get the sockets by their types, because the name is not guaranteed due to i18n.
-        from_socket = next(s for s in input_node.outputs if s.type == 'GEOMETRY')
-        to_socket = next(s for s in output_node.inputs if s.type == 'GEOMETRY')
-        tree.links.new(to_socket, from_socket)
+        if self.add_default_geometry_link:
+            # Connect geometry sockets by default if available.
+            # Get the sockets by their types, because the name is not guaranteed due to i18n.
+            from_socket = next(s for s in input_node.outputs if s.type == 'GEOMETRY')
+            to_socket = next(s for s in output_node.inputs if s.type == 'GEOMETRY')
+            tree.links.new(to_socket, from_socket)
 
         return {'FINISHED'}
 
@@ -210,6 +221,17 @@ class NODE_OT_add_repeat_zone(NodeAddZoneOperator, Operator):
     output_node_type = "GeometryNodeRepeatOutput"
 
 
+class NODE_OT_add_foreach_geometry_element_zone(NodeAddZoneOperator, Operator):
+    """Add a For Each Geometry Element zone that allows executing nodes e.g. for each vertex separately"""
+    bl_idname = "node.add_foreach_geometry_element_zone"
+    bl_label = "Add For Each Geometry Element Zone"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    input_node_type = "GeometryNodeForeachGeometryElementInput"
+    output_node_type = "GeometryNodeForeachGeometryElementOutput"
+    add_default_geometry_link = False
+
+
 class NODE_OT_collapse_hide_unused_toggle(Operator):
     """Toggle collapsed nodes and hide unused sockets"""
     bl_idname = "node.collapse_hide_unused_toggle"
@@ -221,7 +243,7 @@ class NODE_OT_collapse_hide_unused_toggle(Operator):
         space = context.space_data
         # needs active node editor and a tree
         return (space and (space.type == 'NODE_EDITOR') and
-                (space.edit_tree and not space.edit_tree.library))
+                (space.edit_tree and space.edit_tree.is_editable))
 
     def execute(self, context):
         space = context.space_data
@@ -273,7 +295,7 @@ class NodeInterfaceOperator():
 
 
 class NODE_OT_interface_item_new(NodeInterfaceOperator, Operator):
-    '''Add a new item to the interface'''
+    """Add a new item to the interface"""
     bl_idname = "node.interface_item_new"
     bl_label = "New Item"
     bl_options = {'REGISTER', 'UNDO'}
@@ -339,7 +361,7 @@ class NODE_OT_interface_item_new(NodeInterfaceOperator, Operator):
 
 
 class NODE_OT_interface_item_duplicate(NodeInterfaceOperator, Operator):
-    '''Add a copy of the active item to the interface'''
+    """Add a copy of the active item to the interface"""
     bl_idname = "node.interface_item_duplicate"
     bl_label = "Duplicate Item"
     bl_options = {'REGISTER', 'UNDO'}
@@ -368,7 +390,7 @@ class NODE_OT_interface_item_duplicate(NodeInterfaceOperator, Operator):
 
 
 class NODE_OT_interface_item_remove(NodeInterfaceOperator, Operator):
-    '''Remove active item from the interface'''
+    """Remove active item from the interface"""
     bl_idname = "node.interface_item_remove"
     bl_label = "Remove Item"
     bl_options = {'REGISTER', 'UNDO'}
@@ -386,73 +408,34 @@ class NODE_OT_interface_item_remove(NodeInterfaceOperator, Operator):
         return {'FINISHED'}
 
 
-class NODE_OT_enum_definition_item_add(Operator):
-    '''Add an enum item to the definition'''
-    bl_idname = "node.enum_definition_item_add"
-    bl_label = "Add Item"
-    bl_options = {'REGISTER', 'UNDO'}
+class NODE_FH_image_node(FileHandler):
+    bl_idname = "NODE_FH_image_node"
+    bl_label = "Image node"
+    bl_import_operator = "node.add_file"
+    bl_file_extensions = ";".join((*bpy.path.extensions_image, *bpy.path.extensions_movie))
 
-    def execute(self, context):
-        node = context.active_node
-        enum_def = node.enum_definition
-        item = enum_def.enum_items.new("Item")
-        enum_def.active_index = enum_def.enum_items[:].index(item)
-        return {'FINISHED'}
-
-
-class NODE_OT_enum_definition_item_remove(Operator):
-    '''Remove the selected enum item from the definition'''
-    bl_idname = "node.enum_definition_item_remove"
-    bl_label = "Remove Item"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    def execute(self, context):
-        node = context.active_node
-        enum_def = node.enum_definition
-        item = enum_def.active_item
-        if item:
-            enum_def.enum_items.remove(item)
-        enum_def.active_index = min(max(enum_def.active_index, 0), len(enum_def.enum_items) - 1)
-        return {'FINISHED'}
-
-
-class NODE_OT_enum_definition_item_move(Operator):
-    '''Remove the selected enum item from the definition'''
-    bl_idname = "node.enum_definition_item_move"
-    bl_label = "Move Item"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    direction: EnumProperty(
-        name="Direction",
-        description="Move up or down",
-        items=[("UP", "Up", ""), ("DOWN", "Down", "")]
-    )
-
-    def execute(self, context):
-        node = context.active_node
-        enum_def = node.enum_definition
-        index = enum_def.active_index
-        if self.direction == 'UP':
-            enum_def.enum_items.move(index, index - 1)
-            enum_def.active_index = min(max(index - 1, 0), len(enum_def.enum_items) - 1)
-        else:
-            enum_def.enum_items.move(index, index + 1)
-            enum_def.active_index = min(max(index + 1, 0), len(enum_def.enum_items) - 1)
-        return {'FINISHED'}
+    @classmethod
+    def poll_drop(cls, context):
+        return (
+            (context.area is not None) and
+            (context.area.type == 'NODE_EDITOR') and
+            (context.region is not None) and
+            (context.region.type == 'WINDOW')
+        )
 
 
 classes = (
     NodeSetting,
 
+    NODE_FH_image_node,
+
     NODE_OT_add_node,
     NODE_OT_add_simulation_zone,
     NODE_OT_add_repeat_zone,
+    NODE_OT_add_foreach_geometry_element_zone,
     NODE_OT_collapse_hide_unused_toggle,
     NODE_OT_interface_item_new,
     NODE_OT_interface_item_duplicate,
     NODE_OT_interface_item_remove,
     NODE_OT_tree_path_parent,
-    NODE_OT_enum_definition_item_add,
-    NODE_OT_enum_definition_item_remove,
-    NODE_OT_enum_definition_item_move,
 )

@@ -106,6 +106,13 @@ void PointCloudComponent::ensure_owns_direct_data()
   }
 }
 
+void PointCloudComponent::count_memory(MemoryCounter &memory) const
+{
+  if (pointcloud_) {
+    pointcloud_->count_memory(memory);
+  }
+}
+
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -147,24 +154,18 @@ static ComponentAttributeProviders create_attribute_providers_for_point_cloud()
   static BuiltinCustomDataLayerProvider position("position",
                                                  AttrDomain::Point,
                                                  CD_PROP_FLOAT3,
-                                                 CD_PROP_FLOAT3,
-                                                 BuiltinAttributeProvider::Creatable,
                                                  BuiltinAttributeProvider::NonDeletable,
                                                  point_access,
                                                  tag_component_positions_changed);
   static BuiltinCustomDataLayerProvider radius("radius",
                                                AttrDomain::Point,
                                                CD_PROP_FLOAT,
-                                               CD_PROP_FLOAT,
-                                               BuiltinAttributeProvider::Creatable,
                                                BuiltinAttributeProvider::Deletable,
                                                point_access,
                                                tag_component_radius_changed);
   static BuiltinCustomDataLayerProvider id("id",
                                            AttrDomain::Point,
                                            CD_PROP_INT32,
-                                           CD_PROP_INT32,
-                                           BuiltinAttributeProvider::Creatable,
                                            BuiltinAttributeProvider::Deletable,
                                            point_access,
                                            nullptr);

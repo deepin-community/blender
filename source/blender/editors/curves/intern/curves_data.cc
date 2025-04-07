@@ -11,6 +11,17 @@
 
 namespace blender::ed::curves {
 
+Vector<MutableSpan<float3>> get_curves_positions_for_write(bke::CurvesGeometry &curves)
+{
+  Vector<MutableSpan<float3>> positions_per_attribute;
+  positions_per_attribute.append(curves.positions_for_write());
+  if (curves.has_curve_with_type(CURVE_TYPE_BEZIER)) {
+    positions_per_attribute.append(curves.handle_positions_left_for_write());
+    positions_per_attribute.append(curves.handle_positions_right_for_write());
+  }
+  return positions_per_attribute;
+}
+
 void transverts_from_curves_positions_create(bke::CurvesGeometry &curves, TransVertStore *tvs)
 {
   IndexMaskMemory memory;
@@ -29,9 +40,7 @@ void transverts_from_curves_positions_create(bke::CurvesGeometry &curves, TransV
   });
 }
 
-}  // namespace blender::ed::curves
-
-float (*ED_curves_point_normals_array_create(const Curves *curves_id))[3]
+float (*point_normals_array_create(const Curves *curves_id))[3]
 {
   using namespace blender;
   const bke::CurvesGeometry &curves = curves_id->geometry.wrap();
@@ -40,3 +49,5 @@ float (*ED_curves_point_normals_array_create(const Curves *curves_id))[3]
   bke::curves_normals_point_domain_calc(curves, {data, size});
   return reinterpret_cast<float(*)[3]>(data);
 }
+
+}  // namespace blender::ed::curves

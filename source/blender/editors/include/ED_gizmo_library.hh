@@ -14,7 +14,6 @@
 
 #include "DNA_scene_types.h"
 
-struct Object;
 struct bContext;
 struct wmGizmo;
 struct SnapObjectContext;
@@ -60,9 +59,9 @@ enum {
 
 /* transform */
 enum {
-  /* inverted offset during interaction - if set it also sets constrained below */
+  /** Inverted offset during interaction - if set it also sets constrained below. */
   ED_GIZMO_ARROW_XFORM_FLAG_INVERTED = (1 << 3),
-  /* clamp arrow interaction to property width */
+  /** Clamp arrow interaction to property width. */
   ED_GIZMO_ARROW_XFORM_FLAG_CONSTRAINED = (1 << 4),
 };
 
@@ -99,12 +98,14 @@ enum {
 
 /* draw_style */
 enum {
-  /* Display the hover region (edge or corner) of the underlying bounding box. */
+  /** Display the hover region (edge or corner) of the underlying bounding box. */
   ED_GIZMO_CAGE2D_STYLE_BOX = 0,
-  /* Display the bounding box plus dots on four corners while hovering, usually used for
-   * transforming a 2D shape. */
+  /**
+   * Display the bounding box plus dots on four corners while hovering,
+   * usually used for transforming a 2D shape.
+   */
   ED_GIZMO_CAGE2D_STYLE_BOX_TRANSFORM,
-  /* Display the bounding circle while hovering. */
+  /** Display the bounding circle while hovering. */
   ED_GIZMO_CAGE2D_STYLE_CIRCLE,
 };
 

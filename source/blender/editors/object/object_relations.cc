@@ -19,18 +19,13 @@
 #include "DNA_camera_types.h"
 #include "DNA_collection_types.h"
 #include "DNA_constraint_types.h"
-#include "DNA_gpencil_legacy_types.h"
-#include "DNA_key_types.h"
 #include "DNA_lattice_types.h"
-#include "DNA_light_types.h"
 #include "DNA_material_types.h"
 #include "DNA_mesh_types.h"
-#include "DNA_meta_types.h"
 #include "DNA_object_types.h"
 #include "DNA_particle_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_vfont_types.h"
-#include "DNA_world_types.h"
 
 #include "BLI_kdtree.h"
 #include "BLI_linklist.h"
@@ -41,48 +36,35 @@
 #include "BLI_utildefines.h"
 #include "BLI_vector_set.hh"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
-#include "BKE_DerivedMesh.hh"
-#include "BKE_action.h"
-#include "BKE_anim_data.h"
+#include "BKE_action.hh"
+#include "BKE_anim_data.hh"
 #include "BKE_armature.hh"
-#include "BKE_camera.h"
-#include "BKE_collection.h"
+#include "BKE_collection.hh"
 #include "BKE_constraint.h"
 #include "BKE_context.hh"
 #include "BKE_curve.hh"
-#include "BKE_curves.h"
 #include "BKE_displist.h"
 #include "BKE_editmesh.hh"
-#include "BKE_fcurve.h"
-#include "BKE_gpencil_legacy.h"
-#include "BKE_idprop.h"
+#include "BKE_fcurve.hh"
 #include "BKE_idtype.hh"
-#include "BKE_lattice.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_lib_override.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_lib_remap.hh"
-#include "BKE_light.h"
-#include "BKE_lightprobe.h"
 #include "BKE_main.hh"
 #include "BKE_material.h"
-#include "BKE_mball.hh"
-#include "BKE_mesh.hh"
+#include "BKE_mesh_types.hh"
 #include "BKE_modifier.hh"
-#include "BKE_node.h"
+#include "BKE_node.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_node_tree_interface.hh"
 #include "BKE_object.hh"
 #include "BKE_object_types.hh"
-#include "BKE_pointcloud.hh"
-#include "BKE_report.h"
-#include "BKE_scene.h"
-#include "BKE_speaker.h"
-#include "BKE_texture.h"
-#include "BKE_volume.hh"
+#include "BKE_report.hh"
+#include "BKE_scene.hh"
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_build.hh"
@@ -101,7 +83,7 @@
 #include "ED_armature.hh"
 #include "ED_curve.hh"
 #include "ED_gpencil_legacy.hh"
-#include "ED_keyframing.hh"
+#include "ED_grease_pencil.hh"
 #include "ED_mesh.hh"
 #include "ED_object.hh"
 #include "ED_screen.hh"
@@ -112,7 +94,9 @@
 
 #include "MOD_nodes.hh"
 
-#include "object_intern.h"
+#include "object_intern.hh"
+
+namespace blender::ed::object {
 
 /* ------------------------------------------------------------------- */
 /** \name Make Vertex Parent Operator
@@ -141,21 +125,20 @@ static int vertex_parent_set_exec(bContext *C, wmOperator *op)
 
   if (obedit->type == OB_MESH) {
     Mesh *mesh = static_cast<Mesh *>(obedit->data);
-    BMEditMesh *em;
 
     EDBM_mesh_load(bmain, obedit);
     EDBM_mesh_make(obedit, scene->toolsettings->selectmode, true);
 
     DEG_id_tag_update(static_cast<ID *>(obedit->data), 0);
 
-    em = mesh->edit_mesh;
+    BMEditMesh *em = mesh->runtime->edit_mesh.get();
 
     BKE_editmesh_looptris_and_normals_calc(em);
 
     /* Make sure the evaluated mesh is updated.
      *
      * Most reliable way is to update the tagged objects, which will ensure
-     * proper copy-on-write update, but also will make sure all dependent
+     * proper copy-on-evaluation update, but also will make sure all dependent
      * objects are also up to date. */
     BKE_scene_graph_update_tagged(depsgraph, bmain);
 
@@ -210,8 +193,8 @@ static int vertex_parent_set_exec(bContext *C, wmOperator *op)
       }
       else {
         BPoint *bp = nu->bp;
-        const int num_points = nu->pntsu * nu->pntsv;
-        for (int nurb_index = 0; nurb_index < num_points; nurb_index++, bp++, curr_index++) {
+        const int points_num = nu->pntsu * nu->pntsv;
+        for (int nurb_index = 0; nurb_index < points_num; nurb_index++, bp++, curr_index++) {
           if (bp->f1 & SELECT) {
             if (par1 == INDEX_UNSET) {
               par1 = curr_index;
@@ -236,10 +219,10 @@ static int vertex_parent_set_exec(bContext *C, wmOperator *op)
   else if (obedit->type == OB_LATTICE) {
     Lattice *lt = static_cast<Lattice *>(obedit->data);
 
-    const int num_points = lt->editlatt->latt->pntsu * lt->editlatt->latt->pntsv *
+    const int points_num = lt->editlatt->latt->pntsu * lt->editlatt->latt->pntsv *
                            lt->editlatt->latt->pntsw;
     BPoint *bp = lt->editlatt->latt->def;
-    for (int curr_index = 0; curr_index < num_points; curr_index++, bp++) {
+    for (int curr_index = 0; curr_index < points_num; curr_index++, bp++) {
       if (bp->f1 & SELECT) {
         if (par1 == INDEX_UNSET) {
           par1 = curr_index;
@@ -274,7 +257,6 @@ static int vertex_parent_set_exec(bContext *C, wmOperator *op)
         BKE_report(op->reports, RPT_ERROR, "Loop in parents");
       }
       else {
-        Object workob;
         BKE_view_layer_synced_ensure(scene, view_layer);
         ob->parent = BKE_view_layer_active_object_get(view_layer);
         if (par3 != INDEX_UNSET) {
@@ -284,16 +266,14 @@ static int vertex_parent_set_exec(bContext *C, wmOperator *op)
           ob->par3 = par3;
 
           /* inverse parent matrix */
-          BKE_object_workob_calc_parent(depsgraph, scene, ob, &workob);
-          invert_m4_m4(ob->parentinv, workob.object_to_world);
+          invert_m4_m4(ob->parentinv, BKE_object_calc_parent(depsgraph, scene, ob).ptr());
         }
         else {
           ob->partype = PARVERT1;
           ob->par1 = par1;
 
           /* inverse parent matrix */
-          BKE_object_workob_calc_parent(depsgraph, scene, ob, &workob);
-          invert_m4_m4(ob->parentinv, workob.object_to_world);
+          invert_m4_m4(ob->parentinv, BKE_object_calc_parent(depsgraph, scene, ob).ptr());
         }
       }
     }
@@ -317,13 +297,11 @@ void OBJECT_OT_vertex_parent_set(wmOperatorType *ot)
   ot->idname = "OBJECT_OT_vertex_parent_set";
 
   /* api callbacks */
-  ot->invoke = WM_operator_confirm_or_exec;
   ot->poll = vertex_parent_set_poll;
   ot->exec = vertex_parent_set_exec;
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
-  WM_operator_properties_confirm_or_exec(ot);
 }
 
 /** \} */
@@ -332,7 +310,7 @@ void OBJECT_OT_vertex_parent_set(wmOperatorType *ot)
 /** \name Clear Parent Operator
  * \{ */
 
-EnumPropertyItem prop_clear_parent_types[] = {
+const EnumPropertyItem prop_clear_parent_types[] = {
     {CLEAR_PARENT_ALL,
      "CLEAR",
      0,
@@ -352,7 +330,7 @@ EnumPropertyItem prop_clear_parent_types[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-/* Helper for ED_object_parent_clear() - Remove deform-modifiers associated with parent */
+/* Helper for parent_clear() - Remove deform-modifiers associated with parent */
 static void object_remove_parent_deform_modifiers(Object *ob, const Object *par)
 {
   if (ELEM(par->type, OB_ARMATURE, OB_LATTICE, OB_CURVES_LEGACY)) {
@@ -393,7 +371,7 @@ static void object_remove_parent_deform_modifiers(Object *ob, const Object *par)
   }
 }
 
-void ED_object_parent_clear(Object *ob, const int type)
+void parent_clear(Object *ob, const int type)
 {
   if (ob->parent == nullptr) {
     return;
@@ -415,7 +393,7 @@ void ED_object_parent_clear(Object *ob, const int type)
       /* remove parent, and apply the parented transform
        * result as object's local transforms */
       ob->parent = nullptr;
-      BKE_object_apply_mat4(ob, ob->object_to_world, true, false);
+      BKE_object_apply_mat4(ob, ob->object_to_world().ptr(), true, false);
       /* Don't recalculate the animation because it would change the transform
        * instead of keeping it. */
       flags &= ~ID_RECALC_ANIMATION;
@@ -439,10 +417,12 @@ void ED_object_parent_clear(Object *ob, const int type)
 static int parent_clear_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
+  /* Dependency graph must be evaluated for access to object's evaluated transform matrices. */
+  CTX_data_ensure_evaluated_depsgraph(C);
   const int type = RNA_enum_get(op->ptr, "type");
 
   CTX_DATA_BEGIN (C, Object *, ob, selected_editable_objects) {
-    ED_object_parent_clear(ob, type);
+    parent_clear(ob, type);
   }
   CTX_DATA_END;
 
@@ -475,7 +455,7 @@ void OBJECT_OT_parent_clear(wmOperatorType *ot)
 /** \name Make Parent Operator
  * \{ */
 
-void ED_object_parent(Object *ob, Object *par, const int type, const char *substr)
+void parent_set(Object *ob, Object *par, const int type, const char *substr)
 {
   /* Always clear parentinv matrix for sake of consistency, see #41950. */
   unit_m4(ob->parentinv);
@@ -498,7 +478,7 @@ void ED_object_parent(Object *ob, Object *par, const int type, const char *subst
   STRNCPY(ob->parsubstr, substr);
 }
 
-EnumPropertyItem prop_make_parent_types[] = {
+const EnumPropertyItem prop_make_parent_types[] = {
     {PAR_OBJECT, "OBJECT", 0, "Object", ""},
     {PAR_ARMATURE, "ARMATURE", 0, "Armature Deform", ""},
     {PAR_ARMATURE_NAME, "ARMATURE_NAME", 0, "   With Empty Groups", ""},
@@ -515,23 +495,21 @@ EnumPropertyItem prop_make_parent_types[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-bool ED_object_parent_set(ReportList *reports,
-                          const bContext *C,
-                          Scene *scene,
-                          Object *const ob,
-                          Object *const par,
-                          int partype,
-                          const bool xmirror,
-                          const bool keep_transform,
-                          const int vert_par[3])
+bool parent_set(ReportList *reports,
+                const bContext *C,
+                Scene *scene,
+                Object *const ob,
+                Object *const par,
+                int partype,
+                const bool xmirror,
+                const bool keep_transform,
+                const int vert_par[3])
 {
   Main *bmain = CTX_data_main(C);
   Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
   bPoseChannel *pchan = nullptr;
   bPoseChannel *pchan_eval = nullptr;
   Object *parent_eval = DEG_get_evaluated_object(depsgraph, par);
-
-  DEG_id_tag_update(&par->id, ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY);
 
   /* Preconditions. */
   if (ob == par) {
@@ -566,9 +544,10 @@ bool ED_object_parent_set(ReportList *reports,
       /* if follow, add F-Curve for ctime (i.e. "eval_time") so that path-follow works */
       if (partype == PAR_FOLLOW) {
         /* get or create F-Curve */
-        bAction *act = blender::animrig::id_action_ensure(bmain, &cu->id);
-        FCurve *fcu = blender::animrig::action_fcurve_ensure(
-            bmain, act, nullptr, nullptr, "eval_time", 0);
+        bAction *act = animrig::id_action_ensure(bmain, &cu->id);
+        PointerRNA id_ptr = RNA_id_pointer_create(&cu->id);
+        FCurve *fcu = animrig::action_fcurve_ensure(
+            bmain, act, nullptr, &id_ptr, {"eval_time", 0});
 
         /* setup dummy 'generator' modifier here to get 1-1 correspondence still working */
         if (!fcu->bezt && !fcu->fpt && !fcu->modifiers.first) {
@@ -595,13 +574,11 @@ bool ED_object_parent_set(ReportList *reports,
       }
   }
 
-  Object workob;
-
   /* Apply transformation of previous parenting. */
   if (keep_transform) {
     /* Was removed because of bug #23577,      * but this can be handy in some cases too #32616, so
      * make optional. */
-    BKE_object_apply_mat4(ob, ob->object_to_world, false, false);
+    BKE_object_apply_mat4(ob, ob->object_to_world().ptr(), false, false);
   }
 
   /* Set the parent (except for follow-path constraint option). */
@@ -609,7 +586,6 @@ bool ED_object_parent_set(ReportList *reports,
     ob->parent = par;
     /* Always clear parentinv matrix for sake of consistency, see #41950. */
     unit_m4(ob->parentinv);
-    DEG_id_tag_update(&ob->id, ID_RECALC_TRANSFORM);
   }
 
   /* Handle types. */
@@ -645,13 +621,15 @@ bool ED_object_parent_set(ReportList *reports,
        */
       /* XXX currently this should only happen for meshes, curves, surfaces,        * and lattices
        * - this stuff isn't available for meta-balls yet. */
-      if (ELEM(ob->type, OB_MESH, OB_CURVES_LEGACY, OB_SURF, OB_FONT, OB_LATTICE)) {
+      if (ELEM(
+              ob->type, OB_MESH, OB_CURVES_LEGACY, OB_SURF, OB_FONT, OB_LATTICE, OB_GREASE_PENCIL))
+      {
         ModifierData *md;
 
         switch (partype) {
           case PAR_CURVE: /* curve deform */
             if (BKE_modifiers_is_deformed_by_curve(ob) != par) {
-              md = ED_object_modifier_add(reports, bmain, scene, ob, nullptr, eModifierType_Curve);
+              md = modifier_add(reports, bmain, scene, ob, nullptr, eModifierType_Curve);
               if (md) {
                 ((CurveModifierData *)md)->object = par;
               }
@@ -664,8 +642,7 @@ bool ED_object_parent_set(ReportList *reports,
             break;
           case PAR_LATTICE: /* lattice deform */
             if (BKE_modifiers_is_deformed_by_lattice(ob) != par) {
-              md = ED_object_modifier_add(
-                  reports, bmain, scene, ob, nullptr, eModifierType_Lattice);
+              md = modifier_add(reports, bmain, scene, ob, nullptr, eModifierType_Lattice);
               if (md) {
                 ((LatticeModifierData *)md)->object = par;
               }
@@ -673,10 +650,18 @@ bool ED_object_parent_set(ReportList *reports,
             break;
           default: /* armature deform */
             if (BKE_modifiers_is_deformed_by_armature(ob) != par) {
-              md = ED_object_modifier_add(
-                  reports, bmain, scene, ob, nullptr, eModifierType_Armature);
-              if (md) {
-                ((ArmatureModifierData *)md)->object = par;
+              if (ob->type == OB_GREASE_PENCIL) {
+                md = modifier_add(
+                    reports, bmain, scene, ob, nullptr, eModifierType_GreasePencilArmature);
+                if (md) {
+                  ((GreasePencilArmatureModifierData *)md)->object = par;
+                }
+              }
+              else {
+                md = modifier_add(reports, bmain, scene, ob, nullptr, eModifierType_Armature);
+                if (md) {
+                  ((ArmatureModifierData *)md)->object = par;
+                }
               }
             }
             break;
@@ -726,7 +711,7 @@ bool ED_object_parent_set(ReportList *reports,
 
     BKE_constraint_target_matrix_get(
         depsgraph, scene, con, 0, CONSTRAINT_OBTYPE_OBJECT, nullptr, cmat, scene->r.cfra);
-    sub_v3_v3v3(vec, ob->object_to_world[3], cmat[3]);
+    sub_v3_v3v3(vec, ob->object_to_world().location(), cmat[3]);
 
     copy_v3_v3(ob->loc, vec);
   }
@@ -745,54 +730,39 @@ bool ED_object_parent_set(ReportList *reports,
           reports, depsgraph, scene, ob, par, ARM_GROUPS_AUTO, xmirror);
       WM_cursor_wait(false);
     }
-    /* get corrected inverse */
+    /* Get corrected inverse. */
     ob->partype = PAROBJECT;
-    BKE_object_workob_calc_parent(depsgraph, scene, ob, &workob);
 
-    invert_m4_m4(ob->parentinv, workob.object_to_world);
+    invert_m4_m4(ob->parentinv, BKE_object_calc_parent(depsgraph, scene, ob).ptr());
   }
-  else if (is_armature_parent && (ob->type == OB_GPENCIL_LEGACY) && (par->type == OB_ARMATURE)) {
-    if (partype == PAR_ARMATURE) {
-      ED_gpencil_add_armature(C, reports, ob, par);
+  else if (is_armature_parent && (ob->type == OB_GREASE_PENCIL) && (par->type == OB_ARMATURE)) {
+    if (partype == PAR_ARMATURE_NAME) {
+      ed::greasepencil::add_armature_vertex_groups(*ob, *par);
     }
-    else if (partype == PAR_ARMATURE_NAME) {
-      ED_gpencil_add_armature_weights(C, reports, ob, par, GP_PAR_ARMATURE_NAME);
+    else if (partype == PAR_ARMATURE_ENVELOPE) {
+      ed::greasepencil::add_armature_envelope_weights(*scene, *ob, *par);
     }
-    else if (ELEM(partype, PAR_ARMATURE_AUTO, PAR_ARMATURE_ENVELOPE)) {
-      WM_cursor_wait(true);
-      ED_gpencil_add_armature_weights(C, reports, ob, par, GP_PAR_ARMATURE_AUTO);
-      WM_cursor_wait(false);
+    else if (partype == PAR_ARMATURE_AUTO) {
+      ed::greasepencil::add_armature_automatic_weights(*scene, *ob, *par);
     }
     /* get corrected inverse */
     ob->partype = PAROBJECT;
-    BKE_object_workob_calc_parent(depsgraph, scene, ob, &workob);
 
-    invert_m4_m4(ob->parentinv, workob.object_to_world);
-  }
-  else if ((ob->type == OB_GPENCIL_LEGACY) && (par->type == OB_LATTICE)) {
-    /* Add Lattice modifier */
-    if (partype == PAR_LATTICE) {
-      ED_gpencil_add_lattice_modifier(C, reports, ob, par);
-    }
-    /* get corrected inverse */
-    ob->partype = PAROBJECT;
-    BKE_object_workob_calc_parent(depsgraph, scene, ob, &workob);
-
-    invert_m4_m4(ob->parentinv, workob.object_to_world);
+    invert_m4_m4(ob->parentinv, BKE_object_calc_parent(depsgraph, scene, ob).ptr());
   }
   else {
     /* calculate inverse parent matrix */
-    BKE_object_workob_calc_parent(depsgraph, scene, ob, &workob);
-    invert_m4_m4(ob->parentinv, workob.object_to_world);
+    invert_m4_m4(ob->parentinv, BKE_object_calc_parent(depsgraph, scene, ob).ptr());
   }
 
+  DEG_id_tag_update(&par->id, ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY);
   DEG_id_tag_update(&ob->id, ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY);
   return true;
 }
 
 static void parent_set_vert_find(KDTree_3d *tree, Object *child, int vert_par[3], bool is_tri)
 {
-  const float *co_find = child->object_to_world[3];
+  const float *co_find = child->object_to_world().location();
   if (is_tri) {
     KDTreeNearest_3d nearest[3];
     int tot;
@@ -829,20 +799,20 @@ static bool parent_set_nonvertex_parent(bContext *C, ParentingContext *parenting
 {
   CTX_DATA_BEGIN (C, Object *, ob, selected_editable_objects) {
     if (ob == parenting_context->par) {
-      /* ED_object_parent_set() will fail (and thus return false), but this case shouldn't break
-       * this loop. It's expected that the active object is also selected. */
+      /* parent_set() will fail (and thus return false), but this case
+       * shouldn't break this loop. It's expected that the active object is also selected. */
       continue;
     }
 
-    if (!ED_object_parent_set(parenting_context->reports,
-                              C,
-                              parenting_context->scene,
-                              ob,
-                              parenting_context->par,
-                              parenting_context->partype,
-                              parenting_context->xmirror,
-                              parenting_context->keep_transform,
-                              nullptr))
+    if (!parent_set(parenting_context->reports,
+                    C,
+                    parenting_context->scene,
+                    ob,
+                    parenting_context->par,
+                    parenting_context->partype,
+                    parenting_context->xmirror,
+                    parenting_context->keep_transform,
+                    nullptr))
     {
       return false;
     }
@@ -860,21 +830,21 @@ static bool parent_set_vertex_parent_with_kdtree(bContext *C,
 
   CTX_DATA_BEGIN (C, Object *, ob, selected_editable_objects) {
     if (ob == parenting_context->par) {
-      /* ED_object_parent_set() will fail (and thus return false), but this case shouldn't break
-       * this loop. It's expected that the active object is also selected. */
+      /* parent_set() will fail (and thus return false), but this case
+       * shouldn't break this loop. It's expected that the active object is also selected. */
       continue;
     }
 
     parent_set_vert_find(tree, ob, vert_par, parenting_context->is_vertex_tri);
-    if (!ED_object_parent_set(parenting_context->reports,
-                              C,
-                              parenting_context->scene,
-                              ob,
-                              parenting_context->par,
-                              parenting_context->partype,
-                              parenting_context->xmirror,
-                              parenting_context->keep_transform,
-                              vert_par))
+    if (!parent_set(parenting_context->reports,
+                    C,
+                    parenting_context->scene,
+                    ob,
+                    parenting_context->par,
+                    parenting_context->partype,
+                    parenting_context->xmirror,
+                    parenting_context->keep_transform,
+                    vert_par))
     {
       return false;
     }
@@ -888,7 +858,10 @@ static bool parent_set_vertex_parent(bContext *C, ParentingContext *parenting_co
   KDTree_3d *tree = nullptr;
   int tree_tot;
 
-  tree = BKE_object_as_kdtree(parenting_context->par, &tree_tot);
+  Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
+  Object *par_eval = DEG_get_evaluated_object(depsgraph, parenting_context->par);
+
+  tree = BKE_object_as_kdtree(par_eval, &tree_tot);
   BLI_assert(tree != nullptr);
 
   if (tree_tot < (parenting_context->is_vertex_tri ? 3 : 1)) {
@@ -908,7 +881,7 @@ static int parent_set_exec(bContext *C, wmOperator *op)
   ParentingContext parenting_context{};
   parenting_context.reports = op->reports;
   parenting_context.scene = CTX_data_scene(C);
-  parenting_context.par = ED_object_active_context(C);
+  parenting_context.par = context_active_object(C);
   parenting_context.partype = partype;
   parenting_context.is_vertex_tri = partype == PAR_VERTEX_TRI;
   parenting_context.xmirror = RNA_boolean_get(op->ptr, "xmirror");
@@ -935,7 +908,7 @@ static int parent_set_exec(bContext *C, wmOperator *op)
 
 static int parent_set_invoke_menu(bContext *C, wmOperatorType *ot)
 {
-  Object *parent = ED_object_active_context(C);
+  Object *parent = context_active_object(C);
   uiPopupMenu *pup = UI_popup_menu_begin(C, IFACE_("Set Parent To"), ICON_NONE);
   uiLayout *layout = UI_popup_menu_layout(pup);
 
@@ -985,7 +958,7 @@ static int parent_set_invoke_menu(bContext *C, wmOperatorType *ot)
     if (child->type == OB_MESH) {
       has_children_of_type.mesh = true;
     }
-    if (child->type == OB_GPENCIL_LEGACY) {
+    if (ELEM(child->type, OB_GPENCIL_LEGACY, OB_GREASE_PENCIL)) {
       has_children_of_type.gpencil = true;
     }
     if (child->type == OB_CURVES) {
@@ -997,9 +970,7 @@ static int parent_set_invoke_menu(bContext *C, wmOperatorType *ot)
   if (parent->type == OB_ARMATURE) {
     uiItemEnumO_ptr(layout, ot, nullptr, ICON_NONE, "type", PAR_ARMATURE);
     uiItemEnumO_ptr(layout, ot, nullptr, ICON_NONE, "type", PAR_ARMATURE_NAME);
-    if (!has_children_of_type.gpencil) {
-      uiItemEnumO_ptr(layout, ot, nullptr, ICON_NONE, "type", PAR_ARMATURE_ENVELOPE);
-    }
+    uiItemEnumO_ptr(layout, ot, nullptr, ICON_NONE, "type", PAR_ARMATURE_ENVELOPE);
     if (has_children_of_type.mesh || has_children_of_type.gpencil) {
       uiItemEnumO_ptr(layout, ot, nullptr, ICON_NONE, "type", PAR_ARMATURE_AUTO);
     }
@@ -1096,7 +1067,7 @@ void OBJECT_OT_parent_set(wmOperatorType *ot)
 static int parent_noinv_set_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
-  Object *par = ED_object_active_context(C);
+  Object *par = context_active_object(C);
 
   const bool keep_transform = RNA_boolean_get(op->ptr, "keep_transform");
 
@@ -1144,13 +1115,11 @@ void OBJECT_OT_parent_no_inverse_set(wmOperatorType *ot)
   ot->idname = "OBJECT_OT_parent_no_inverse_set";
 
   /* api callbacks */
-  ot->invoke = WM_operator_confirm_or_exec;
   ot->exec = parent_noinv_set_exec;
   ot->poll = ED_operator_object_active_editable;
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
-  WM_operator_properties_confirm_or_exec(ot);
 
   RNA_def_boolean(ot->srna,
                   "keep_transform",
@@ -1210,7 +1179,7 @@ static int object_track_clear_exec(bContext *C, wmOperator *op)
     }
 
     if (type == CLEAR_TRACK_KEEP_TRANSFORM) {
-      BKE_object_apply_mat4(ob, ob->object_to_world, true, true);
+      BKE_object_apply_mat4(ob, ob->object_to_world().ptr(), true, true);
     }
   }
   CTX_DATA_END;
@@ -1262,7 +1231,7 @@ static const EnumPropertyItem prop_make_track_types[] = {
 static int track_set_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
-  Object *obact = ED_object_active_context(C);
+  Object *obact = context_active_object(C);
 
   const int type = RNA_enum_get(op->ptr, "type");
 
@@ -1457,7 +1426,7 @@ static bool allow_make_links_data(const int type, Object *ob_src, Object *ob_dst
           /* Linking non-grease-pencil materials to a grease-pencil object causes issues.
            * We make sure that if one of the objects is a grease-pencil object, the other must be
            * as well. */
-          ((ob_src->type == OB_GPENCIL_LEGACY) == (ob_dst->type == OB_GPENCIL_LEGACY)))
+          ((ob_src->type == OB_GREASE_PENCIL) == (ob_dst->type == OB_GREASE_PENCIL)))
       {
         return true;
       }
@@ -1482,7 +1451,7 @@ static bool allow_make_links_data(const int type, Object *ob_src, Object *ob_dst
       }
       break;
     case MAKE_LINKS_SHADERFX:
-      if ((ob_src->type == OB_GPENCIL_LEGACY) && (ob_dst->type == OB_GPENCIL_LEGACY)) {
+      if ((ob_src->type == OB_GREASE_PENCIL) && (ob_dst->type == OB_GREASE_PENCIL)) {
         return true;
       }
       break;
@@ -1504,7 +1473,7 @@ static int make_links_data_exec(bContext *C, wmOperator *op)
   bool is_cycle = false;
   bool is_lib = false;
 
-  ob_src = ED_object_active_context(C);
+  ob_src = context_active_object(C);
 
   /* avoid searching all collections in source object each time */
   if (type == MAKE_LINKS_GROUP) {
@@ -1529,6 +1498,9 @@ static int make_links_data_exec(bContext *C, wmOperator *op)
             /* if amount of material indices changed: */
             BKE_object_materials_test(bmain, ob_dst, static_cast<ID *>(ob_dst->data));
 
+            if (ob_dst->type == OB_ARMATURE) {
+              BKE_pose_rebuild(bmain, ob_dst, static_cast<bArmature *>(ob_dst->data), true);
+            }
             DEG_id_tag_update(&ob_dst->id, ID_RECALC_GEOMETRY);
             break;
           case MAKE_LINKS_MATERIALS:
@@ -1579,7 +1551,7 @@ static int make_links_data_exec(bContext *C, wmOperator *op)
               id_us_plus(&ob_dst->instance_collection->id);
               ob_dst->transflag |= OB_DUPLICOLLECTION;
             }
-            DEG_id_tag_update(&ob_dst->id, ID_RECALC_COPY_ON_WRITE);
+            DEG_id_tag_update(&ob_dst->id, ID_RECALC_SYNC_TO_EVAL);
             break;
           case MAKE_LINKS_MODIFIERS:
             BKE_object_link_modifiers(ob_dst, ob_src);
@@ -1621,7 +1593,7 @@ static int make_links_data_exec(bContext *C, wmOperator *op)
             break;
           }
           case MAKE_LINKS_SHADERFX:
-            ED_object_shaderfx_link(ob_dst, ob_src);
+            shaderfx_link(ob_dst, ob_src);
             DEG_id_tag_update(&ob_dst->id,
                               ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY | ID_RECALC_ANIMATION);
             break;
@@ -1761,8 +1733,8 @@ static Collection *single_object_users_collection(Main *bmain,
                                                   const bool copy_collections,
                                                   const bool is_master_collection)
 {
-  /* Generate new copies for objects in given collection and all its children,    * and optionally
-   * also copy collections themselves. */
+  /* Generate new copies for objects in given collection and all its children,    * and
+   * optionally also copy collections themselves. */
   if (copy_collections && !is_master_collection) {
     Collection *collection_new = (Collection *)BKE_id_copy_ex(
         bmain, &collection->id, nullptr, LIB_ID_COPY_DEFAULT | LIB_ID_COPY_ACTIONS);
@@ -1835,7 +1807,7 @@ static void single_object_users(
   BKE_main_collection_sync_remap(bmain);
 }
 
-void ED_object_single_user(Main *bmain, Scene *scene, Object *ob)
+void object_single_user_make(Main *bmain, Scene *scene, Object *ob)
 {
   FOREACH_SCENE_OBJECT_BEGIN (scene, ob_iter) {
     ob_iter->flag &= ~OB_DONE;
@@ -2006,7 +1978,7 @@ static void single_obdata_users(
   }
 }
 
-void ED_object_single_obdata_user(Main *bmain, Scene *scene, Object *ob)
+void single_obdata_user_make(Main *bmain, Scene *scene, Object *ob)
 {
   FOREACH_SCENE_OBJECT_BEGIN (scene, ob_iter) {
     ob_iter->flag &= ~OB_DONE;
@@ -2099,7 +2071,7 @@ static int tag_localizable_looper(LibraryIDLinkCallbackData *cb_data)
 {
   ID **id_pointer = cb_data->id_pointer;
   if (*id_pointer) {
-    (*id_pointer)->tag &= ~LIB_TAG_DOIT;
+    (*id_pointer)->tag &= ~ID_TAG_DOIT;
   }
 
   return IDWALK_RET_NOP;
@@ -2109,18 +2081,18 @@ static void tag_localizable_objects(bContext *C, const int mode)
 {
   Main *bmain = CTX_data_main(C);
 
-  BKE_main_id_tag_all(bmain, LIB_TAG_DOIT, false);
+  BKE_main_id_tag_all(bmain, ID_TAG_DOIT, false);
 
-  /* Set LIB_TAG_DOIT flag for all selected objects, so next we can check whether
+  /* Set ID_TAG_DOIT flag for all selected objects, so next we can check whether
    * object is gonna to become local or not.
    */
   CTX_DATA_BEGIN (C, Object *, object, selected_objects) {
-    object->id.tag |= LIB_TAG_DOIT;
+    object->id.tag |= ID_TAG_DOIT;
 
     /* If obdata is also going to become local, mark it as such too. */
     if (mode == MAKE_LOCAL_SELECT_OBDATA && object->data) {
       ID *data_id = (ID *)object->data;
-      data_id->tag |= LIB_TAG_DOIT;
+      data_id->tag |= ID_TAG_DOIT;
     }
   }
   CTX_DATA_END;
@@ -2134,13 +2106,13 @@ static void tag_localizable_objects(bContext *C, const int mode)
   for (Object *object = static_cast<Object *>(bmain->objects.first); object;
        object = static_cast<Object *>(object->id.next))
   {
-    if ((object->id.tag & LIB_TAG_DOIT) == 0 && ID_IS_LINKED(object)) {
+    if ((object->id.tag & ID_TAG_DOIT) == 0 && ID_IS_LINKED(object)) {
       BKE_library_foreach_ID_link(
           nullptr, &object->id, tag_localizable_looper, nullptr, IDWALK_READONLY);
     }
     if (object->data) {
       ID *data_id = (ID *)object->data;
-      if ((data_id->tag & LIB_TAG_DOIT) == 0 && ID_IS_LINKED(data_id)) {
+      if ((data_id->tag & ID_TAG_DOIT) == 0 && ID_IS_LINKED(data_id)) {
         BKE_library_foreach_ID_link(
             nullptr, data_id, tag_localizable_looper, nullptr, IDWALK_READONLY);
       }
@@ -2173,7 +2145,7 @@ static bool make_local_all__instance_indirect_unused(Main *bmain,
       BKE_collection_object_add(bmain, collection, ob);
       BKE_view_layer_synced_ensure(scene, view_layer);
       base = BKE_view_layer_base_find(view_layer, ob);
-      ED_object_base_select(base, BA_SELECT);
+      base_select(base, BA_SELECT);
       DEG_id_tag_update(&ob->id, ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY | ID_RECALC_ANIMATION);
 
       changed = true;
@@ -2187,7 +2159,7 @@ static void make_local_animdata_tag_strips(ListBase *strips)
 {
   LISTBASE_FOREACH (NlaStrip *, strip, strips) {
     if (strip->act) {
-      strip->act->id.tag &= ~LIB_TAG_PRE_EXISTING;
+      strip->act->id.tag &= ~ID_TAG_PRE_EXISTING;
     }
 
     make_local_animdata_tag_strips(&strip->strips);
@@ -2200,10 +2172,10 @@ static void make_local_animdata_tag(AnimData *adt)
   if (adt) {
     /* Actions - Active and Temp */
     if (adt->action) {
-      adt->action->id.tag &= ~LIB_TAG_PRE_EXISTING;
+      adt->action->id.tag &= ~ID_TAG_PRE_EXISTING;
     }
     if (adt->tmpact) {
-      adt->tmpact->id.tag &= ~LIB_TAG_PRE_EXISTING;
+      adt->tmpact->id.tag &= ~ID_TAG_PRE_EXISTING;
     }
 
     /* Drivers */
@@ -2219,7 +2191,7 @@ static void make_local_animdata_tag(AnimData *adt)
 static void make_local_material_tag(Material *ma)
 {
   if (ma) {
-    ma->id.tag &= ~LIB_TAG_PRE_EXISTING;
+    ma->id.tag &= ~ID_TAG_PRE_EXISTING;
     make_local_animdata_tag(BKE_animdata_from_id(&ma->id));
 
     /* About node-trees: root one is made local together with material,
@@ -2234,13 +2206,13 @@ static int make_local_exec(bContext *C, wmOperator *op)
   const int mode = RNA_enum_get(op->ptr, "type");
   int a;
 
-  /* NOTE: we (ab)use LIB_TAG_PRE_EXISTING to cherry pick which ID to make local... */
+  /* NOTE: we (ab)use ID_TAG_PRE_EXISTING to cherry pick which ID to make local... */
   if (mode == MAKE_LOCAL_ALL) {
     const Scene *scene = CTX_data_scene(C);
     ViewLayer *view_layer = CTX_data_view_layer(C);
     Collection *collection = CTX_data_collection(C);
 
-    BKE_main_id_tag_all(bmain, LIB_TAG_PRE_EXISTING, false);
+    BKE_main_id_tag_all(bmain, ID_TAG_PRE_EXISTING, false);
 
     /* De-select so the user can differentiate newly instanced from existing objects. */
     BKE_view_layer_base_deselect_all(scene, view_layer);
@@ -2252,18 +2224,18 @@ static int make_local_exec(bContext *C, wmOperator *op)
     }
   }
   else {
-    BKE_main_id_tag_all(bmain, LIB_TAG_PRE_EXISTING, true);
+    BKE_main_id_tag_all(bmain, ID_TAG_PRE_EXISTING, true);
     tag_localizable_objects(C, mode);
 
     CTX_DATA_BEGIN (C, Object *, ob, selected_objects) {
-      if ((ob->id.tag & LIB_TAG_DOIT) == 0) {
+      if ((ob->id.tag & ID_TAG_DOIT) == 0) {
         continue;
       }
 
-      ob->id.tag &= ~LIB_TAG_PRE_EXISTING;
+      ob->id.tag &= ~ID_TAG_PRE_EXISTING;
       make_local_animdata_tag(BKE_animdata_from_id(&ob->id));
       LISTBASE_FOREACH (ParticleSystem *, psys, &ob->particlesystem) {
-        psys->part->id.tag &= ~LIB_TAG_PRE_EXISTING;
+        psys->part->id.tag &= ~ID_TAG_PRE_EXISTING;
       }
 
       if (mode == MAKE_LOCAL_SELECT_OBDATA_MATERIAL) {
@@ -2289,14 +2261,15 @@ static int make_local_exec(bContext *C, wmOperator *op)
           ob->data != nullptr)
       {
         ID *ob_data = static_cast<ID *>(ob->data);
-        ob_data->tag &= ~LIB_TAG_PRE_EXISTING;
+        ob_data->tag &= ~ID_TAG_PRE_EXISTING;
         make_local_animdata_tag(BKE_animdata_from_id(ob_data));
       }
     }
     CTX_DATA_END;
   }
 
-  BKE_library_make_local(bmain, nullptr, nullptr, true, false); /* nullptr is all libraries. */
+  BKE_library_make_local(
+      bmain, nullptr, nullptr, true, false, true); /* nullptr is all libraries. */
 
   WM_event_add_notifier(C, NC_WINDOW, nullptr);
   return OPERATOR_FINISHED;
@@ -2400,8 +2373,8 @@ static int make_override_library_exec(bContext *C, wmOperator *op)
     id_root = &collection->id;
     user_overrides_from_selected_objects = true;
   }
-  /* Else, poll func ensures us that ID_IS_LINKED(obact) is true, or that it is already an existing
-   * liboverride. */
+  /* Else, poll func ensures us that ID_IS_LINKED(obact) is true, or that it is already an
+   * existing liboverride. */
   else {
     BLI_assert(ID_IS_LINKED(obact) || ID_IS_OVERRIDE_LIBRARY_REAL(obact));
     id_root = &obact->id;
@@ -2414,7 +2387,7 @@ static int make_override_library_exec(bContext *C, wmOperator *op)
     if (ID_IS_OVERRIDE_LIBRARY_REAL(ob_iter) && !ID_IS_LINKED(ob_iter)) {
       ob_iter->id.override_library->flag &= ~LIBOVERRIDE_FLAG_SYSTEM_DEFINED;
       is_active_override = is_active_override || (&ob_iter->id == id_root);
-      DEG_id_tag_update(&ob_iter->id, ID_RECALC_COPY_ON_WRITE);
+      DEG_id_tag_update(&ob_iter->id, ID_RECALC_SYNC_TO_EVAL);
     }
   }
   FOREACH_SELECTED_OBJECT_END;
@@ -2455,11 +2428,11 @@ static int make_override_library_exec(bContext *C, wmOperator *op)
     FOREACH_COLLECTION_OBJECT_RECURSIVE_END;
   }
 
-  BKE_main_id_tag_all(bmain, LIB_TAG_DOIT, false);
+  BKE_main_id_tag_all(bmain, ID_TAG_DOIT, false);
 
   /* For the time being, replace selected linked objects by their overrides in all collections.
-   * While this may not be the absolute best behavior in all cases, in most common one this should
-   * match the expected result. */
+   * While this may not be the absolute best behavior in all cases, in most common one this
+   * should match the expected result. */
   if (user_overrides_objects_uids != nullptr) {
     LISTBASE_FOREACH (Collection *, coll_iter, &bmain->collections) {
       if (ID_IS_LINKED(coll_iter)) {
@@ -2470,11 +2443,14 @@ static int make_override_library_exec(bContext *C, wmOperator *op)
                             POINTER_FROM_UINT(coll_ob_iter->ob->id.session_uid)))
         {
           /* Tag for remapping when creating overrides. */
-          coll_iter->id.tag |= LIB_TAG_DOIT;
+          coll_iter->id.tag |= ID_TAG_DOIT;
           break;
         }
       }
     }
+    /* Also tag the Scene itself for remapping when creating overrides (includes the scene's master
+     * collection too). */
+    scene->id.tag |= ID_TAG_DOIT;
   }
 
   ID *id_root_override;
@@ -2513,7 +2489,7 @@ static int make_override_library_exec(bContext *C, wmOperator *op)
     if (is_override_instancing_object) {
       /* Remove the instance empty from this scene, the items now have an overridden collection
        * instead. */
-      ED_object_base_free_and_unlink(bmain, scene, obact);
+      base_free_and_unlink(bmain, scene, obact);
     }
     else {
       /* Remove the found root ID from the view layer. */
@@ -2533,8 +2509,8 @@ static int make_override_library_exec(bContext *C, wmOperator *op)
           break;
         }
         case ID_OB: {
-          /* TODO: Not sure how well we can handle this case, when we don't have the collections as
-           * reference containers... */
+          /* TODO: Not sure how well we can handle this case, when we don't have the collections
+           * as reference containers... */
           break;
         }
         default:
@@ -2543,7 +2519,7 @@ static int make_override_library_exec(bContext *C, wmOperator *op)
     }
   }
 
-  DEG_id_tag_update(&CTX_data_scene(C)->id, ID_RECALC_BASE_FLAGS | ID_RECALC_COPY_ON_WRITE);
+  DEG_id_tag_update(&CTX_data_scene(C)->id, ID_RECALC_BASE_FLAGS | ID_RECALC_SYNC_TO_EVAL);
   WM_event_add_notifier(C, NC_WINDOW, nullptr);
   WM_event_add_notifier(C, NC_WM | ND_LIB_OVERRIDE_CHANGED, nullptr);
   WM_event_add_notifier(C, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
@@ -2557,7 +2533,7 @@ static int make_override_library_invoke(bContext *C, wmOperator *op, const wmEve
   Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
-  Object *obact = ED_object_active_context(C);
+  Object *obact = context_active_object(C);
 
   /* Sanity checks. */
   if (!scene || ID_IS_LINKED(scene) || !obact) {
@@ -2579,7 +2555,7 @@ static int make_override_library_invoke(bContext *C, wmOperator *op, const wmEve
     return OPERATOR_CANCELLED;
   }
 
-  blender::VectorSet<Collection *> potential_root_collections;
+  VectorSet<Collection *> potential_root_collections;
   LISTBASE_FOREACH (Collection *, collection, &bmain->collections) {
     /* Only check for linked collections from the same library, in the current view-layer. */
     if (!ID_IS_LINKED(&collection->id) || collection->id.lib != obact->id.lib ||
@@ -2613,13 +2589,13 @@ static int make_override_library_invoke(bContext *C, wmOperator *op, const wmEve
           potential_root_collections.remove(collection_root_iter);
         }
         else {
-          /* Current potential root is not found in current collection's hierarchy, so the later is
-           * a potential candidate as root collection. */
+          /* Current potential root is not found in current collection's hierarchy, so the later
+           * is a potential candidate as root collection. */
           is_potential_root = true;
         }
       }
-      /* Only add the current collection as potential root if it is not a descendant of any already
-       * known potential root collections. */
+      /* Only add the current collection as potential root if it is not a descendant of any
+       * already known potential root collections. */
       if (is_potential_root && !has_parents_in_potential_roots) {
         potential_root_collections.add_new(collection);
       }
@@ -2646,9 +2622,15 @@ static int make_override_library_invoke(bContext *C, wmOperator *op, const wmEve
 
 static bool make_override_library_poll(bContext *C)
 {
-  Object *obact = CTX_data_active_object(C);
+  Base *base_act = CTX_data_active_base(C);
+  /* If the active object is not selected, do nothing (operators rely on selection too, they will
+   * misbehave if the active object is not also selected, see e.g. #120701. */
+  if ((base_act == nullptr) || ((base_act->flag & BASE_SELECTED) == 0)) {
+    return false;
+  }
 
   /* Object must be directly linked to be overridable. */
+  Object *obact = base_act->object;
   return (
       ED_operator_objectmode(C) && obact != nullptr &&
       (ID_IS_LINKED(obact) || ID_IS_OVERRIDE_LIBRARY(obact) ||
@@ -2697,9 +2679,15 @@ void OBJECT_OT_make_override_library(wmOperatorType *ot)
 
 static bool reset_clear_override_library_poll(bContext *C)
 {
-  Object *obact = CTX_data_active_object(C);
+  Base *base_act = CTX_data_active_base(C);
+  /* If the active object is not selected, do nothing (operators rely on selection too, they will
+   * misbehave if the active object is not also selected, see e.g. #120701. */
+  if ((base_act == nullptr) || ((base_act->flag & BASE_SELECTED) == 0)) {
+    return false;
+  }
 
   /* Object must be local and an override. */
+  Object *obact = base_act->object;
   return (ED_operator_objectmode(C) && obact != nullptr && !ID_IS_LINKED(obact) &&
           ID_IS_OVERRIDE_LIBRARY(obact));
 }
@@ -2708,7 +2696,7 @@ static int reset_override_library_exec(bContext *C, wmOperator * /*op*/)
 {
   Main *bmain = CTX_data_main(C);
 
-  /* Make already existing selected liboverrides editable. */
+  /* Reset all selected liboverrides. */
   FOREACH_SELECTED_OBJECT_BEGIN (CTX_data_view_layer(C), CTX_wm_view3d(C), ob_iter) {
     if (ID_IS_OVERRIDE_LIBRARY_REAL(ob_iter) && !ID_IS_LINKED(ob_iter)) {
       BKE_lib_override_library_id_reset(bmain, &ob_iter->id, false);
@@ -2775,6 +2763,7 @@ static int clear_override_library_exec(bContext *C, wmOperator * /*op*/)
                          ob_iter->id.override_library->reference,
                          ID_REMAP_SKIP_INDIRECT_USAGE);
       if (do_remap_active) {
+        BKE_view_layer_synced_ensure(scene, view_layer);
         Object *ref_object = (Object *)ob_iter->id.override_library->reference;
         Base *basact = BKE_view_layer_base_find(view_layer, ref_object);
         if (basact != nullptr) {
@@ -2789,7 +2778,7 @@ static int clear_override_library_exec(bContext *C, wmOperator * /*op*/)
     }
   }
 
-  DEG_id_tag_update(&scene->id, ID_RECALC_BASE_FLAGS | ID_RECALC_COPY_ON_WRITE);
+  DEG_id_tag_update(&scene->id, ID_RECALC_BASE_FLAGS | ID_RECALC_SYNC_TO_EVAL);
   WM_event_add_notifier(C, NC_WINDOW, nullptr);
   WM_event_add_notifier(C, NC_WM | ND_LIB_OVERRIDE_CHANGED, nullptr);
   WM_event_add_notifier(C, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
@@ -2878,6 +2867,12 @@ static int make_single_user_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
+static int make_single_user_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+{
+  return WM_operator_props_popup_confirm_ex(
+      C, op, event, IFACE_("Make Selected Objects Single-User"), IFACE_("Make Single"));
+}
+
 void OBJECT_OT_make_single_user(wmOperatorType *ot)
 {
   static const EnumPropertyItem type_items[] = {
@@ -2895,7 +2890,7 @@ void OBJECT_OT_make_single_user(wmOperatorType *ot)
    * nothing by default. */
 
   /* api callbacks */
-  ot->invoke = WM_operator_props_popup_confirm;
+  ot->invoke = make_single_user_invoke;
   ot->exec = make_single_user_exec;
   ot->poll = ED_operator_objectmode;
 
@@ -2927,9 +2922,7 @@ void OBJECT_OT_make_single_user(wmOperatorType *ot)
 /** \name Drop Named Material on Object Operator
  * \{ */
 
-std::string ED_object_ot_drop_named_material_tooltip(bContext *C,
-                                                     const char *name,
-                                                     const int mval[2])
+std::string drop_named_material_tooltip(bContext *C, const char *name, const int mval[2])
 {
   int mat_slot = 0;
   Object *ob = ED_view3d_give_material_slot_under_cursor(C, mval, &mat_slot);
@@ -2998,9 +2991,7 @@ void OBJECT_OT_drop_named_material(wmOperatorType *ot)
 /** \name Drop Geometry Nodes on Object Operator
  * \{ */
 
-std::string ED_object_ot_drop_geometry_nodes_tooltip(bContext *C,
-                                                     PointerRNA *properties,
-                                                     const int mval[2])
+std::string drop_geometry_nodes_tooltip(bContext *C, PointerRNA *properties, const int mval[2])
 {
   const Object *ob = ED_view3d_give_object_under_cursor(C, mval);
   if (ob == nullptr) {
@@ -3026,7 +3017,7 @@ static bool check_geometry_node_group_sockets(wmOperator *op, const bNodeTree *t
       BKE_report(op->reports, RPT_ERROR, "The node group must have a geometry output socket");
       return false;
     }
-    const bNodeSocketType *typeinfo = first_output->socket_typeinfo();
+    const bke::bNodeSocketType *typeinfo = first_output->socket_typeinfo();
     const eNodeSocketDatatype type = typeinfo ? eNodeSocketDatatype(typeinfo->type) : SOCK_CUSTOM;
     if (type != SOCK_GEOMETRY) {
       BKE_report(op->reports, RPT_ERROR, "The first output must be a geometry socket");
@@ -3060,7 +3051,7 @@ static int drop_geometry_nodes_invoke(bContext *C, wmOperator *op, const wmEvent
     return OPERATOR_CANCELLED;
   }
 
-  NodesModifierData *nmd = (NodesModifierData *)ED_object_modifier_add(
+  NodesModifierData *nmd = (NodesModifierData *)modifier_add(
       op->reports, bmain, scene, ob, node_tree->id.name + 2, eModifierType_Nodes);
   if (!nmd) {
     BKE_report(op->reports, RPT_ERROR, "Could not add geometry nodes modifier");
@@ -3163,3 +3154,5 @@ void OBJECT_OT_unlink_data(wmOperatorType *ot)
 }
 
 /** \} */
+
+}  // namespace blender::ed::object

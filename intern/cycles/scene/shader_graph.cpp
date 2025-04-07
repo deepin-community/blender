@@ -1056,6 +1056,7 @@ void ShaderGraph::bump_from_displacement(bool use_object_space)
   dot_dy->set_math_type(NODE_VECTOR_MATH_DOT_PRODUCT);
 
   GeometryNode *geom = (GeometryNode *)add(create_node<GeometryNode>());
+  connect(geom->output("Normal"), bump->input("Normal"));
   connect(geom->output("Normal"), dot_center->input("Vector2"));
   connect(geom->output("Normal"), dot_dx->input("Vector2"));
   connect(geom->output("Normal"), dot_dy->input("Vector2"));
@@ -1197,7 +1198,9 @@ int ShaderGraph::get_num_closures()
        * for the volume steps. */
       num_closures += MAX_VOLUME_STACK_SIZE;
     }
-    else if (closure_type == CLOSURE_BSDF_MICROFACET_BECKMANN_GLASS_ID ||
+    else if (closure_type == CLOSURE_BSDF_PHYSICAL_CONDUCTOR ||
+             closure_type == CLOSURE_BSDF_F82_CONDUCTOR ||
+             closure_type == CLOSURE_BSDF_MICROFACET_BECKMANN_GLASS_ID ||
              closure_type == CLOSURE_BSDF_MICROFACET_GGX_GLASS_ID ||
              closure_type == CLOSURE_BSDF_HAIR_CHIANG_ID ||
              closure_type == CLOSURE_BSDF_HAIR_HUANG_ID)

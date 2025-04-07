@@ -14,23 +14,23 @@
 
 #include "DNA_packedFile_types.h"
 
-#include "BLI_path_util.h"
+#include "BLI_path_utils.hh"
 #include "BLI_utildefines.h"
 
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
 
-#include "BKE_packedFile.h"
+#include "BKE_packedFile.hh"
 
 #include "rna_internal.hh" /* own include */
 
 #ifdef RNA_RUNTIME
 
-#  include "BKE_image.h"
-#  include "BKE_image_format.h"
-#  include "BKE_image_save.h"
+#  include "BKE_image.hh"
+#  include "BKE_image_format.hh"
+#  include "BKE_image_save.hh"
 #  include "BKE_main.hh"
-#  include "BKE_scene.h"
+#  include "BKE_scene.hh"
 #  include <errno.h>
 
 #  include "IMB_imbuf.hh"
@@ -144,15 +144,21 @@ static void rna_Image_unpack(Image *image, Main *bmain, ReportList *reports, int
 {
   if (!BKE_image_has_packedfile(image)) {
     BKE_report(reports, RPT_ERROR, "Image not packed");
+    return;
   }
-  else if (ELEM(image->source, IMA_SRC_MOVIE, IMA_SRC_SEQUENCE)) {
+
+  if (!ID_IS_EDITABLE(&image->id)) {
+    BKE_report(reports, RPT_ERROR, "Image is not editable");
+    return;
+  }
+
+  if (ELEM(image->source, IMA_SRC_MOVIE, IMA_SRC_SEQUENCE)) {
     BKE_report(reports, RPT_ERROR, "Unpacking movies or image sequences not supported");
     return;
   }
-  else {
-    /* reports its own error on failure */
-    BKE_packedfile_unpack_image(bmain, reports, image, ePF_FileStatus(method));
-  }
+
+  /* reports its own error on failure */
+  BKE_packedfile_unpack_image(bmain, reports, image, ePF_FileStatus(method));
 }
 
 static void rna_Image_reload(Image *image, Main *bmain)
@@ -384,7 +390,7 @@ void RNA_api_image(StructRNA *srna)
       func,
       "Load the image into an OpenGL texture. On success, image.bindcode will contain the "
       "OpenGL texture bindcode. Colors read from the texture will be in scene linear color space "
-      "and have premultiplied or straight alpha matching the image alpha mode");
+      "and have premultiplied or straight alpha matching the image alpha mode.");
   RNA_def_function_flag(func, FUNC_USE_REPORTS);
   RNA_def_int(
       func, "frame", 0, 0, INT_MAX, "Frame", "Frame of image sequence or movie", 0, INT_MAX);

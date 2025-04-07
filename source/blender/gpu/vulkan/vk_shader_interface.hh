@@ -15,21 +15,26 @@
 
 #include "BLI_array.hh"
 
+#include "vk_descriptor_set_layouts.hh"
 #include "vk_push_constants.hh"
 
 namespace blender::gpu {
+
+struct VKResourceBinding {
+  shader::ShaderCreateInfo::Resource::BindType bind_type =
+      shader::ShaderCreateInfo::Resource::BindType::UNIFORM_BUFFER;
+  int binding = -1;
+
+  VKDescriptorSet::Location location;
+  VKImageViewArrayed arrayed = VKImageViewArrayed::DONT_CARE;
+  VkAccessFlags access_mask = VK_ACCESS_NONE;
+};
+
 class VKShaderInterface : public ShaderInterface {
  private:
-  /**
-   * Offset when searching for a shader input based on a binding number.
-   *
-   * When shaders combine images and samplers, the images have to be offset to find the correct
-   * shader input. Both textures and images are stored in the uniform list and their ID can be
-   * overlapping.
-   */
-  uint32_t image_offset_ = 0;
-  Array<VKDescriptorSet::Location> descriptor_set_locations_;
-  Array<shader::ShaderCreateInfo::Resource::BindType> descriptor_set_bind_types_;
+  /** Binding information for each shader input. */
+  Array<VKResourceBinding> resource_bindings_;
+  VKDescriptorSetLayoutInfo descriptor_set_layout_info_;
 
   VKPushConstants::Layout push_constants_layout_;
 
@@ -45,10 +50,28 @@ class VKShaderInterface : public ShaderInterface {
   const std::optional<VKDescriptorSet::Location> descriptor_set_location(
       const shader::ShaderCreateInfo::Resource::BindType &bind_type, int binding) const;
 
+  /**
+   * Get the access mask for a binding.
+   *
+   * Is used to build the correct resource accesses in the render graph (dispatch/draw nodes).
+   *
+   * Will return VK_ACCESS_NONE when binding isn't found or not compatible with the given bind
+   * type.
+   */
+  const VkAccessFlags access_mask(const shader::ShaderCreateInfo::Resource::BindType &bind_type,
+                                  int binding) const;
+  const VKImageViewArrayed arrayed(const shader::ShaderCreateInfo::Resource::BindType &bind_type,
+                                   int binding) const;
+
   /** Get the Layout of the shader. */
   const VKPushConstants::Layout &push_constants_layout_get() const
   {
     return push_constants_layout_;
+  }
+
+  const VKDescriptorSetLayoutInfo &descriptor_set_layout_info_get() const
+  {
+    return descriptor_set_layout_info_;
   }
 
   shader::Type get_attribute_type(int location) const
@@ -61,7 +84,16 @@ class VKShaderInterface : public ShaderInterface {
     return (shader_builtins_ & shader::BuiltinBits::POINT_SIZE) == shader::BuiltinBits::POINT_SIZE;
   }
 
+  const Span<VKResourceBinding> resource_bindings_get() const
+  {
+    return resource_bindings_;
+  }
+
  private:
+  void init_descriptor_set_layout_info(const shader::ShaderCreateInfo &info,
+                                       int64_t resources_len,
+                                       Span<shader::ShaderCreateInfo::Resource> resources,
+                                       VKPushConstants::StorageType push_constants_storage);
   /**
    * Retrieve the shader input for the given resource.
    *
@@ -71,13 +103,14 @@ class VKShaderInterface : public ShaderInterface {
   const ShaderInput *shader_input_get(const shader::ShaderCreateInfo::Resource &resource) const;
   const ShaderInput *shader_input_get(
       const shader::ShaderCreateInfo::Resource::BindType &bind_type, int binding) const;
-  const VKDescriptorSet::Location descriptor_set_location(const ShaderInput *shader_input) const;
-  const shader::ShaderCreateInfo::Resource::BindType descriptor_set_bind_type(
-      const ShaderInput *shader_input) const;
+  const VKResourceBinding &resource_binding_info(const ShaderInput *shader_input) const;
+
   void descriptor_set_location_update(
       const ShaderInput *shader_input,
       const VKDescriptorSet::Location location,
-      const shader::ShaderCreateInfo::Resource::BindType bind_type);
+      const shader::ShaderCreateInfo::Resource::BindType bind_type,
+      std::optional<const shader::ShaderCreateInfo::Resource> resource,
+      VKImageViewArrayed arrayed);
 };
 
 }  // namespace blender::gpu

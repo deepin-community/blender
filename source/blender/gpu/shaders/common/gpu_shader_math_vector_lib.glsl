@@ -176,6 +176,7 @@ vec3 orthogonal(vec3 v);
  * \note Returned vector is always rotated 90 degrees counter clock wise.
  */
 vec2 orthogonal(vec2 v);
+ivec2 orthogonal(ivec2 v);
 
 /**
  * Return true if the difference between`a` and `b` is below the `epsilon` value.
@@ -213,6 +214,16 @@ float reduce_add(vec4 a);
 int reduce_add(ivec2 a);
 int reduce_add(ivec3 a);
 int reduce_add(ivec4 a);
+
+/**
+ * Return the product of the components of a vector.
+ */
+float reduce_mul(vec2 a);
+float reduce_mul(vec3 a);
+float reduce_mul(vec4 a);
+int reduce_mul(ivec2 a);
+int reduce_mul(ivec3 a);
+int reduce_mul(ivec4 a);
 
 /**
  * Return the average of the components of a vector.
@@ -613,6 +624,10 @@ vec2 orthogonal(vec2 v)
 {
   return vec2(-v.y, v.x);
 }
+ivec2 orthogonal(ivec2 v)
+{
+  return ivec2(-v.y, v.x);
+}
 
 bool is_equal(vec2 a, vec2 b, const float epsilon)
 {
@@ -700,6 +715,31 @@ int reduce_add(ivec3 a)
 int reduce_add(ivec4 a)
 {
   return a.x + a.y + a.z + a.w;
+}
+
+float reduce_mul(vec2 a)
+{
+  return a.x * a.y;
+}
+float reduce_mul(vec3 a)
+{
+  return a.x * a.y * a.z;
+}
+float reduce_mul(vec4 a)
+{
+  return a.x * a.y * a.z * a.w;
+}
+int reduce_mul(ivec2 a)
+{
+  return a.x * a.y;
+}
+int reduce_mul(ivec3 a)
+{
+  return a.x * a.y * a.z;
+}
+int reduce_mul(ivec4 a)
+{
+  return a.x * a.y * a.z * a.w;
 }
 
 float average(vec2 a)

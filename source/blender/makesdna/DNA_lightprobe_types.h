@@ -73,7 +73,7 @@ typedef struct LightProbe {
   float grid_clamp_indirect;
 
   /** Surface element density for scene surface cache. In surfel per unit distance. */
-  float surfel_density;
+  int grid_surfel_density;
 
   /** Object visibility group, inclusive or exclusive. */
   struct Collection *visibility_grp;
@@ -188,7 +188,7 @@ typedef struct LightCache {
   LightCacheTexture cube_tx;
   /** Does not contains valid GPUTexture, only data. */
   LightCacheTexture *cube_mips;
-  /* All lightprobes data contained in the cache. */
+  /* All light-probes data contained in the cache. */
   LightProbeCache *cube_data;
   LightGridCache *grid_data;
 } LightCache;

@@ -26,12 +26,12 @@
 #include "BLI_utildefines.h"
 
 #include "BIK_api.h"
-#include "BKE_action.h" /* pose functions */
+#include "BKE_action.hh" /* pose functions */
 #include "BKE_armature.hh"
 #include "BKE_constraint.h"
-#include "BKE_fcurve.h"
+#include "BKE_fcurve.hh"
 #include "BKE_object.hh"
-#include "BKE_scene.h"
+#include "BKE_scene.hh"
 #include "ED_object.hh"
 
 #include "MEM_guardedalloc.h"

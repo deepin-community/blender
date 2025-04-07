@@ -30,6 +30,7 @@ set(SRC
   integrator_adaptive_sampling_test.cpp
   integrator_render_scheduler_test.cpp
   integrator_tile_test.cpp
+  kernel_camera_projection_test.cpp
   render_graph_finalize_test.cpp
   util_aligned_malloc_test.cpp
   util_ies_test.cpp
@@ -49,7 +50,7 @@ if(NOT APPLE)
     list(APPEND SRC
       util_float8_avx2_test.cpp
     )
-    set_source_files_properties(util_float8_avx2_test.cpp PROPERTIES COMPILE_FLAGS "${CYCLES_AVX2_KERNEL_FLAGS}")
+    set_source_files_properties(util_float8_avx2_test.cpp PROPERTIES COMPILE_FLAGS "${CYCLES_AVX2_FLAGS}")
   endif()
 endif()
 

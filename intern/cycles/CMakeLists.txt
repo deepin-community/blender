@@ -11,9 +11,9 @@ else()
   # be started with --env-system-scripts pointing to the release folder, which will
   # lack the cycles addon, and we don't want to write into it.
   if(NOT WINDOWS_PYTHON_DEBUG)
-    set(CYCLES_INSTALL_PATH "scripts/addons/cycles")
+    set(CYCLES_INSTALL_PATH "scripts/addons_core/cycles")
   else()
-    set(CYCLES_INSTALL_PATH "$ENV{appdata}/blender foundation/blender/${BLENDER_VERSION}/scripts/addons/cycles")
+    set(CYCLES_INSTALL_PATH "$ENV{appdata}/blender foundation/blender/${BLENDER_VERSION}/scripts/addons_core/cycles")
   endif()
 endif()
 
@@ -25,12 +25,12 @@ if(NOT CYCLES_STANDALONE_REPOSITORY)
 endif()
 
 # Build Flags
-# todo: this code could be refactored a bit to avoid duplication
-# note: CXX_HAS_SSE is needed in case passing SSE flags fails altogether (gcc-arm)
+# TODO: this code could be refactored a bit to avoid duplication.
+# NOTE: CXX_HAS_SSE42 is needed in case passing SSE flags fails altogether (`gcc-arm`).
 
+# Determine vectorization support and required build flags
 if(WITH_CYCLES_NATIVE_ONLY)
-  set(CXX_HAS_SSE FALSE)
-  set(CXX_HAS_AVX FALSE)
+  set(CXX_HAS_SSE42 FALSE)
   set(CXX_HAS_AVX2 FALSE)
   add_definitions(
     -DWITH_KERNEL_NATIVE
@@ -42,9 +42,9 @@ if(WITH_CYCLES_NATIVE_ONLY)
       _has_march_native "-march=native"
     )
     if(_has_march_native)
-      set(CYCLES_KERNEL_FLAGS "-march=native")
+      string(APPEND CMAKE_CXX_FLAGS " -march=native")
     else()
-      set(CYCLES_KERNEL_FLAGS "")
+      string(APPEND CMAKE_CXX_FLAGS "")
     endif()
     unset(_has_march_native)
   else()
@@ -62,133 +62,131 @@ if(WITH_CYCLES_NATIVE_ONLY)
         set(MSVC_NATIVE_ARCH_FLAGS ${arch_run_output} CACHE STRING "MSVC Native architecture flags")
       endif()
     endif()
-    set(CYCLES_KERNEL_FLAGS "${MSVC_NATIVE_ARCH_FLAGS}")
+    string(APPEND CMAKE_CXX_FLAGS " ${MSVC_NATIVE_ARCH_FLAGS}")
   endif()
+elseif(WIN32 AND MSVC AND SUPPORT_NEON_BUILD AND SSE2NEON_FOUND)
+  set(CXX_HAS_SSE42 FALSE)
+  set(CXX_HAS_AVX2 FALSE)
 elseif(NOT WITH_CPU_SIMD OR (SUPPORT_NEON_BUILD AND SSE2NEON_FOUND))
-  set(CXX_HAS_SSE FALSE)
-  set(CXX_HAS_AVX FALSE)
+  set(CXX_HAS_SSE42 FALSE)
   set(CXX_HAS_AVX2 FALSE)
 elseif(WIN32 AND MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  set(CXX_HAS_SSE TRUE)
-  set(CXX_HAS_AVX TRUE)
+  set(CXX_HAS_SSE42 TRUE)
   set(CXX_HAS_AVX2 TRUE)
 
   # /arch:AVX for VC2012 and above
   if(NOT MSVC_VERSION LESS 1700)
-    set(CYCLES_AVX_ARCH_FLAGS "/arch:AVX")
-    set(CYCLES_AVX2_ARCH_FLAGS "/arch:AVX /arch:AVX2")
+    set(CYCLES_AVX2_FLAGS "/arch:AVX /arch:AVX2")
   elseif(NOT CMAKE_CL_64)
-    set(CYCLES_AVX_ARCH_FLAGS "/arch:SSE2")
-    set(CYCLES_AVX2_ARCH_FLAGS "/arch:SSE2")
-  endif()
-
-  # Unlike GCC/clang we still use fast math, because there is no fine
-  # grained control and the speedup we get here is too big to ignore.
-  set(CYCLES_KERNEL_FLAGS "/fp:fast -D_CRT_SECURE_NO_WARNINGS /GS-")
-
-  # "jumptablerdata" improves performance when there is contention in large switch statements such as in svm.h
-  # This flag is supported starting with MSVC 17.7 preview 3:
-  # https://learn.microsoft.com/en-us/cpp/build/reference/jump-table-rdata
-  if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 19.37.32820)
-    string(APPEND CYCLES_KERNEL_FLAGS " /jumptablerdata")
+    set(CYCLES_AVX2_FLAGS "/arch:SSE2")
   endif()
 
   # there is no /arch:SSE3, but intrinsics are available anyway
   if(CMAKE_CL_64)
-    set(CYCLES_SSE2_KERNEL_FLAGS "${CYCLES_KERNEL_FLAGS}")
-    set(CYCLES_SSE41_KERNEL_FLAGS "${CYCLES_KERNEL_FLAGS}")
-    set(CYCLES_AVX2_KERNEL_FLAGS "${CYCLES_AVX2_ARCH_FLAGS} ${CYCLES_KERNEL_FLAGS}")
+    set(CYCLES_SSE42_FLAGS "")
   else()
-    set(CYCLES_SSE2_KERNEL_FLAGS "/arch:SSE2 ${CYCLES_KERNEL_FLAGS}")
-    set(CYCLES_SSE41_KERNEL_FLAGS "/arch:SSE2 ${CYCLES_KERNEL_FLAGS}")
-    set(CYCLES_AVX2_KERNEL_FLAGS "${CYCLES_AVX2_ARCH_FLAGS} ${CYCLES_KERNEL_FLAGS}")
+    set(CYCLES_SSE42_FLAGS "/arch:SSE2")
   endif()
-
-  string(APPEND CMAKE_CXX_FLAGS " ${CYCLES_KERNEL_FLAGS}")
-  string(APPEND CMAKE_CXX_FLAGS_RELEASE " /Ox")
-  string(APPEND CMAKE_CXX_FLAGS_RELWITHDEBINFO " /Ox")
-  string(APPEND CMAKE_CXX_FLAGS_MINSIZEREL " /Ox")
 elseif(CMAKE_COMPILER_IS_GNUCC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
-  check_cxx_compiler_flag(-msse CXX_HAS_SSE)
-  check_cxx_compiler_flag(-mavx CXX_HAS_AVX)
+  check_cxx_compiler_flag(-msse4.2 CXX_HAS_SSE42)
   check_cxx_compiler_flag(-mavx2 CXX_HAS_AVX2)
 
-  # Assume no signal trapping for better code generation.
-  set(CYCLES_KERNEL_FLAGS "-fno-trapping-math")
-  # Avoid overhead of setting errno for NaNs.
-  string(APPEND CYCLES_KERNEL_FLAGS " -fno-math-errno")
-  # Let compiler optimize 0.0 - x without worrying about signed zeros.
-  string(APPEND CYCLES_KERNEL_FLAGS " -fno-signed-zeros")
-
-  if(CMAKE_COMPILER_IS_GNUCC)
-    # Assume no signal trapping for better code generation.
-    string(APPEND CYCLES_KERNEL_FLAGS " -fno-signaling-nans")
-    # Assume a fixed rounding mode for better constant folding.
-    string(APPEND CYCLES_KERNEL_FLAGS " -fno-rounding-math")
-  endif()
-
-  if(CXX_HAS_SSE)
-    if(CMAKE_COMPILER_IS_GNUCC)
-      string(APPEND CYCLES_KERNEL_FLAGS " -mfpmath=sse")
-    endif()
-
-    set(CYCLES_SSE2_KERNEL_FLAGS "${CYCLES_KERNEL_FLAGS} -msse -msse2")
-    set(CYCLES_SSE41_KERNEL_FLAGS "${CYCLES_SSE2_KERNEL_FLAGS} -msse3 -mssse3 -msse4.1")
+  if(CXX_HAS_SSE42)
+    set(CYCLES_SSE42_FLAGS "-msse -msse2 -msse3 -mssse3 -msse4.1 -msse4.2")
     if(CXX_HAS_AVX2)
-      set(CYCLES_AVX2_KERNEL_FLAGS "${CYCLES_SSE41_KERNEL_FLAGS} -mavx -mavx2 -mfma -mlzcnt -mbmi -mbmi2 -mf16c")
+      set(CYCLES_AVX2_FLAGS "${CYCLES_SSE42_FLAGS} -mavx -mavx2 -mfma -mlzcnt -mbmi -mbmi2 -mf16c")
     endif()
   endif()
 
-  string(APPEND CMAKE_CXX_FLAGS " ${CYCLES_KERNEL_FLAGS}")
-elseif(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Intel")
-  check_cxx_compiler_flag(/QxSSE2 CXX_HAS_SSE)
-  check_cxx_compiler_flag(/arch:AVX CXX_HAS_AVX)
+elseif(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
+  check_cxx_compiler_flag(/QxSSE4.2 CXX_HAS_SSE42)
   check_cxx_compiler_flag(/QxCORE-AVX2 CXX_HAS_AVX2)
 
-  if(CXX_HAS_SSE)
-    set(CYCLES_SSE2_KERNEL_FLAGS "/QxSSE2")
-    set(CYCLES_SSE41_KERNEL_FLAGS "/QxSSE4.1")
+  if(CXX_HAS_SSE42)
+    set(CYCLES_SSE42_FLAGS "/QxSSE4.2")
 
     if(CXX_HAS_AVX2)
-      set(CYCLES_AVX2_KERNEL_FLAGS "/QxCORE-AVX2")
+      set(CYCLES_AVX2_FLAGS "/QxCORE-AVX2")
     endif()
   endif()
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
-  if(APPLE)
-    # ICC does not support SSE2 flag on MacOSX
-    check_cxx_compiler_flag(-xssse3 CXX_HAS_SSE)
-  else()
-    check_cxx_compiler_flag(-xsse2 CXX_HAS_SSE)
-  endif()
-
-  check_cxx_compiler_flag(-xavx CXX_HAS_AVX)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
+  check_cxx_compiler_flag(-xsse4.2 CXX_HAS_SSE42)
   check_cxx_compiler_flag(-xcore-avx2 CXX_HAS_AVX2)
 
-  if(CXX_HAS_SSE)
-    if(APPLE)
-      # ICC does not support SSE2 flag on MacOSX
-      set(CYCLES_SSE2_KERNEL_FLAGS "-xssse3")
-    else()
-      set(CYCLES_SSE2_KERNEL_FLAGS "-xsse2")
-    endif()
-
-    set(CYCLES_SSE41_KERNEL_FLAGS "-xsse4.1")
+  if(CXX_HAS_SSE42)
+    set(CYCLES_SSE42_FLAGS "-xsse4.2")
 
     if(CXX_HAS_AVX2)
-      set(CYCLES_AVX2_KERNEL_FLAGS "-xcore-avx2")
+      set(CYCLES_AVX2_FLAGS "-xcore-avx2")
     endif()
   endif()
 endif()
 
-if(CXX_HAS_SSE)
+if(CXX_HAS_SSE42)
   add_definitions(
-    -DWITH_KERNEL_SSE2
-    -DWITH_KERNEL_SSE41
+    -DWITH_KERNEL_SSE42
   )
+  # We require SSE4.2 as a minimum, so make use of it
+  string(APPEND CMAKE_CXX_FLAGS " ${CYCLES_SSE42_FLAGS}")
 endif()
 
 if(CXX_HAS_AVX2)
   add_definitions(-DWITH_KERNEL_AVX2)
+endif()
+
+# Enable math optimizations
+
+if(WIN32 AND MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # Unlike GCC/clang we still use fast math, because there is no fine
+  # grained control and the speedup we get here is too big to ignore.
+  string(APPEND CMAKE_CXX_FLAGS " /fp:fast -D_CRT_SECURE_NO_WARNINGS /GS-")
+  string(APPEND CMAKE_CXX_FLAGS_RELEASE " /Ox")
+  string(APPEND CMAKE_CXX_FLAGS_RELWITHDEBINFO " /Ox")
+  string(APPEND CMAKE_CXX_FLAGS_MINSIZEREL " /Ox")
+
+  # `jumptablerdata` improves performance when there is contention in large switch statements
+  # such as in `svm.h`.
+  # This flag is supported starting with MSVC 17.7 preview 3:
+  # https://learn.microsoft.com/en-us/cpp/build/reference/jump-table-rdata
+  if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 19.37.32820)
+    string(APPEND CMAKE_CXX_FLAGS " /jumptablerdata")
+  endif()
+elseif(CMAKE_COMPILER_IS_GNUCC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
+  # Assume no signal trapping for better code generation.
+  list(APPEND CYCLES_MATH_FLAGS "-fno-trapping-math")
+  # Avoid overhead of setting `errno` for NaNs.
+  list(APPEND CYCLES_MATH_FLAGS "-fno-math-errno")
+  # Let compiler optimize 0.0 - x without worrying about signed zeros.
+  list(APPEND CYCLES_MATH_FLAGS "-fno-signed-zeros")
+  # Let the compiler generate fused multiply-add instructions
+  list(APPEND CYCLES_MATH_FLAGS "-ffp-contract=fast")
+  # Let the compiler replace x/y with x*(1/y)
+  list(APPEND CYCLES_MATH_FLAGS "-freciprocal-math")
+  # Let the compiler reorder terms to save operations
+  # NOTE: Disabled for now due to problems with bsdf_D for GGX on Linux (#130389)
+  # list(APPEND CYCLES_MATH_FLAGS "-fassociative-math")
+  # Don't enable `-ffinite-math-only` since the BVH code relies on NaNs.
+  # Otherwise, we could just use `-ffast-math`.
+
+  if(CMAKE_COMPILER_IS_GNUCC)
+    # Assume no signal trapping for better code generation.
+    list(APPEND CYCLES_MATH_FLAGS "-fno-signaling-nans")
+    # Assume a fixed rounding mode for better constant folding.
+    list(APPEND CYCLES_MATH_FLAGS "-fno-rounding-math")
+
+    if(CXX_HAS_SSE42)
+      list(APPEND CYCLES_MATH_FLAGS "-mfpmath=sse")
+    endif()
+  endif()
+
+  if(WIN32 AND MSVC)
+    # Pass clang flags directly to clang otherwise. Clang-cl doesn't recognize
+    # these flags by default
+    list(TRANSFORM CYCLES_MATH_FLAGS PREPEND "/clang:")
+  endif()
+
+  list(JOIN CYCLES_MATH_FLAGS " " CYCLES_MATH_FLAGS)
+  string(APPEND CMAKE_CXX_FLAGS " ${CYCLES_MATH_FLAGS}")
 endif()
 
 # Definitions and Includes
@@ -388,7 +386,7 @@ if(WITH_CYCLES_DEBUG_NAN)
   add_definitions(-DWITH_CYCLES_DEBUG_NAN)
 endif()
 
-if(NOT OPENIMAGEIO_PUGIXML_FOUND)
+if((NOT OPENIMAGEIO_PUGIXML_FOUND) OR WIN32)
   add_definitions(-DWITH_SYSTEM_PUGIXML)
 endif()
 
@@ -439,6 +437,8 @@ endif()
 if(WITH_CYCLES_BLENDER)
   # Not needed to make cycles automated tests pass with -march=native.
   # However Blender itself needs this flag.
+  # Note: the clang-cl style removal must go first, to avoid a dangling "/clang:"
+  remove_cc_flag("/clang:-ffp-contract=off")
   remove_cc_flag("-ffp-contract=off")
   add_definitions(-DWITH_BLENDER_GUARDEDALLOC)
   add_subdirectory(blender)
@@ -466,5 +466,9 @@ if(WITH_CYCLES_HYDRA_RENDER_DELEGATE OR (WITH_CYCLES_STANDALONE AND WITH_USD))
 endif()
 
 if(NOT WITH_BLENDER)
-  delayed_do_install(${CMAKE_BINARY_DIR}/bin)
+  if(CYCLES_STANDALONE_REPOSITORY)
+    delayed_do_install()
+  else()
+    delayed_do_install(${CMAKE_BINARY_DIR}/bin)
+  endif()
 endif()

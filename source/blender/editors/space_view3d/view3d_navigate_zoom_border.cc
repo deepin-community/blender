@@ -14,15 +14,13 @@
 #include "BLI_rect.h"
 
 #include "BKE_context.hh"
-#include "BKE_report.h"
-
-#include "DEG_depsgraph_query.hh"
+#include "BKE_report.hh"
 
 #include "WM_api.hh"
 
 #include "RNA_access.hh"
 
-#include "view3d_intern.h"
+#include "view3d_intern.hh"
 #include "view3d_navigate.hh" /* own include */
 
 /* -------------------------------------------------------------------- */
@@ -60,8 +58,13 @@ static int view3d_zoom_border_exec(bContext *C, wmOperator *op)
 
   ED_view3d_dist_range_get(v3d, dist_range);
 
-  ED_view3d_depth_override(
-      CTX_data_ensure_evaluated_depsgraph(C), region, v3d, nullptr, V3D_DEPTH_NO_GPENCIL, nullptr);
+  ED_view3d_depth_override(CTX_data_ensure_evaluated_depsgraph(C),
+                           region,
+                           v3d,
+                           nullptr,
+                           V3D_DEPTH_NO_GPENCIL,
+                           true,
+                           nullptr);
   {
     /* avoid allocating the whole depth buffer */
     ViewDepths depth_temp = {0};

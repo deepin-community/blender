@@ -7,12 +7,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "GPU_compute.h"
-#include "GPU_shader.h"
-#include "GPU_texture.h"
+#include "GPU_compute.hh"
+#include "GPU_shader.hh"
+#include "GPU_texture.hh"
 
 #include "COM_context.hh"
-#include "COM_utilities.hh"
 
 #include "COM_algorithm_parallel_reduction.hh"
 
@@ -88,7 +87,10 @@ float sum_red(Context &context, GPUTexture *texture)
   GPU_shader_bind(shader);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Float, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
   const float sum = *reduced_value;
   MEM_freeN(reduced_value);
   GPU_shader_unbind();
@@ -102,7 +104,10 @@ float sum_green(Context &context, GPUTexture *texture)
   GPU_shader_bind(shader);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Float, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
   const float sum = *reduced_value;
   MEM_freeN(reduced_value);
   GPU_shader_unbind();
@@ -116,7 +121,10 @@ float sum_blue(Context &context, GPUTexture *texture)
   GPU_shader_bind(shader);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Float, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
   const float sum = *reduced_value;
   MEM_freeN(reduced_value);
   GPU_shader_unbind();
@@ -132,7 +140,10 @@ float sum_luminance(Context &context, GPUTexture *texture, float3 luminance_coef
   GPU_shader_uniform_3fv(shader, "luminance_coefficients", luminance_coefficients);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Float, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
   const float sum = *reduced_value;
   MEM_freeN(reduced_value);
   GPU_shader_unbind();
@@ -148,7 +159,10 @@ float sum_log_luminance(Context &context, GPUTexture *texture, float3 luminance_
   GPU_shader_uniform_3fv(shader, "luminance_coefficients", luminance_coefficients);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Float, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
   const float sum = *reduced_value;
   MEM_freeN(reduced_value);
   GPU_shader_unbind();
@@ -162,7 +176,10 @@ float4 sum_color(Context &context, GPUTexture *texture)
   GPU_shader_bind(shader);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Color, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Color, ResultPrecision::Full));
   const float4 sum = float4(reduced_value);
   MEM_freeN(reduced_value);
   GPU_shader_unbind();
@@ -183,7 +200,10 @@ float sum_red_squared_difference(Context &context, GPUTexture *texture, float su
   GPU_shader_uniform_1f(shader, "subtrahend", subtrahend);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Float, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
   const float sum = *reduced_value;
   MEM_freeN(reduced_value);
   GPU_shader_unbind();
@@ -200,7 +220,10 @@ float sum_green_squared_difference(Context &context, GPUTexture *texture, float 
   GPU_shader_uniform_1f(shader, "subtrahend", subtrahend);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Float, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
   const float sum = *reduced_value;
   MEM_freeN(reduced_value);
   GPU_shader_unbind();
@@ -217,7 +240,10 @@ float sum_blue_squared_difference(Context &context, GPUTexture *texture, float s
   GPU_shader_uniform_1f(shader, "subtrahend", subtrahend);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Float, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
   const float sum = *reduced_value;
   MEM_freeN(reduced_value);
   GPU_shader_unbind();
@@ -238,7 +264,10 @@ float sum_luminance_squared_difference(Context &context,
   GPU_shader_uniform_1f(shader, "subtrahend", subtrahend);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Float, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
   const float sum = *reduced_value;
   MEM_freeN(reduced_value);
   GPU_shader_unbind();
@@ -258,7 +287,27 @@ float maximum_luminance(Context &context, GPUTexture *texture, float3 luminance_
   GPU_shader_uniform_3fv(shader, "luminance_coefficients", luminance_coefficients);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Float, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
+  const float maximum = *reduced_value;
+  MEM_freeN(reduced_value);
+  GPU_shader_unbind();
+
+  return maximum;
+}
+
+float maximum_float(Context &context, GPUTexture *texture)
+{
+  GPUShader *shader = context.get_shader("compositor_maximum_float", ResultPrecision::Full);
+  GPU_shader_bind(shader);
+
+  float *reduced_value = parallel_reduction_dispatch(
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
   const float maximum = *reduced_value;
   MEM_freeN(reduced_value);
   GPU_shader_unbind();
@@ -279,7 +328,10 @@ float maximum_float_in_range(Context &context,
   GPU_shader_uniform_1f(shader, "upper_bound", upper_bound);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Float, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
   const float maximum = *reduced_value;
   MEM_freeN(reduced_value);
   GPU_shader_unbind();
@@ -299,7 +351,27 @@ float minimum_luminance(Context &context, GPUTexture *texture, float3 luminance_
   GPU_shader_uniform_3fv(shader, "luminance_coefficients", luminance_coefficients);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Float, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
+  const float minimum = *reduced_value;
+  MEM_freeN(reduced_value);
+  GPU_shader_unbind();
+
+  return minimum;
+}
+
+float minimum_float(Context &context, GPUTexture *texture)
+{
+  GPUShader *shader = context.get_shader("compositor_minimum_float", ResultPrecision::Full);
+  GPU_shader_bind(shader);
+
+  float *reduced_value = parallel_reduction_dispatch(
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
   const float minimum = *reduced_value;
   MEM_freeN(reduced_value);
   GPU_shader_unbind();
@@ -320,7 +392,10 @@ float minimum_float_in_range(Context &context,
   GPU_shader_uniform_1f(shader, "upper_bound", upper_bound);
 
   float *reduced_value = parallel_reduction_dispatch(
-      context, texture, shader, Result::texture_format(ResultType::Float, ResultPrecision::Full));
+      context,
+      texture,
+      shader,
+      Result::gpu_texture_format(ResultType::Float, ResultPrecision::Full));
   const float minimum = *reduced_value;
   MEM_freeN(reduced_value);
   GPU_shader_unbind();

@@ -9,22 +9,23 @@
 #include <memory>
 
 #include "AS_asset_catalog_tree.hh"
-#include "AS_asset_identifier.hh"
 #include "AS_asset_library.hh"
 #include "AS_asset_representation.hh"
 
+#include "BKE_lib_remap.hh"
 #include "BKE_main.hh"
 #include "BKE_preferences.h"
 
 #include "BLI_fileops.h"
 #include "BLI_listbase.h"
-#include "BLI_path_util.h"
+#include "BLI_path_utils.hh"
 #include "BLI_string.h"
 
 #include "DNA_userdef_types.h"
 
+#include "asset_catalog_collection.hh"
+#include "asset_catalog_definition_file.hh"
 #include "asset_library_service.hh"
-#include "asset_storage.hh"
 #include "utils.hh"
 
 using namespace blender;
@@ -93,36 +94,11 @@ std::string AS_asset_library_find_suitable_root_path_from_main(const Main *bmain
   return AS_asset_library_find_suitable_root_path_from_path(bmain->filepath);
 }
 
-AssetCatalogService *AS_asset_library_get_catalog_service(const AssetLibrary *library)
-{
-  if (library == nullptr) {
-    return nullptr;
-  }
-  return library->catalog_service.get();
-}
-
-AssetCatalogTree *AS_asset_library_get_catalog_tree(const AssetLibrary *library)
-{
-  AssetCatalogService *catalog_service = AS_asset_library_get_catalog_service(library);
-  if (catalog_service == nullptr) {
-    return nullptr;
-  }
-
-  return catalog_service->get_catalog_tree();
-}
-
-void AS_asset_library_refresh_catalog_simplename(AssetLibrary *asset_library,
-                                                 AssetMetaData *asset_data)
-{
-  asset_library->refresh_catalog_simplename(asset_data);
-}
-
-void AS_asset_library_remap_ids(const IDRemapper *mappings)
+void AS_asset_library_remap_ids(const bke::id::IDRemapper &mappings)
 {
   AssetLibraryService *service = AssetLibraryService::get();
   service->foreach_loaded_asset_library(
-      [mappings](AssetLibrary &library) { library.remap_ids_and_remove_invalid(*mappings); },
-      true);
+      [mappings](AssetLibrary &library) { library.remap_ids_and_remove_invalid(mappings); }, true);
 }
 
 void AS_asset_full_path_explode_from_weak_ref(const AssetWeakReference *asset_reference,
@@ -190,15 +166,14 @@ AssetLibrary::AssetLibrary(eAssetLibraryType library_type, StringRef name, Strin
     : library_type_(library_type),
       name_(name),
       root_path_(std::make_shared<std::string>(utils::normalize_directory_path(root_path))),
-      asset_storage_(std::make_unique<AssetStorage>()),
-      catalog_service(std::make_unique<AssetCatalogService>())
+      catalog_service_(std::make_unique<AssetCatalogService>())
 {
 }
 
 AssetLibrary::~AssetLibrary()
 {
   if (on_save_callback_store_.func) {
-    on_blend_save_handler_unregister();
+    this->on_blend_save_handler_unregister();
   }
 }
 
@@ -213,45 +188,72 @@ void AssetLibrary::load_catalogs()
 {
   auto catalog_service = std::make_unique<AssetCatalogService>(root_path());
   catalog_service->load_from_disk();
-  this->catalog_service = std::move(catalog_service);
+  std::lock_guard lock{catalog_service_mutex_};
+  catalog_service_ = std::move(catalog_service);
+}
+
+AssetCatalogService &AssetLibrary::catalog_service() const
+{
+  return *catalog_service_;
 }
 
 void AssetLibrary::refresh_catalogs() {}
 
-AssetRepresentation &AssetLibrary::add_external_asset(StringRef relative_asset_path,
-                                                      StringRef name,
-                                                      const int id_type,
-                                                      std::unique_ptr<AssetMetaData> metadata)
+std::weak_ptr<AssetRepresentation> AssetLibrary::add_external_asset(
+    StringRef relative_asset_path,
+    StringRef name,
+    const int id_type,
+    std::unique_ptr<AssetMetaData> metadata)
 {
-  AssetIdentifier identifier = asset_identifier_from_library(relative_asset_path);
-  return asset_storage_->add_external_asset(
-      std::move(identifier), name, id_type, std::move(metadata), *this);
+  return asset_storage_.external_assets.lookup_key_or_add(std::make_shared<AssetRepresentation>(
+      relative_asset_path, name, id_type, std::move(metadata), *this));
 }
 
-AssetRepresentation &AssetLibrary::add_local_id_asset(StringRef relative_asset_path, ID &id)
+std::weak_ptr<AssetRepresentation> AssetLibrary::add_local_id_asset(StringRef relative_asset_path,
+                                                                    ID &id)
 {
-  AssetIdentifier identifier = asset_identifier_from_library(relative_asset_path);
-  return asset_storage_->add_local_id_asset(std::move(identifier), id, *this);
+  return asset_storage_.local_id_assets.lookup_key_or_add(
+      std::make_shared<AssetRepresentation>(relative_asset_path, id, *this));
 }
 
 bool AssetLibrary::remove_asset(AssetRepresentation &asset)
 {
-  return asset_storage_->remove_asset(asset);
+  if (asset_storage_.local_id_assets.remove_as(&asset)) {
+    return true;
+  }
+  return asset_storage_.external_assets.remove_as(&asset);
 }
 
-void AssetLibrary::remap_ids_and_remove_invalid(const IDRemapper &mappings)
+void AssetLibrary::remap_ids_and_remove_invalid(const bke::id::IDRemapper &mappings)
 {
-  asset_storage_->remap_ids_and_remove_invalid(mappings);
+  Set<AssetRepresentation *> removed_assets;
+
+  for (auto &asset_ptr : asset_storage_.local_id_assets) {
+    AssetRepresentation &asset = *asset_ptr;
+    BLI_assert(asset.is_local_id());
+
+    const IDRemapperApplyResult result = mappings.apply(&std::get<ID *>(asset.asset_),
+                                                        ID_REMAP_APPLY_DEFAULT);
+
+    /* Entirely remove assets whose ID is unset. We don't want assets with a null ID pointer. */
+    if (result == ID_REMAP_RESULT_SOURCE_UNASSIGNED) {
+      removed_assets.add(&asset);
+    }
+  }
+
+  for (AssetRepresentation *asset : removed_assets) {
+    this->remove_asset(*asset);
+  }
 }
 
 namespace {
-void asset_library_on_save_post(Main *main,
+void asset_library_on_save_post(Main *bmain,
                                 PointerRNA **pointers,
                                 const int num_pointers,
                                 void *arg)
 {
   AssetLibrary *asset_lib = static_cast<AssetLibrary *>(arg);
-  asset_lib->on_blend_save_post(main, pointers, num_pointers);
+  asset_lib->on_blend_save_post(bmain, pointers, num_pointers);
 }
 
 }  // namespace
@@ -274,22 +276,13 @@ void AssetLibrary::on_blend_save_handler_unregister()
   on_save_callback_store_.arg = nullptr;
 }
 
-void AssetLibrary::on_blend_save_post(Main *main,
+void AssetLibrary::on_blend_save_post(Main *bmain,
                                       PointerRNA ** /*pointers*/,
                                       const int /*num_pointers*/)
 {
-  if (this->catalog_service == nullptr) {
-    return;
-  }
-
   if (save_catalogs_when_file_is_saved) {
-    this->catalog_service->write_to_disk(main->filepath);
+    this->catalog_service().write_to_disk(bmain->filepath);
   }
-}
-
-AssetIdentifier AssetLibrary::asset_identifier_from_library(StringRef relative_asset_path)
-{
-  return AssetIdentifier(root_path_, relative_asset_path);
 }
 
 std::string AssetLibrary::resolve_asset_weak_reference_to_full_path(
@@ -305,7 +298,7 @@ void AssetLibrary::refresh_catalog_simplename(AssetMetaData *asset_data)
     asset_data->catalog_simple_name[0] = '\0';
     return;
   }
-  const AssetCatalog *catalog = this->catalog_service->find_catalog(asset_data->catalog_id);
+  const AssetCatalog *catalog = this->catalog_service().find_catalog(asset_data->catalog_id);
   if (catalog == nullptr) {
     /* No-op if the catalog cannot be found. This could be the kind of "the catalog definition file
      * is corrupt/lost" scenario that the simple name is meant to help recover from. */
@@ -362,6 +355,12 @@ AssetLibraryReference all_library_reference()
   all_library_ref.custom_library_index = -1;
   all_library_ref.type = ASSET_LIBRARY_ALL;
   return all_library_ref;
+}
+
+void all_library_reload_catalogs_if_dirty()
+{
+  AssetLibraryService *service = AssetLibraryService::get();
+  service->reload_all_library_catalogs_if_dirty();
 }
 
 }  // namespace blender::asset_system

@@ -6,13 +6,13 @@
  * \ingroup draw
  */
 
-#include "BKE_global.h"
-#include "GPU_compute.h"
+#include "BKE_global.hh"
+#include "GPU_compute.hh"
 
 #include "draw_debug.hh"
-#include "draw_defines.h"
-#include "draw_manager.h"
+#include "draw_defines.hh"
 #include "draw_manager.hh"
+#include "draw_manager_c.hh"
 #include "draw_pass.hh"
 #include "draw_shader.hh"
 
@@ -47,7 +47,9 @@ void Manager::begin_sync()
   acquired_textures.clear();
   layer_attributes.clear();
 
-#ifndef NDEBUG
+/* For some reason, if this uninitialized data pattern was enabled (ie release asserts enabled),
+ * The viewport just gives up rendering objects on ARM64 devices. Possibly Mesa GLOn12-related. */
+#if !defined(NDEBUG) && !defined(_M_ARM64)
   /* Detect uninitialized data. */
   memset(matrix_buf.current().data(),
          0xF0,
@@ -183,7 +185,8 @@ void Manager::submit(PassMain &pass, View &view)
   bool freeze_culling = (U.experimental.use_viewport_debug && DST.draw_ctx.v3d &&
                          (DST.draw_ctx.v3d->debug_flag & V3D_DEBUG_FREEZE_CULLING) != 0);
 
-  view.compute_visibility(bounds_buf.current(), resource_len_, freeze_culling);
+  view.compute_visibility(
+      bounds_buf.current(), infos_buf.current(), resource_len_, freeze_culling);
 
   command::RecordingState state;
   state.inverted_view = view.is_inverted();

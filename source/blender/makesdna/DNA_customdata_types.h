@@ -14,16 +14,6 @@
 
 #include "BLI_implicit_sharing.h"
 
-/** Workaround to forward-declare C++ type in C header. */
-#ifdef __cplusplus
-namespace blender::bke {
-class AnonymousAttributeID;
-}  // namespace blender::bke
-using AnonymousAttributeIDHandle = blender::bke::AnonymousAttributeID;
-#else
-typedef struct AnonymousAttributeIDHandle AnonymousAttributeIDHandle;
-#endif
-
 /** Descriptor and storage for a custom data layer. */
 typedef struct CustomDataLayer {
   /** Type of data in layer. */
@@ -47,11 +37,6 @@ typedef struct CustomDataLayer {
   char _pad1[4];
   /** Layer data. */
   void *data;
-  /**
-   * Run-time identifier for this layer. Can be used to retrieve information about where this
-   * attribute was created.
-   */
-  const AnonymousAttributeIDHandle *anonymous_id;
   /**
    * Run-time data that allows sharing `data` with other entities (mostly custom data layers on
    * other geometries).
@@ -138,7 +123,7 @@ typedef enum eCustomDataType {
   CD_PROP_BYTE_COLOR = 17,
   CD_TANGENT = 18,
   CD_MDISPS = 19,
-  /* CD_PREVIEW_MCOL = 20, */ /* UNUSED */
+  CD_PROP_FLOAT4X4 = 20,
   /* CD_ID_MCOL = 21, */
   /* CD_TEXTURE_MLOOPCOL = 22, */ /* UNUSED */
   CD_CLOTH_ORCO = 23,
@@ -230,6 +215,7 @@ using eCustomDataMask = uint64_t;
 #define CD_MASK_PROP_INT8 (1ULL << CD_PROP_INT8)
 #define CD_MASK_PROP_INT32_2D (1ULL << CD_PROP_INT32_2D)
 #define CD_MASK_PROP_QUATERNION (1ULL << CD_PROP_QUATERNION)
+#define CD_MASK_PROP_FLOAT4X4 (1ULL << CD_PROP_FLOAT4X4)
 
 /** Multi-resolution loop data. */
 #define CD_MASK_MULTIRES_GRIDS (CD_MASK_MDISPS | CD_GRID_PAINT_MASK)
@@ -241,7 +227,7 @@ using eCustomDataMask = uint64_t;
 #define CD_MASK_PROP_ALL \
   (CD_MASK_PROP_FLOAT | CD_MASK_PROP_FLOAT2 | CD_MASK_PROP_FLOAT3 | CD_MASK_PROP_INT32 | \
    CD_MASK_PROP_COLOR | CD_MASK_PROP_STRING | CD_MASK_PROP_BYTE_COLOR | CD_MASK_PROP_BOOL | \
-   CD_MASK_PROP_INT8 | CD_MASK_PROP_INT32_2D | CD_MASK_PROP_QUATERNION)
+   CD_MASK_PROP_INT8 | CD_MASK_PROP_INT32_2D | CD_MASK_PROP_QUATERNION | CD_MASK_PROP_FLOAT4X4)
 
 /* All color attributes */
 #define CD_MASK_COLOR_ALL (CD_MASK_PROP_COLOR | CD_MASK_PROP_BYTE_COLOR)

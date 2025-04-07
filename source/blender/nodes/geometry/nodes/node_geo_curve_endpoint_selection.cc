@@ -6,7 +6,6 @@
 
 #include "BKE_curves.hh"
 
-#include "UI_interface.hh"
 #include "UI_resources.hh"
 
 #include "node_geometry_util.hh"
@@ -30,32 +29,36 @@ static void node_declare(NodeDeclarationBuilder &b)
       .description("The selection from the start and end of the splines based on the input sizes");
 }
 
-class EndpointFieldInput final : public bke::CurvesFieldInput {
+class EndpointFieldInput final : public bke::GeometryFieldInput {
   Field<int> start_size_;
   Field<int> end_size_;
 
  public:
   EndpointFieldInput(Field<int> start_size, Field<int> end_size)
-      : bke::CurvesFieldInput(CPPType::get<bool>(), "Endpoint Selection node"),
+      : bke::GeometryFieldInput(CPPType::get<bool>(), "Endpoint Selection node"),
         start_size_(start_size),
         end_size_(end_size)
   {
     category_ = Category::Generated;
   }
 
-  GVArray get_varray_for_context(const bke::CurvesGeometry &curves,
-                                 const AttrDomain domain,
+  GVArray get_varray_for_context(const bke::GeometryFieldContext &context,
                                  const IndexMask & /*mask*/) const final
   {
-    if (domain != AttrDomain::Point) {
+    if (context.domain() != AttrDomain::Point) {
       return {};
     }
+    const bke::CurvesGeometry *curves_ptr = context.curves_or_strokes();
+    if (!curves_ptr) {
+      return {};
+    }
+    const bke::CurvesGeometry &curves = *curves_ptr;
     if (curves.points_num() == 0) {
       return {};
     }
 
-    const bke::CurvesFieldContext size_context{curves, AttrDomain::Curve};
-    fn::FieldEvaluator evaluator{size_context, curves.curves_num()};
+    const bke::GeometryFieldContext sub_context{context, AttrDomain::Curve};
+    fn::FieldEvaluator evaluator{sub_context, curves.curves_num()};
     evaluator.add(start_size_);
     evaluator.add(end_size_);
     evaluator.evaluate();
@@ -65,7 +68,7 @@ class EndpointFieldInput final : public bke::CurvesFieldInput {
     Array<bool> selection(curves.points_num(), false);
     MutableSpan<bool> selection_span = selection.as_mutable_span();
     const OffsetIndices points_by_curve = curves.points_by_curve();
-    devirtualize_varray2(start_size, end_size, [&](const auto &start_size, const auto &end_size) {
+    devirtualize_varray2(start_size, end_size, [&](const auto start_size, const auto end_size) {
       threading::parallel_for(curves.curves_range(), 1024, [&](IndexRange curves_range) {
         for (const int i : curves_range) {
           const IndexRange points = points_by_curve[i];
@@ -81,18 +84,18 @@ class EndpointFieldInput final : public bke::CurvesFieldInput {
     return VArray<bool>::ForContainer(std::move(selection));
   };
 
-  void for_each_field_input_recursive(FunctionRef<void(const FieldInput &)> fn) const override
+  void for_each_field_input_recursive(FunctionRef<void(const FieldInput &)> fn) const final
   {
     start_size_.node().for_each_field_input_recursive(fn);
     end_size_.node().for_each_field_input_recursive(fn);
   }
 
-  uint64_t hash() const override
+  uint64_t hash() const final
   {
     return get_default_hash(start_size_, end_size_);
   }
 
-  bool is_equal_to(const fn::FieldNode &other) const override
+  bool is_equal_to(const fn::FieldNode &other) const final
   {
     if (const EndpointFieldInput *other_endpoint = dynamic_cast<const EndpointFieldInput *>(
             &other))
@@ -102,7 +105,7 @@ class EndpointFieldInput final : public bke::CurvesFieldInput {
     return false;
   }
 
-  std::optional<AttrDomain> preferred_domain(const CurvesGeometry & /*curves*/) const
+  std::optional<AttrDomain> preferred_domain(const GeometryComponent & /*component*/) const final
   {
     return AttrDomain::Point;
   }
@@ -118,14 +121,14 @@ static void node_geo_exec(GeoNodeExecParams params)
 
 static void node_register()
 {
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
 
   geo_node_type_base(
       &ntype, GEO_NODE_CURVE_ENDPOINT_SELECTION, "Endpoint Selection", NODE_CLASS_INPUT);
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
 
-  nodeRegisterType(&ntype);
+  blender::bke::node_register_type(&ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

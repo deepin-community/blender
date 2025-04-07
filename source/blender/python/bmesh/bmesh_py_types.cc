@@ -18,7 +18,7 @@
 #include "DNA_object_types.h"
 
 #include "BKE_customdata.hh"
-#include "BKE_global.h"
+#include "BKE_global.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_mesh.hh"
 #include "BKE_mesh_runtime.hh"
@@ -31,15 +31,15 @@
 
 #include <Python.h>
 
-#include "../mathutils/mathutils.h"
+#include "../mathutils/mathutils.hh"
 
-#include "../generic/py_capi_utils.h"
-#include "../generic/python_utildefines.h"
+#include "../generic/py_capi_utils.hh"
+#include "../generic/python_utildefines.hh"
 
-#include "bmesh_py_types.h" /* own include */
-#include "bmesh_py_types_customdata.h"
-#include "bmesh_py_types_meshdata.h"
-#include "bmesh_py_types_select.h"
+#include "bmesh_py_types.hh" /* own include */
+#include "bmesh_py_types_customdata.hh"
+#include "bmesh_py_types_meshdata.hh"
+#include "bmesh_py_types_select.hh"
 
 static void bm_dealloc_editmode_warn(BPy_BMesh *self);
 
@@ -94,31 +94,31 @@ PyDoc_STRVAR(
     bpy_bm_elem_select_doc,
     "Selected state of this element.\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 PyDoc_STRVAR(
     /* Wrap. */
     bpy_bm_elem_hide_doc,
     "Hidden state of this element.\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 PyDoc_STRVAR(
     /* Wrap. */
     bpy_bm_elem_tag_doc,
     "Generic attribute scripts can use for own logic\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 PyDoc_STRVAR(
     /* Wrap. */
     bpy_bm_elem_smooth_doc,
     "Smooth state of this element.\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 PyDoc_STRVAR(
     /* Wrap. */
     bpy_bm_elem_seam_doc,
     "Seam for UV unwrapping.\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 
 static PyObject *bpy_bm_elem_hflag_get(BPy_BMElem *self, void *flag)
 {
@@ -314,7 +314,7 @@ PyDoc_STRVAR(
     bpy_bm_is_valid_doc,
     "True when this element is valid (hasn't been removed).\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 static PyObject *bpy_bm_is_valid_get(BPy_BMGeneric *self, void * /*closure*/)
 {
   return PyBool_FromLong(BPY_BM_IS_VALID(self));
@@ -323,7 +323,7 @@ static PyObject *bpy_bm_is_valid_get(BPy_BMGeneric *self, void * /*closure*/)
 PyDoc_STRVAR(bpy_bmesh_is_wrapped_doc,
              "True when this mesh is owned by blender (typically the editmode BMesh).\n"
              "\n"
-             ":type: boolean");
+             ":type: bool");
 static PyObject *bpy_bmesh_is_wrapped_get(BPy_BMesh *self, void * /*closure*/)
 {
   BPY_BM_CHECK_OBJ(self);
@@ -437,7 +437,7 @@ PyDoc_STRVAR(
     bpy_bmvert_is_manifold_doc,
     "True when this vertex is manifold (read-only).\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 static PyObject *bpy_bmvert_is_manifold_get(BPy_BMVert *self, void * /*closure*/)
 {
   BPY_BM_CHECK_OBJ(self);
@@ -449,7 +449,7 @@ PyDoc_STRVAR(
     bpy_bmvert_is_wire_doc,
     "True when this vertex is not connected to any faces (read-only).\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 static PyObject *bpy_bmvert_is_wire_get(BPy_BMVert *self, void * /*closure*/)
 {
   BPY_BM_CHECK_OBJ(self);
@@ -459,7 +459,7 @@ static PyObject *bpy_bmvert_is_wire_get(BPy_BMVert *self, void * /*closure*/)
 PyDoc_STRVAR(bpy_bmvert_is_boundary_doc,
              "True when this vertex is connected to boundary edges (read-only).\n"
              "\n"
-             ":type: boolean");
+             ":type: bool");
 static PyObject *bpy_bmvert_is_boundary_get(BPy_BMVert *self, void * /*closure*/)
 {
   BPY_BM_CHECK_OBJ(self);
@@ -474,7 +474,7 @@ PyDoc_STRVAR(
     bpy_bmedge_is_manifold_doc,
     "True when this edge is manifold (read-only).\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 static PyObject *bpy_bmedge_is_manifold_get(BPy_BMEdge *self, void * /*closure*/)
 {
   BPY_BM_CHECK_OBJ(self);
@@ -487,7 +487,7 @@ PyDoc_STRVAR(
     "True when this edge is manifold, between two faces with the same winding "
     "(read-only).\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 static PyObject *bpy_bmedge_is_contiguous_get(BPy_BMEdge *self, void * /*closure*/)
 {
   BPY_BM_CHECK_OBJ(self);
@@ -499,7 +499,7 @@ PyDoc_STRVAR(
     bpy_bmedge_is_convex_doc,
     "True when this edge joins two convex faces, depends on a valid face normal (read-only).\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 static PyObject *bpy_bmedge_is_convex_get(BPy_BMEdge *self, void * /*closure*/)
 {
   BPY_BM_CHECK_OBJ(self);
@@ -511,7 +511,7 @@ PyDoc_STRVAR(
     bpy_bmedge_is_wire_doc,
     "True when this edge is not connected to any faces (read-only).\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 static PyObject *bpy_bmedge_is_wire_get(BPy_BMEdge *self, void * /*closure*/)
 {
   BPY_BM_CHECK_OBJ(self);
@@ -523,7 +523,7 @@ PyDoc_STRVAR(
     bpy_bmedge_is_boundary_doc,
     "True when this edge is at the boundary of a face (read-only).\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 static PyObject *bpy_bmedge_is_boundary_get(BPy_BMEdge *self, void * /*closure*/)
 {
   BPY_BM_CHECK_OBJ(self);
@@ -678,7 +678,7 @@ PyDoc_STRVAR(
     "True when this loop is at the convex corner of a face, depends on a valid face "
     "normal (read-only).\n"
     "\n"
-    ":type: boolean");
+    ":type: bool");
 static PyObject *bpy_bmloop_is_convex_get(BPy_BMLoop *self, void * /*closure*/)
 {
   BPY_BM_CHECK_OBJ(self);
@@ -1211,7 +1211,7 @@ static PyObject *bpy_bmesh_to_mesh(BPy_BMesh *self, PyObject *args)
   }
 
   /* we could allow this but its almost certainly _not_ what script authors want */
-  if (mesh->edit_mesh) {
+  if (mesh->runtime->edit_mesh) {
     PyErr_Format(PyExc_ValueError, "to_mesh(): Mesh '%s' is in editmode", mesh->id.name + 2);
     return nullptr;
   }
@@ -1221,7 +1221,7 @@ static PyObject *bpy_bmesh_to_mesh(BPy_BMesh *self, PyObject *args)
   Main *bmain = nullptr;
   BMeshToMeshParams params{};
   params.update_shapekey_indices = true;
-  if (mesh->id.tag & LIB_TAG_NO_MAIN) {
+  if (mesh->id.tag & ID_TAG_NO_MAIN) {
     /* Mesh might be coming from a self-contained source like object.to_mesh(). No need to remap
      * anything in this case. */
   }
@@ -1233,8 +1233,8 @@ static PyObject *bpy_bmesh_to_mesh(BPy_BMesh *self, PyObject *args)
 
   BM_mesh_bm_to_me(bmain, bm, mesh, &params);
 
-  /* we could have the user do this but if they forget blender can easy crash
-   * since the references arrays for the objects derived meshes are now invalid */
+  /* We could have the user do this but if they forget blender can easy crash
+   * since the references arrays for the objects evaluated meshes are now invalid. */
   DEG_id_tag_update(&mesh->id, ID_RECALC_GEOMETRY_ALL_MODES);
 
   Py_RETURN_NONE;
@@ -1251,12 +1251,13 @@ PyDoc_STRVAR(
     "\n"
     "   :arg object: The object data to load.\n"
     "   :type object: :class:`Object`\n"
+    "   :type depsgraph: :class:`Depsgraph`\n"
     "   :arg cage: Get the mesh as a deformed cage.\n"
-    "   :type cage: boolean\n"
+    "   :type cage: bool\n"
     "   :arg face_normals: Calculate face normals.\n"
-    "   :type face_normals: boolean\n"
+    "   :type face_normals: bool\n"
     "   :arg vertex_normals: Calculate vertex normals.\n"
-    "   :type vertex_normals: boolean\n");
+    "   :type vertex_normals: bool\n");
 static PyObject *bpy_bmesh_from_object(BPy_BMesh *self, PyObject *args, PyObject *kw)
 {
   static const char *kwlist[] = {
@@ -1266,7 +1267,7 @@ static PyObject *bpy_bmesh_from_object(BPy_BMesh *self, PyObject *args, PyObject
   Object *ob, *ob_eval;
   Depsgraph *depsgraph;
   Scene *scene_eval;
-  const Mesh *me_eval;
+  const Mesh *mesh_eval;
   BMesh *bm;
   bool use_cage = false;
   bool use_fnorm = true;
@@ -1313,19 +1314,19 @@ static PyObject *bpy_bmesh_from_object(BPy_BMesh *self, PyObject *args, PyObject
       return nullptr;
     }
 
-    me_eval = BKE_mesh_new_from_object(depsgraph, ob_eval, true, false);
+    mesh_eval = BKE_mesh_new_from_object(depsgraph, ob_eval, true, false);
     need_free = true;
   }
   else {
     if (use_cage) {
-      me_eval = mesh_get_eval_deform(depsgraph, scene_eval, ob_eval, &data_masks);
+      mesh_eval = blender::bke::mesh_get_eval_deform(depsgraph, scene_eval, ob_eval, &data_masks);
     }
     else {
-      me_eval = BKE_object_get_evaluated_mesh(ob_eval);
+      mesh_eval = BKE_object_get_evaluated_mesh(ob_eval);
     }
   }
 
-  if (me_eval == nullptr) {
+  if (mesh_eval == nullptr) {
     PyErr_Format(PyExc_ValueError,
                  "from_object(...): Object '%s' has no usable mesh data",
                  ob->id.name + 2);
@@ -1337,10 +1338,10 @@ static PyObject *bpy_bmesh_from_object(BPy_BMesh *self, PyObject *args, PyObject
   BMeshFromMeshParams params{};
   params.calc_face_normal = use_fnorm;
   params.calc_vert_normal = use_vert_normal;
-  BM_mesh_bm_from_me(bm, me_eval, &params);
+  BM_mesh_bm_from_me(bm, mesh_eval, &params);
 
   if (need_free) {
-    BKE_id_free(nullptr, (Mesh *)me_eval);
+    BKE_id_free(nullptr, (Mesh *)mesh_eval);
   }
 
   Py_RETURN_NONE;
@@ -1356,8 +1357,10 @@ PyDoc_STRVAR(
     "\n"
     "   :arg mesh: The mesh data to load.\n"
     "   :type mesh: :class:`Mesh`\n"
+    "   :type face_normals: bool\n"
+    "   :type vertex_normals: bool\n"
     "   :arg use_shape_key: Use the locations from a shape key.\n"
-    "   :type use_shape_key: boolean\n"
+    "   :type use_shape_key: bool\n"
     "   :arg shape_key_index: The shape key index to use.\n"
     "   :type shape_key_index: int\n"
     "\n"
@@ -1434,7 +1437,7 @@ PyDoc_STRVAR(
     "   Flush selection, independent of the current selection mode.\n"
     "\n"
     "   :arg select: flush selection or de-selected elements.\n"
-    "   :type select: boolean\n");
+    "   :type select: bool\n");
 static PyObject *bpy_bmesh_select_flush(BPy_BMesh *self, PyObject *value)
 {
   int param;
@@ -1482,11 +1485,11 @@ PyDoc_STRVAR(
     "\n"
     "   Transform the mesh (optionally filtering flagged data only).\n"
     "\n"
-    "   :arg matrix: transform matrix.\n"
-    "   :type matrix: 4x4 :class:`mathutils.Matrix`\n"
+    "   :arg matrix: 4x4x transform matrix.\n"
+    "   :type matrix: :class:`mathutils.Matrix`\n"
     "   :arg filter: set of values in " BPY_BM_HFLAG_ALL_STR
     ".\n"
-    "   :type filter: set\n");
+    "   :type filter: set[str]\n");
 static PyObject *bpy_bmesh_transform(BPy_BMElem *self, PyObject *args, PyObject *kw)
 {
   static const char *kwlist[] = {"matrix", "filter", nullptr};
@@ -1575,13 +1578,12 @@ PyDoc_STRVAR(
     "   Calculate triangle tessellation from quads/ngons.\n"
     "\n"
     "   :return: The triangulated faces.\n"
-    "   :rtype: list of :class:`BMLoop` tuples\n");
+    "   :rtype: list[tuple[:class:`BMLoop`, :class:`BMLoop`, :class:`BMLoop`]]\n");
 static PyObject *bpy_bmesh_calc_loop_triangles(BPy_BMElem *self)
 {
   BMesh *bm;
 
   int corner_tris_tot;
-  BMLoop *(*corner_tris)[3];
 
   PyObject *ret;
   int i;
@@ -1591,16 +1593,13 @@ static PyObject *bpy_bmesh_calc_loop_triangles(BPy_BMElem *self)
   bm = self->bm;
 
   corner_tris_tot = poly_to_tri_count(bm->totface, bm->totloop);
-  corner_tris = static_cast<BMLoop *(*)[3]>(PyMem_MALLOC(sizeof(*corner_tris) * corner_tris_tot));
-
+  blender::Array<std::array<BMLoop *, 3>> corner_tris(corner_tris_tot);
   BM_mesh_calc_tessellation(bm, corner_tris);
 
   ret = PyList_New(corner_tris_tot);
   for (i = 0; i < corner_tris_tot; i++) {
-    PyList_SET_ITEM(ret, i, BPy_BMLoop_Array_As_Tuple(bm, corner_tris[i], 3));
+    PyList_SET_ITEM(ret, i, BPy_BMLoop_Array_As_Tuple(bm, corner_tris[i].data(), 3));
   }
-
-  PyMem_FREE(corner_tris);
 
   return ret;
 }
@@ -1618,7 +1617,7 @@ PyDoc_STRVAR(
     "state of associated geometry.\n"
     "\n"
     "   :arg select: Select or de-select.\n"
-    "   :type select: boolean\n"
+    "   :type select: bool\n"
     "\n"
     "   .. note::\n"
     "\n"
@@ -1651,7 +1650,7 @@ PyDoc_STRVAR(
     "hide state of associated geometry.\n"
     "\n"
     "   :arg hide: Hidden or visible.\n"
-    "   :type hide: boolean\n");
+    "   :type hide: bool\n");
 static PyObject *bpy_bm_elem_hide_set(BPy_BMElem *self, PyObject *value)
 {
   int param;
@@ -1739,8 +1738,9 @@ PyDoc_STRVAR(
     "\n"
     "   Interpolate the customdata from a vert between 2 other verts.\n"
     "\n"
-    "   :arg vert_pair: The vert to interpolate data from.\n"
-    "   :type vert_pair: :class:`BMVert`\n");
+    "   :arg vert_pair: The verts between which to interpolate data from.\n"
+    "   :type vert_pair: Sequence[:class:`BMVert`]\n"
+    "   :type fac: float\n");
 static PyObject *bpy_bmvert_copy_from_vert_interp(BPy_BMVert *self, PyObject *args)
 {
   PyObject *vert_seq;
@@ -1815,7 +1815,7 @@ PyDoc_STRVAR(
     "\n"
     "   :arg fallback: return this when the vert doesn't have 2 edges\n"
     "      (instead of raising a :exc:`ValueError`).\n"
-    "   :type fallback: any\n"
+    "   :type fallback: Any\n"
     "   :return: Angle between edges in radians.\n"
     "   :rtype: float\n");
 static PyObject *bpy_bmvert_calc_edge_angle(BPy_BMVert *self, PyObject *args)
@@ -1908,7 +1908,7 @@ PyDoc_STRVAR(
     "\n"
     "   :arg fallback: return this when the edge doesn't have 2 faces\n"
     "      (instead of raising a :exc:`ValueError`).\n"
-    "   :type fallback: any\n"
+    "   :type fallback: Any\n"
     "   :return: The angle between 2 connected faces in radians.\n"
     "   :rtype: float\n");
 static PyObject *bpy_bmedge_calc_face_angle(BPy_BMEdge *self, PyObject *args)
@@ -1948,7 +1948,7 @@ PyDoc_STRVAR(
     "\n"
     "   :arg fallback: return this when the edge doesn't have 2 faces\n"
     "      (instead of raising a :exc:`ValueError`).\n"
-    "   :type fallback: any\n"
+    "   :type fallback: Any\n"
     "   :return: The angle between 2 connected faces in radians (negative for concave join).\n"
     "   :rtype: float\n");
 static PyObject *bpy_bmedge_calc_face_angle_signed(BPy_BMEdge *self, PyObject *args)
@@ -2019,7 +2019,7 @@ PyDoc_STRVAR(
     "   :arg vert: a vert in this edge.\n"
     "   :type vert: :class:`BMVert`\n"
     "   :return: The edges other vert.\n"
-    "   :rtype: :class:`BMVert` or None\n");
+    "   :rtype: :class:`BMVert` | None\n");
 static PyObject *bpy_bmedge_other_vert(BPy_BMEdge *self, BPy_BMVert *value)
 {
   BMVert *other;
@@ -2076,7 +2076,7 @@ PyDoc_STRVAR(
     "   :arg face: The face to interpolate data from.\n"
     "   :type face: :class:`BMFace`\n"
     "   :arg vert: When True, also copy vertex data.\n"
-    "   :type vert: boolean\n");
+    "   :type vert: bool\n");
 static PyObject *bpy_bmface_copy_from_face_interp(BPy_BMFace *self, PyObject *args)
 {
   BPy_BMFace *py_face = nullptr;
@@ -2111,9 +2111,9 @@ PyDoc_STRVAR(
     "   Make a copy of this face.\n"
     "\n"
     "   :arg verts: When set, the faces verts will be duplicated too.\n"
-    "   :type verts: boolean\n"
+    "   :type verts: bool\n"
     "   :arg edges: When set, the faces edges will be duplicated too.\n"
-    "   :type edges: boolean\n"
+    "   :type edges: bool\n"
     "   :return: The newly created face.\n"
     "   :rtype: :class:`BMFace`\n");
 static PyObject *bpy_bmface_copy(BPy_BMFace *self, PyObject *args, PyObject *kw)
@@ -2354,9 +2354,9 @@ PyDoc_STRVAR(
     "   :arg face: The face to interpolate data from.\n"
     "   :type face: :class:`BMFace`\n"
     "   :arg vert: When enabled, interpolate the loops vertex data (optional).\n"
-    "   :type vert: boolean\n"
+    "   :type vert: bool\n"
     "   :arg multires: When enabled, interpolate the loops multires data (optional).\n"
-    "   :type multires: boolean\n");
+    "   :type multires: bool\n");
 static PyObject *bpy_bmloop_copy_from_face_interp(BPy_BMLoop *self, PyObject *args)
 {
   BPy_BMFace *py_face = nullptr;
@@ -2508,7 +2508,7 @@ PyDoc_STRVAR(
     "   Create a new edge from a given pair of verts.\n"
     "\n"
     "   :arg verts: Vertex pair.\n"
-    "   :type verts: pair of :class:`BMVert`\n"
+    "   :type verts: Sequence[:class:`BMVert`]\n"
     "   :arg example: Existing edge to initialize settings (optional argument).\n"
     "   :type example: :class:`BMEdge`\n"
     "   :return: The newly created edge.\n"
@@ -2584,7 +2584,7 @@ PyDoc_STRVAR(
     "   Create a new face from a given set of verts.\n"
     "\n"
     "   :arg verts: Sequence of 3 or more verts.\n"
-    "   :type verts: sequence of :class:`BMVert`\n"
+    "   :type verts: Sequence[:class:`BMVert`]\n"
     "   :arg example: Existing face to initialize settings (optional argument).\n"
     "   :type example: :class:`BMFace`\n"
     "   :return: The newly created face.\n"
@@ -2660,7 +2660,9 @@ PyDoc_STRVAR(
     bpy_bmvertseq_remove_doc,
     ".. method:: remove(vert)\n"
     "\n"
-    "   Remove a vert.\n");
+    "   Remove a vert.\n"
+    "\n"
+    "   :type vert: :class:`BMVert`\n");
 static PyObject *bpy_bmvertseq_remove(BPy_BMElemSeq *self, BPy_BMVert *value)
 {
   BPY_BM_CHECK_OBJ(self);
@@ -2684,7 +2686,9 @@ PyDoc_STRVAR(
     bpy_bmedgeseq_remove_doc,
     ".. method:: remove(edge)\n"
     "\n"
-    "   Remove an edge.\n");
+    "   Remove an edge.\n"
+    "\n"
+    "   :type edge: :class:`BMEdge`\n");
 static PyObject *bpy_bmedgeseq_remove(BPy_BMElemSeq *self, BPy_BMEdge *value)
 {
   BPY_BM_CHECK_OBJ(self);
@@ -2708,7 +2712,9 @@ PyDoc_STRVAR(
     bpy_bmfaceseq_remove_doc,
     ".. method:: remove(face)\n"
     "\n"
-    "   Remove a face.\n");
+    "   Remove a face.\n"
+    "\n"
+    "   :type face: :class:`BMFace`\n");
 static PyObject *bpy_bmfaceseq_remove(BPy_BMElemSeq *self, BPy_BMFace *value)
 {
   BPY_BM_CHECK_OBJ(self);
@@ -2735,7 +2741,7 @@ PyDoc_STRVAR(
     "   Return an edge which uses the **verts** passed.\n"
     "\n"
     "   :arg verts: Sequence of verts.\n"
-    "   :type verts: :class:`BMVert`\n"
+    "   :type verts: Sequence[:class:`BMVert`]\n"
     "   :arg fallback: Return this value if nothing is found.\n"
     "   :return: The edge found or None\n"
     "   :rtype: :class:`BMEdge`\n");
@@ -2783,7 +2789,7 @@ PyDoc_STRVAR(
     "   Return a face which uses the **verts** passed.\n"
     "\n"
     "   :arg verts: Sequence of verts.\n"
-    "   :type verts: :class:`BMVert`\n"
+    "   :type verts: Sequence[:class:`BMVert`]\n"
     "   :arg fallback: Return this value if nothing is found.\n"
     "   :return: The face found or None\n"
     "   :rtype: :class:`BMFace`\n");
@@ -2906,12 +2912,13 @@ PyDoc_STRVAR(
     ".. method:: sort(key=None, reverse=False)\n"
     "\n"
     "   Sort the elements of this sequence, using an optional custom sort key.\n"
-    "   Indices of elements are not changed, BMElemeSeq.index_update() can be used for that.\n"
+    "   Indices of elements are not changed, :class:`BMElemSeq.index_update` can be used for "
+    "that.\n"
     "\n"
     "   :arg key: The key that sets the ordering of the elements.\n"
-    "   :type key: :function: returning a number\n"
+    "   :type key: Callable[[:class:`BMVert` | :class:`BMEdge` | :class:`BMFace`], int] | None\n"
     "   :arg reverse: Reverse the order of the elements\n"
-    "   :type reverse: :boolean:\n"
+    "   :type reverse: bool\n"
     "\n"
     "   .. note::\n"
     "\n"
@@ -2998,6 +3005,9 @@ static PyObject *bpy_bmelemseq_sort(BPy_BMElemSeq *self, PyObject *args, PyObjec
                                      &do_reverse))
     {
       return nullptr;
+    }
+    if (keyfunc == Py_None) {
+      keyfunc = nullptr;
     }
   }
 
@@ -3232,7 +3242,7 @@ static PyMethodDef bpy_bmface_methods[] = {
     {"copy_from", (PyCFunction)bpy_bm_elem_copy_from, METH_O, bpy_bm_elem_copy_from_doc},
     {"copy_from_face_interp",
      (PyCFunction)bpy_bmface_copy_from_face_interp,
-     METH_O,
+     METH_VARARGS,
      bpy_bmface_copy_from_face_interp_doc},
 
     {"copy", (PyCFunction)bpy_bmface_copy, METH_VARARGS | METH_KEYWORDS, bpy_bmface_copy_doc},
@@ -3284,7 +3294,7 @@ static PyMethodDef bpy_bmloop_methods[] = {
     {"copy_from", (PyCFunction)bpy_bm_elem_copy_from, METH_O, bpy_bm_elem_copy_from_doc},
     {"copy_from_face_interp",
      (PyCFunction)bpy_bmloop_copy_from_face_interp,
-     METH_O,
+     METH_VARARGS,
      bpy_bmloop_copy_from_face_interp_doc},
 
     {"calc_angle", (PyCFunction)bpy_bmloop_calc_angle, METH_NOARGS, bpy_bmloop_calc_angle_doc},
@@ -4590,7 +4600,7 @@ PyObject *BPy_BMFace_Array_As_Tuple(BMesh *bm, BMFace **elem, Py_ssize_t elem_le
 
   return ret;
 }
-PyObject *BPy_BMLoop_Array_As_Tuple(BMesh *bm, BMLoop **elem, Py_ssize_t elem_len)
+PyObject *BPy_BMLoop_Array_As_Tuple(BMesh *bm, BMLoop *const *elem, Py_ssize_t elem_len)
 {
   Py_ssize_t i;
   PyObject *ret = PyTuple_New(elem_len);

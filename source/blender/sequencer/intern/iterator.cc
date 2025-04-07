@@ -12,21 +12,15 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "DNA_scene_types.h"
 #include "DNA_sequence_types.h"
 
-#include "BLI_ghash.h"
 #include "BLI_listbase.h"
-#include "BLI_set.hh"
-
-#include "BKE_scene.h"
 
 #include "SEQ_effects.hh"
 #include "SEQ_iterator.hh"
 #include "SEQ_relations.hh"
 #include "SEQ_render.hh"
 #include "SEQ_time.hh"
-#include "render.hh"
 
 using blender::VectorSet;
 
@@ -51,7 +45,7 @@ void SEQ_for_each_callback(ListBase *seqbase, SeqForEachFunc callback, void *use
   seq_for_each_recursive(seqbase, callback, user_data);
 }
 
-VectorSet<Sequence *> SEQ_query_by_reference(Sequence *reference_strip,
+VectorSet<Sequence *> SEQ_query_by_reference(Sequence *seq_reference,
                                              const Scene *scene,
                                              ListBase *seqbase,
                                              void seq_query_func(const Scene *scene,
@@ -60,7 +54,7 @@ VectorSet<Sequence *> SEQ_query_by_reference(Sequence *reference_strip,
                                                                  VectorSet<Sequence *> &strips))
 {
   VectorSet<Sequence *> strips;
-  seq_query_func(scene, reference_strip, seqbase, strips);
+  seq_query_func(scene, seq_reference, seqbase, strips);
   return strips;
 }
 
@@ -83,7 +77,7 @@ void SEQ_iterator_set_expand(const Scene *scene,
   strips.add_multiple(query_matches);
 }
 
-static void query_all_strips_recursive(ListBase *seqbase, VectorSet<Sequence *> &strips)
+static void query_all_strips_recursive(const ListBase *seqbase, VectorSet<Sequence *> &strips)
 {
   LISTBASE_FOREACH (Sequence *, seq, seqbase) {
     if (seq->type == SEQ_TYPE_META) {
@@ -93,27 +87,10 @@ static void query_all_strips_recursive(ListBase *seqbase, VectorSet<Sequence *> 
   }
 }
 
-static void query_all_meta_strips_recursive(ListBase *seqbase, VectorSet<Sequence *> &strips)
-{
-  LISTBASE_FOREACH (Sequence *, seq, seqbase) {
-    if (seq->type == SEQ_TYPE_META) {
-      query_all_meta_strips_recursive(&seq->seqbase, strips);
-      strips.add(seq);
-    }
-  }
-}
-
-VectorSet<Sequence *> SEQ_query_all_strips_recursive(ListBase *seqbase)
+VectorSet<Sequence *> SEQ_query_all_strips_recursive(const ListBase *seqbase)
 {
   VectorSet<Sequence *> strips;
   query_all_strips_recursive(seqbase, strips);
-  return strips;
-}
-
-VectorSet<Sequence *> SEQ_query_all_meta_strips_recursive(ListBase *seqbase)
-{
-  VectorSet<Sequence *> strips;
-  query_all_meta_strips_recursive(seqbase, strips);
   return strips;
 }
 
@@ -158,7 +135,7 @@ static void collection_filter_channel_up_to_incl(VectorSet<Sequence *> &strips, 
 
 /* Check if seq must be rendered. This depends on whole stack in some cases, not only seq itself.
  * Order of applying these conditions is important. */
-static bool must_render_strip(VectorSet<Sequence *> &strips, Sequence *strip)
+static bool must_render_strip(const VectorSet<Sequence *> &strips, Sequence *strip)
 {
   bool seq_have_effect_in_stack = false;
   for (Sequence *strip_iter : strips) {
@@ -249,16 +226,11 @@ void SEQ_query_strip_effect_chain(const Scene *scene,
     if (reference_strip->seq2) {
       SEQ_query_strip_effect_chain(scene, reference_strip->seq2, seqbase, strips);
     }
-    if (reference_strip->seq3) {
-      SEQ_query_strip_effect_chain(scene, reference_strip->seq3, seqbase, strips);
-    }
   }
 
   /* Find all strips connected to reference_strip. */
   LISTBASE_FOREACH (Sequence *, seq_test, seqbase) {
-    if (seq_test->seq1 == reference_strip || seq_test->seq2 == reference_strip ||
-        seq_test->seq3 == reference_strip)
-    {
+    if (seq_test->seq1 == reference_strip || seq_test->seq2 == reference_strip) {
       SEQ_query_strip_effect_chain(scene, seq_test, seqbase, strips);
     }
   }

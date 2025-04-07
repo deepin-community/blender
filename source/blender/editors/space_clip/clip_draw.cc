@@ -22,7 +22,7 @@
 #include "BLI_utildefines.h"
 
 #include "BKE_context.hh"
-#include "BKE_image.h"
+#include "BKE_image.hh"
 #include "BKE_movieclip.h"
 #include "BKE_tracking.h"
 
@@ -34,20 +34,19 @@
 
 #include "BIF_glutil.hh"
 
-#include "GPU_immediate.h"
-#include "GPU_immediate_util.h"
-#include "GPU_matrix.h"
-#include "GPU_state.h"
+#include "GPU_immediate.hh"
+#include "GPU_immediate_util.hh"
+#include "GPU_matrix.hh"
+#include "GPU_state.hh"
 
 #include "WM_types.hh"
 
-#include "UI_interface.hh"
 #include "UI_resources.hh"
 #include "UI_view2d.hh"
 
 #include "BLF_api.hh"
 
-#include "clip_intern.h" /* own include */
+#include "clip_intern.hh" /* own include */
 
 /*********************** main area drawing *************************/
 
@@ -659,26 +658,26 @@ static void draw_marker_outline(SpaceClip *sc,
   GPU_matrix_pop();
 }
 
-static void track_colors(const MovieTrackingTrack *track, int act, float col[3], float scol[3])
+static void track_colors(const MovieTrackingTrack *track, int act, float r_col[3], float r_scol[3])
 {
   if (track->flag & TRACK_CUSTOMCOLOR) {
     if (act) {
-      UI_GetThemeColor3fv(TH_ACT_MARKER, scol);
+      UI_GetThemeColor3fv(TH_ACT_MARKER, r_scol);
     }
     else {
-      copy_v3_v3(scol, track->color);
+      copy_v3_v3(r_scol, track->color);
     }
 
-    mul_v3_v3fl(col, track->color, 0.5f);
+    mul_v3_v3fl(r_col, track->color, 0.5f);
   }
   else {
-    UI_GetThemeColor3fv(TH_MARKER, col);
+    UI_GetThemeColor3fv(TH_MARKER, r_col);
 
     if (act) {
-      UI_GetThemeColor3fv(TH_ACT_MARKER, scol);
+      UI_GetThemeColor3fv(TH_ACT_MARKER, r_scol);
     }
     else {
-      UI_GetThemeColor3fv(TH_SEL_MARKER, scol);
+      UI_GetThemeColor3fv(TH_SEL_MARKER, r_scol);
     }
   }
 }
@@ -1117,11 +1116,11 @@ static void draw_marker_texts(SpaceClip *sc,
   }
 }
 
-static void plane_track_colors(bool is_active, float color[3], float selected_color[3])
+static void plane_track_colors(bool is_active, float r_color[3], float r_selected_color[3])
 {
-  UI_GetThemeColor3fv(TH_MARKER, color);
+  UI_GetThemeColor3fv(TH_MARKER, r_color);
 
-  UI_GetThemeColor3fv(is_active ? TH_ACT_MARKER : TH_SEL_MARKER, selected_color);
+  UI_GetThemeColor3fv(is_active ? TH_ACT_MARKER : TH_SEL_MARKER, r_selected_color);
 }
 
 static void getArrowEndPoint(const int width,

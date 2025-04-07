@@ -8,7 +8,6 @@
 
 #include "abc_reader_nurbs.h"
 #include "abc_axis_conversion.h"
-#include "abc_reader_transform.h"
 #include "abc_util.h"
 
 #include "MEM_guardedalloc.h"
@@ -17,9 +16,8 @@
 #include "DNA_object_types.h"
 
 #include "BLI_listbase.h"
-#include "BLI_string.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "BKE_curve.hh"
 #include "BKE_object.hh"
@@ -64,17 +62,17 @@ bool AbcNurbsReader::valid() const
 bool AbcNurbsReader::accepts_object_type(
     const Alembic::AbcCoreAbstract::v12::ObjectHeader &alembic_header,
     const Object *const ob,
-    const char **err_str) const
+    const char **r_err_str) const
 {
   if (!Alembic::AbcGeom::INuPatch::matches(alembic_header)) {
-    *err_str = RPT_(
+    *r_err_str = RPT_(
         "Object type mismatch, Alembic object path pointed to NURBS when importing, but not any "
         "more");
     return false;
   }
 
   if (ob->type != OB_CURVES_LEGACY) {
-    *err_str = RPT_("Object type mismatch, Alembic object path points to NURBS");
+    *r_err_str = RPT_("Object type mismatch, Alembic object path points to NURBS");
     return false;
   }
 

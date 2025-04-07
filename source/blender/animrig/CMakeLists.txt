@@ -11,7 +11,8 @@ set(INC
   ../editors/include
   ../makesrna
   ../windowmanager
-  # RNA_prototypes.h
+  ../../../extern/fmtlib/include
+  # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
 
@@ -20,27 +21,42 @@ set(INC_SYS
 
 set(SRC
   intern/action.cc
+  intern/action_iterators.cc
+  intern/action_legacy.cc
+  intern/action_runtime.cc
+  intern/action_selection.cc
   intern/anim_rna.cc
   intern/animdata.cc
   intern/bone_collections.cc
   intern/bonecolor.cc
   intern/driver.cc
+  intern/evaluation.cc
   intern/fcurve.cc
   intern/keyframing.cc
   intern/keyframing_auto.cc
+  intern/nla.cc
+  intern/pose.cc
   intern/visualkey.cc
 
   ANIM_action.hh
+  ANIM_action_iterators.hh
+  ANIM_action_legacy.hh
   ANIM_animdata.hh
   ANIM_armature_iter.hh
   ANIM_bone_collections.hh
   ANIM_bonecolor.hh
   ANIM_driver.hh
+  ANIM_evaluation.hh
   ANIM_fcurve.hh
   ANIM_keyframing.hh
+  ANIM_keyingsets.hh
+  ANIM_nla.hh
+  ANIM_pose.hh
   ANIM_rna.hh
   ANIM_visualkey.hh
+  intern/action_runtime.hh
   intern/bone_collections_internal.hh
+  intern/evaluation_internal.hh
 )
 
 set(LIB
@@ -50,8 +66,13 @@ set(LIB
   bf::dna
   PRIVATE bf_editor_interface
   PRIVATE bf::intern::guardedalloc
+  PRIVATE bf::intern::atomic
+  PRIVATE bf::intern::clog
 )
 
+if(WITH_EXPERIMENTAL_FEATURES)
+  add_definitions(-DWITH_ANIM_BAKLAVA)
+endif()
 
 blender_add_lib(bf_animrig "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 add_library(bf::animrig ALIAS bf_animrig)
@@ -60,7 +81,13 @@ if(WITH_GTESTS)
   set(TEST_INC
   )
   set(TEST_SRC
+    intern/action_iterators_test.cc
+    intern/action_legacy_test.cc
+    intern/action_test.cc
     intern/bone_collections_test.cc
+    intern/evaluation_test.cc
+    intern/keyframing_test.cc
+    intern/nla_test.cc
   )
   set(TEST_LIB
     PRIVATE bf::animrig

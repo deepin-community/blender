@@ -10,45 +10,34 @@
 #include "BLI_math_vector.h"
 #include "BLI_task.h"
 #include "BLI_utildefines.h"
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "DNA_defaults.h"
-#include "DNA_mesh_types.h"
-#include "DNA_meshdata_types.h"
 #include "DNA_object_types.h"
 #include "DNA_screen_types.h"
 
-#include "BKE_context.hh"
 #include "BKE_deform.hh"
-#include "BKE_editmesh.hh"
-#include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
-#include "BKE_mesh.hh"
-#include "BKE_mesh_wrapper.hh"
 #include "BKE_modifier.hh"
-#include "BKE_screen.hh"
 
 #include "UI_interface.hh"
 #include "UI_resources.hh"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
-
-#include "DEG_depsgraph_query.hh"
+#include "RNA_prototypes.hh"
 
 #include "MOD_ui_common.hh"
 #include "MOD_util.hh"
 
 #define BEND_EPS 0.000001f
 
-ALIGN_STRUCT struct DeformUserData {
+BLI_ALIGN_STRUCT struct DeformUserData {
   bool invert_vgroup;
   char mode;
   char deform_axis;
   int lock_axis;
   int vgroup;
   int limit_axis;
-  float weight;
   float smd_factor;
   float smd_limit[2];
   float (*vertexCos)[3];
@@ -299,7 +288,7 @@ static void SimpleDeformModifier_do(SimpleDeformModifierData *smd,
   const MDeformVert *dvert;
 
   /* This is historically the lock axis, _not_ the deform axis as the name would imply */
-  const int deform_axis = smd->deform_axis;
+  const int deform_axis = std::clamp(int(smd->deform_axis), 0, 2);
   int lock_axis = smd->axis;
   if (smd->mode == MOD_SIMPLEDEFORM_MODE_BEND) { /* Bend mode shouldn't have any lock axis */
     lock_axis = 0;

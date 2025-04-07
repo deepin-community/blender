@@ -13,19 +13,16 @@
 
 #include "draw_handle.hh"
 #include "draw_manager.hh"
-#include "draw_shader_shared.h"
+#include "draw_shader_shared.hh"
 
 /* -------------------------------------------------------------------- */
 /** \name ObjectAttributes
  * \{ */
 
-/**
- * Go through all possible source of the given object uniform attribute.
- * Returns true if the attribute was correctly filled.
- * This function mirrors lookup_instance_property in cycles/blender/blender_object.cpp
- */
 bool ObjectAttribute::sync(const blender::draw::ObjectRef &ref, const GPUUniformAttr &attr)
 {
+  /* This function mirrors `lookup_instance_property` in `cycles/blender/blender_object.cpp`. */
+
   hash_code = attr.hash_code;
 
   /* If requesting instance data, check the parent particle system and object. */

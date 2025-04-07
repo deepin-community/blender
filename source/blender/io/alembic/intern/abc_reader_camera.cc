@@ -7,7 +7,6 @@
  */
 
 #include "abc_reader_camera.h"
-#include "abc_reader_transform.h"
 #include "abc_util.h"
 
 #include "DNA_camera_types.h"
@@ -18,7 +17,7 @@
 #include "BKE_camera.h"
 #include "BKE_object.hh"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 using Alembic::AbcGeom::CameraSample;
 using Alembic::AbcGeom::ICamera;
@@ -46,17 +45,17 @@ bool AbcCameraReader::valid() const
 bool AbcCameraReader::accepts_object_type(
     const Alembic::AbcCoreAbstract::ObjectHeader &alembic_header,
     const Object *const ob,
-    const char **err_str) const
+    const char **r_err_str) const
 {
   if (!Alembic::AbcGeom::ICamera::matches(alembic_header)) {
-    *err_str = RPT_(
+    *r_err_str = RPT_(
         "Object type mismatch, Alembic object path pointed to Camera when importing, but not any "
         "more");
     return false;
   }
 
   if (ob->type != OB_CAMERA) {
-    *err_str = RPT_("Object type mismatch, Alembic object path points to Camera");
+    *r_err_str = RPT_("Object type mismatch, Alembic object path points to Camera");
     return false;
   }
 

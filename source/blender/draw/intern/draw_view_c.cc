@@ -17,10 +17,10 @@
 #include "ED_util.hh"
 #include "ED_view3d.hh"
 
-#include "GPU_debug.h"
-#include "GPU_immediate.h"
-#include "GPU_matrix.h"
-#include "GPU_shader.h"
+#include "GPU_debug.hh"
+#include "GPU_immediate.hh"
+#include "GPU_matrix.hh"
+#include "GPU_shader.hh"
 
 #include "UI_resources.hh"
 #include "UI_view2d.hh"
@@ -29,13 +29,13 @@
 
 #include "BLI_math_rotation.h"
 
-#include "BKE_global.h"
+#include "BKE_global.hh"
 #include "BKE_object.hh"
 #include "BKE_paint.hh"
 
-#include "view3d_intern.h"
+#include "view3d_intern.hh"
 
-#include "draw_manager.h"
+#include "draw_manager_c.hh"
 
 /* ******************** region info ***************** */
 
@@ -74,9 +74,10 @@ static bool is_cursor_visible(const DRWContextState *draw_ctx, Scene *scene, Vie
     }
     /* exception: object in texture paint mode, clone brush, use_clone_layer disabled */
     else if (draw_ctx->object_mode & OB_MODE_TEXTURE_PAINT) {
-      const Paint *p = BKE_paint_get_active(scene, view_layer);
+      const Paint *paint = BKE_paint_get_active(scene, view_layer);
+      const Brush *brush = (paint) ? BKE_paint_brush_for_read(paint) : nullptr;
 
-      if (p && p->brush && p->brush->imagepaint_tool == PAINT_TOOL_CLONE) {
+      if (brush && brush->image_brush_type == IMAGE_PAINT_BRUSH_TYPE_CLONE) {
         if ((scene->toolsettings->imapaint.flag & IMAGEPAINT_PROJECT_LAYER_CLONE) == 0) {
           return true;
         }
@@ -86,7 +87,7 @@ static bool is_cursor_visible(const DRWContextState *draw_ctx, Scene *scene, Vie
     /* no exception met? then don't draw cursor! */
     return false;
   }
-  if (draw_ctx->object_mode & OB_MODE_WEIGHT_GPENCIL_LEGACY) {
+  if (draw_ctx->object_mode & OB_MODE_WEIGHT_GREASE_PENCIL) {
     /* grease pencil hide always in some modes */
     return false;
   }
@@ -121,8 +122,7 @@ void DRW_draw_cursor()
 
   RegionView3D *rv3d = static_cast<RegionView3D *>(region->regiondata);
 
-  float cursor_quat[4];
-  BKE_scene_cursor_rot_to_quat(cursor, cursor_quat);
+  blender::math::Quaternion cursor_quat = cursor->rotation();
 
   /* Draw nice Anti Aliased cursor. */
   GPU_line_width(1.0f);
@@ -131,10 +131,10 @@ void DRW_draw_cursor()
 
   float eps = 1e-5f;
   rv3d->viewquat[0] = -rv3d->viewquat[0];
-  bool is_aligned = compare_v4v4(cursor_quat, rv3d->viewquat, eps);
+  bool is_aligned = compare_v4v4(&cursor_quat.w, rv3d->viewquat, eps);
   if (is_aligned == false) {
     float tquat[4];
-    rotation_between_quats_to_quat(tquat, rv3d->viewquat, cursor_quat);
+    rotation_between_quats_to_quat(tquat, rv3d->viewquat, &cursor_quat.w);
     is_aligned = tquat[0] - eps < -1.0f;
   }
   rv3d->viewquat[0] = -rv3d->viewquat[0];
@@ -164,7 +164,7 @@ void DRW_draw_cursor()
     for (int axis = 0; axis < 3; axis++) {
       float axis_vec[3] = {0};
       axis_vec[axis] = scale;
-      mul_qt_v3(cursor_quat, axis_vec);
+      mul_qt_v3(&cursor_quat.w, axis_vec);
       CURSOR_EDGE(axis_vec, axis, +);
       CURSOR_EDGE(axis_vec, axis, -);
     }
@@ -183,7 +183,7 @@ void DRW_draw_cursor()
   GPU_matrix_translate_2f(co[0] + 0.5f, co[1] + 0.5f);
   GPU_matrix_scale_2f(U.widget_unit, U.widget_unit);
 
-  GPUBatch *cursor_batch = DRW_cache_cursor_get(is_aligned);
+  blender::gpu::Batch *cursor_batch = DRW_cache_cursor_get(is_aligned);
   GPUShader *shader = GPU_shader_get_builtin_shader(GPU_SHADER_3D_FLAT_COLOR);
   GPU_batch_set_shader(cursor_batch, shader);
 
@@ -246,7 +246,7 @@ void DRW_draw_cursor_2d_ex(const ARegion *region, const float cursor[2])
   GPU_matrix_translate_2f(co[0] + 0.5f, co[1] + 0.5f);
   GPU_matrix_scale_2f(U.widget_unit, U.widget_unit);
 
-  GPUBatch *cursor_batch = DRW_cache_cursor_get(true);
+  blender::gpu::Batch *cursor_batch = DRW_cache_cursor_get(true);
 
   GPUShader *shader = GPU_shader_get_builtin_shader(GPU_SHADER_3D_FLAT_COLOR);
   GPU_batch_set_shader(cursor_batch, shader);

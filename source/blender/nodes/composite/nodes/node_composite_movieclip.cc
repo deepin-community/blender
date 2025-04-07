@@ -20,8 +20,8 @@
 #include "UI_interface.hh"
 #include "UI_resources.hh"
 
-#include "GPU_shader.h"
-#include "GPU_texture.h"
+#include "GPU_shader.hh"
+#include "GPU_texture.hh"
 
 #include "COM_node_operation.hh"
 #include "COM_utilities.hh"
@@ -54,16 +54,7 @@ static void init(const bContext *C, PointerRNA *ptr)
 
 static void node_composit_buts_movieclip(uiLayout *layout, bContext *C, PointerRNA *ptr)
 {
-  uiTemplateID(layout,
-               C,
-               ptr,
-               "clip",
-               nullptr,
-               "CLIP_OT_open",
-               nullptr,
-               UI_TEMPLATE_ID_FILTER_ALL,
-               false,
-               nullptr);
+  uiTemplateID(layout, C, ptr, "clip", nullptr, "CLIP_OT_open", nullptr);
 }
 
 static void node_composit_buts_movieclip_ex(uiLayout *layout, bContext *C, PointerRNA *ptr)
@@ -71,16 +62,7 @@ static void node_composit_buts_movieclip_ex(uiLayout *layout, bContext *C, Point
   bNode *node = (bNode *)ptr->data;
   PointerRNA clipptr;
 
-  uiTemplateID(layout,
-               C,
-               ptr,
-               "clip",
-               nullptr,
-               "CLIP_OT_open",
-               nullptr,
-               UI_TEMPLATE_ID_FILTER_ALL,
-               false,
-               nullptr);
+  uiTemplateID(layout, C, ptr, "clip", nullptr, "CLIP_OT_open", nullptr);
 
   if (!node->id) {
     return;
@@ -281,7 +263,7 @@ void register_node_type_cmp_movieclip()
 {
   namespace file_ns = blender::nodes::node_composite_movieclip_cc;
 
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
 
   cmp_node_type_base(&ntype, CMP_NODE_MOVIECLIP, "Movie Clip", NODE_CLASS_INPUT);
   ntype.declare = file_ns::cmp_node_movieclip_declare;
@@ -290,8 +272,8 @@ void register_node_type_cmp_movieclip()
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
   ntype.initfunc_api = file_ns::init;
   ntype.flag |= NODE_PREVIEW;
-  node_type_storage(
+  blender::bke::node_type_storage(
       &ntype, "MovieClipUser", node_free_standard_storage, node_copy_standard_storage);
 
-  nodeRegisterType(&ntype);
+  blender::bke::node_register_type(&ntype);
 }

@@ -13,7 +13,6 @@
 #include "BKE_attribute_math.hh"
 #include "BKE_curves.hh"
 #include "BKE_curves_utils.hh"
-#include "BKE_geometry_set.hh"
 
 #include "GEO_trim_curves.hh"
 
@@ -33,7 +32,7 @@ namespace blender::geometry {
  * \param cyclic: If curve is cyclic.
  * \param resolution: Curve resolution (number of evaluated points per segment).
  * \param num_curve_points: Total number of control points in the curve.
- * \return: Point on the piecewise segment matching the given distance.
+ * \return Point on the piecewise segment matching the given distance.
  */
 static bke::curves::CurvePoint lookup_point_uniform_spacing(const Span<float> lengths,
                                                             const float sample_length,
@@ -932,7 +931,7 @@ bke::CurvesGeometry trim_curves(const bke::CurvesGeometry &src_curves,
                                 const VArray<float> &starts,
                                 const VArray<float> &ends,
                                 const GeometryNodeCurveSampleMode mode,
-                                const bke::AnonymousAttributePropagationInfo &propagation_info)
+                                const bke::AttributeFilter &attribute_filter)
 {
   const OffsetIndices src_points_by_curve = src_curves.points_by_curve();
   IndexMaskMemory memory;
@@ -978,13 +977,13 @@ bke::CurvesGeometry trim_curves(const bke::CurvesGeometry &src_curves,
       src_attributes,
       dst_attributes,
       ATTR_DOMAIN_MASK_POINT,
-      propagation_info,
-      {"position",
-       "handle_left",
-       "handle_right",
-       "handle_type_left",
-       "handle_type_right",
-       "nurbs_weight"});
+      bke::attribute_filter_with_skip_ref(attribute_filter,
+                                          {"position",
+                                           "handle_left",
+                                           "handle_right",
+                                           "handle_type_left",
+                                           "handle_type_right",
+                                           "nurbs_weight"}));
 
   auto trim_catmull = [&](const IndexMask &selection) {
     trim_catmull_rom_curves(src_curves,
@@ -1059,14 +1058,15 @@ bke::CurvesGeometry trim_curves(const bke::CurvesGeometry &src_curves,
       copy_point_skip.add("nurbs_weight");
     }
 
-    bke::copy_attributes_group_to_group(src_attributes,
-                                        bke::AttrDomain::Point,
-                                        propagation_info,
-                                        copy_point_skip,
-                                        src_points_by_curve,
-                                        dst_points_by_curve,
-                                        unselected,
-                                        dst_attributes);
+    bke::copy_attributes_group_to_group(
+        src_attributes,
+        bke::AttrDomain::Point,
+        bke::AttrDomain::Point,
+        bke::attribute_filter_with_skip_ref(attribute_filter, copy_point_skip),
+        src_points_by_curve,
+        dst_points_by_curve,
+        unselected,
+        dst_attributes);
   }
 
   dst_curves.remove_attributes_based_on_types();

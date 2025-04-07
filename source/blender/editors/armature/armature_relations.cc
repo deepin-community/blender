@@ -21,19 +21,19 @@
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
-#include "BKE_action.h"
-#include "BKE_anim_data.h"
+#include "BKE_action.hh"
+#include "BKE_anim_data.hh"
 #include "BKE_animsys.h"
 #include "BKE_armature.hh"
 #include "BKE_constraint.h"
 #include "BKE_context.hh"
 #include "BKE_fcurve_driver.h"
-#include "BKE_idprop.h"
+#include "BKE_idprop.hh"
 #include "BKE_layer.hh"
 #include "BKE_main.hh"
-#include "BKE_report.h"
+#include "BKE_report.hh"
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_build.hh"
@@ -104,43 +104,33 @@ static void joined_armature_fix_links_constraints(Main *bmain,
         BKE_action_fix_paths_rename(
             &tarArm->id, data->act, "pose.bones[", pchan->name, curbone->name, 0, 0, false);
 
-        DEG_id_tag_update_ex(bmain, &data->act->id, ID_RECALC_COPY_ON_WRITE);
+        DEG_id_tag_update_ex(bmain, &data->act->id, ID_RECALC_SYNC_TO_EVAL);
       }
     }
   }
 
   if (changed) {
-    DEG_id_tag_update_ex(bmain, &ob->id, ID_RECALC_COPY_ON_WRITE);
+    DEG_id_tag_update_ex(bmain, &ob->id, ID_RECALC_SYNC_TO_EVAL);
   }
 }
-
-/** User-data for #joined_armature_fix_animdata_cb(). */
-struct tJoinArmature_AdtFixData {
-  Main *bmain;
-
-  Object *srcArm;
-  Object *tarArm;
-
-  GHash *names_map;
-};
 
 /* Callback to pass to BKE_animdata_main_cb() for fixing driver ID's to point to the new ID. */
 /* FIXME: For now, we only care about drivers here.
  *        When editing rigs, it's very rare to have animation on the rigs being edited already,
  *        so it should be safe to skip these.
  */
-static void joined_armature_fix_animdata_cb(ID *id, FCurve *fcu, void *user_data)
+static void joined_armature_fix_animdata_cb(
+    Main *bmain, ID *id, FCurve *fcu, Object *srcArm, Object *tarArm, GHash *names_map)
 {
-  tJoinArmature_AdtFixData *afd = (tJoinArmature_AdtFixData *)user_data;
-  ID *src_id = &afd->srcArm->id;
-  ID *dst_id = &afd->tarArm->id;
+  ID *src_id = &srcArm->id;
+  ID *dst_id = &tarArm->id;
 
   GHashIterator gh_iter;
   bool changed = false;
 
   /* Fix paths - If this is the target object, it will have some "dirty" paths */
   if ((id == src_id) && strstr(fcu->rna_path, "pose.bones[")) {
-    GHASH_ITER (gh_iter, afd->names_map) {
+    GHASH_ITER (gh_iter, names_map) {
       const char *old_name = static_cast<const char *>(BLI_ghashIterator_getKey(&gh_iter));
       const char *new_name = static_cast<const char *>(BLI_ghashIterator_getValue(&gh_iter));
 
@@ -184,7 +174,7 @@ static void joined_armature_fix_animdata_cb(ID *id, FCurve *fcu, void *user_data
            *      little twists so that we know that it isn't going to clobber the wrong data
            */
           if ((dtar->rna_path && strstr(dtar->rna_path, "pose.bones[")) || (dtar->pchan_name[0])) {
-            GHASH_ITER (gh_iter, afd->names_map) {
+            GHASH_ITER (gh_iter, names_map) {
               const char *old_name = static_cast<const char *>(BLI_ghashIterator_getKey(&gh_iter));
               const char *new_name = static_cast<const char *>(
                   BLI_ghashIterator_getValue(&gh_iter));
@@ -212,7 +202,7 @@ static void joined_armature_fix_animdata_cb(ID *id, FCurve *fcu, void *user_data
   }
 
   if (changed) {
-    DEG_id_tag_update_ex(afd->bmain, id, ID_RECALC_COPY_ON_WRITE);
+    DEG_id_tag_update_ex(bmain, id, ID_RECALC_SYNC_TO_EVAL);
   }
 }
 
@@ -255,7 +245,7 @@ static void joined_armature_fix_links(
       /* make tar armature be new parent */
       ob->parent = tarArm;
 
-      DEG_id_tag_update_ex(bmain, &ob->id, ID_RECALC_COPY_ON_WRITE);
+      DEG_id_tag_update_ex(bmain, &ob->id, ID_RECALC_SYNC_TO_EVAL);
     }
   }
 }
@@ -340,7 +330,7 @@ int ED_armature_join_objects_exec(bContext *C, wmOperator *op)
 
   /* Inverse transform for all selected armatures in this object,
    * See #object_join_exec for detailed comment on why the safe version is used. */
-  invert_m4_m4_safe_ortho(oimat, ob_active->object_to_world);
+  invert_m4_m4_safe_ortho(oimat, ob_active->object_to_world().ptr());
 
   /* Index bone collections by name.  This is also used later to keep track
    * of collections added from other armatures. */
@@ -362,17 +352,13 @@ int ED_armature_join_objects_exec(bContext *C, wmOperator *op)
 
   CTX_DATA_BEGIN (C, Object *, ob_iter, selected_editable_objects) {
     if ((ob_iter->type == OB_ARMATURE) && (ob_iter != ob_active)) {
-      tJoinArmature_AdtFixData afd = {nullptr};
       bArmature *curarm = static_cast<bArmature *>(ob_iter->data);
 
       /* we assume that each armature datablock is only used in a single place */
       BLI_assert(ob_active->data != ob_iter->data);
 
       /* init callback data for fixing up AnimData links later */
-      afd.bmain = bmain;
-      afd.srcArm = ob_iter;
-      afd.tarArm = ob_active;
-      afd.names_map = BLI_ghash_str_new("join_armature_adt_fix");
+      GHash *names_map = BLI_ghash_str_new("join_armature_adt_fix");
 
       /* Make a list of edit-bones in current armature */
       ED_armature_to_edit(curarm);
@@ -391,7 +377,7 @@ int ED_armature_join_objects_exec(bContext *C, wmOperator *op)
       // BASACT->flag &= ~OB_MODE_POSE;
 
       /* Find the difference matrix */
-      mul_m4_m4m4(mat, oimat, ob_iter->object_to_world);
+      mul_m4_m4m4(mat, oimat, ob_iter->object_to_world().ptr());
 
       /* Copy bones and posechannels from the object to the edit armature */
       for (pchan = static_cast<bPoseChannel *>(opose->chanbase.first); pchan; pchan = pchann) {
@@ -400,7 +386,7 @@ int ED_armature_join_objects_exec(bContext *C, wmOperator *op)
 
         /* Get new name */
         ED_armature_ebone_unique_name(arm->edbo, curbone->name, nullptr);
-        BLI_ghash_insert(afd.names_map, BLI_strdup(pchan->name), curbone->name);
+        BLI_ghash_insert(names_map, BLI_strdup(pchan->name), curbone->name);
 
         /* Transform the bone */
         {
@@ -462,8 +448,10 @@ int ED_armature_join_objects_exec(bContext *C, wmOperator *op)
       DEG_id_tag_update_ex(bmain, &curarm->id, ID_RECALC_GEOMETRY);
 
       /* Fix all the drivers (and animation data) */
-      BKE_fcurves_main_cb(bmain, joined_armature_fix_animdata_cb, &afd);
-      BLI_ghash_free(afd.names_map, MEM_freeN, nullptr);
+      BKE_fcurves_main_cb(bmain, [&](ID *id, FCurve *fcu) {
+        joined_armature_fix_animdata_cb(bmain, id, fcu, ob_iter, ob_active, names_map);
+      });
+      BLI_ghash_free(names_map, MEM_freeN, nullptr);
 
       /* Only copy over animdata now, after all the remapping has been done,
        * so that we don't have to worry about ambiguities re which armature
@@ -493,7 +481,7 @@ int ED_armature_join_objects_exec(bContext *C, wmOperator *op)
       }
 
       /* Free the old object data */
-      ED_object_base_free_and_unlink(bmain, scene, ob_iter);
+      blender::ed::object::base_free_and_unlink(bmain, scene, ob_iter);
     }
   }
   CTX_DATA_END;
@@ -735,7 +723,7 @@ static int separate_armature_exec(bContext *C, wmOperator *op)
     /* Only duplicate linked armature but take into account
      * user preferences for duplicating actions. */
     short dupflag = USER_DUP_ARM | (U.dupflag & USER_DUP_ACT);
-    Base *base_new = ED_object_add_duplicate(
+    Base *base_new = blender::ed::object::add_duplicate(
         bmain, scene, view_layer, base_old, eDupli_ID_Flags(dupflag));
     Object *ob_new = base_new->object;
 
@@ -782,13 +770,11 @@ void ARMATURE_OT_separate(wmOperatorType *ot)
   ot->description = "Isolate selected bones into a separate armature";
 
   /* callbacks */
-  ot->invoke = WM_operator_confirm_or_exec;
   ot->exec = separate_armature_exec;
   ot->poll = ED_operator_editarmature;
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
-  WM_operator_properties_confirm_or_exec(ot);
 }
 
 /** \} */

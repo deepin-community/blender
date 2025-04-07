@@ -15,7 +15,7 @@
 #include "BKE_node_tree_update.hh"
 #include "BKE_tracking.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
@@ -35,10 +35,10 @@
 
 #  include "BLI_math_vector.h"
 
-#  include "BKE_anim_data.h"
+#  include "BKE_anim_data.hh"
 #  include "BKE_animsys.h"
-#  include "BKE_node.h"
-#  include "BKE_report.h"
+#  include "BKE_node.hh"
+#  include "BKE_report.hh"
 
 #  include "DEG_depsgraph.hh"
 
@@ -49,6 +49,11 @@
 static std::optional<std::string> rna_tracking_path(const PointerRNA * /*ptr*/)
 {
   return "tracking";
+}
+
+static std::optional<std::string> rna_trackingSettings_path(const PointerRNA * /*ptr*/)
+{
+  return "tracking.settings";
 }
 
 static void rna_tracking_defaultSettings_patternUpdate(Main * /*bmain*/,
@@ -418,26 +423,26 @@ static std::optional<std::string> rna_trackingStabilization_path(const PointerRN
   return "tracking.stabilization";
 }
 
-static int rna_track_2d_stabilization(CollectionPropertyIterator * /*iter*/, void *data)
+static bool rna_track_2d_stabilization(CollectionPropertyIterator * /*iter*/, void *data)
 {
   MovieTrackingTrack *track = (MovieTrackingTrack *)data;
 
   if ((track->flag & TRACK_USE_2D_STAB) == 0) {
-    return 1;
+    return true;
   }
 
-  return 0;
+  return false;
 }
 
-static int rna_track_2d_stabilization_rotation(CollectionPropertyIterator * /*iter*/, void *data)
+static bool rna_track_2d_stabilization_rotation(CollectionPropertyIterator * /*iter*/, void *data)
 {
   MovieTrackingTrack *track = (MovieTrackingTrack *)data;
 
   if ((track->flag & TRACK_USE_2D_STAB_ROT) == 0) {
-    return 1;
+    return true;
   }
 
-  return 0;
+  return false;
 }
 
 static void rna_tracking_stabTracks_begin(CollectionPropertyIterator *iter, PointerRNA *ptr)
@@ -635,6 +640,11 @@ static void rna_tracking_markerPattern_boundbox_get(PointerRNA *ptr, float *valu
 
   copy_v2_v2(values, min);
   copy_v2_v2(values + 2, max);
+}
+
+static std::optional<std::string> rna_trackingDopesheet_path(const PointerRNA * /*ptr*/)
+{
+  return "tracking.dopesheet";
 }
 
 static void rna_trackingDopesheet_tagUpdate(Main * /*bmain*/, Scene * /*scene*/, PointerRNA *ptr)
@@ -921,6 +931,7 @@ static void rna_def_trackingSettings(BlenderRNA *brna)
   };
 
   srna = RNA_def_struct(brna, "MovieTrackingSettings", nullptr);
+  RNA_def_struct_path_func(srna, "rna_trackingSettings_path");
   RNA_def_struct_ui_text(srna, "Movie tracking settings", "Match moving settings");
 
   /* speed */
@@ -1584,7 +1595,7 @@ static void rna_def_trackingTrack(BlenderRNA *brna)
       prop, nullptr, "algorithm_flag", TRACK_ALGORITHM_FLAG_USE_NORMALIZATION);
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_ui_text(
-      prop, "Normalize", "Normalize light intensities while tracking. Slower");
+      prop, "Normalize", "Normalize light intensities while tracking (Slower)");
   RNA_def_property_update(prop, NC_MOVIECLIP | ND_DISPLAY, nullptr);
 
   /* markers */
@@ -2505,6 +2516,7 @@ static void rna_def_trackingDopesheet(BlenderRNA *brna)
   };
 
   srna = RNA_def_struct(brna, "MovieTrackingDopesheet", nullptr);
+  RNA_def_struct_path_func(srna, "rna_trackingDopesheet_path");
   RNA_def_struct_ui_text(srna, "Movie Tracking Dopesheet", "Match-moving dopesheet data");
 
   /* dopesheet sort */

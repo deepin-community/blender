@@ -56,16 +56,7 @@ static void node_composit_buts_stabilize2d(uiLayout *layout, bContext *C, Pointe
 {
   bNode *node = (bNode *)ptr->data;
 
-  uiTemplateID(layout,
-               C,
-               ptr,
-               "clip",
-               nullptr,
-               "CLIP_OT_open",
-               nullptr,
-               UI_TEMPLATE_ID_FILTER_ALL,
-               false,
-               nullptr);
+  uiTemplateID(layout, C, ptr, "clip", nullptr, "CLIP_OT_open", nullptr);
 
   if (!node->id) {
     return;
@@ -116,12 +107,12 @@ class Stabilize2DOperation : public NodeOperation {
 
   Interpolation get_interpolation()
   {
-    switch (static_cast<CMPNodeStabilizeInterpolation>(bnode().custom1)) {
-      case CMP_NODE_STABILIZE_INTERPOLATION_NEAREST:
+    switch (static_cast<CMPNodeInterpolation>(bnode().custom1)) {
+      case CMP_NODE_INTERPOLATION_NEAREST:
         return Interpolation::Nearest;
-      case CMP_NODE_STABILIZE_INTERPOLATION_BILINEAR:
+      case CMP_NODE_INTERPOLATION_BILINEAR:
         return Interpolation::Bilinear;
-      case CMP_NODE_STABILIZE_INTERPOLATION_BICUBIC:
+      case CMP_NODE_INTERPOLATION_BICUBIC:
         return Interpolation::Bicubic;
     }
 
@@ -151,7 +142,7 @@ void register_node_type_cmp_stabilize2d()
 {
   namespace file_ns = blender::nodes::node_composite_stabilize2d_cc;
 
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
 
   cmp_node_type_base(&ntype, CMP_NODE_STABILIZE2D, "Stabilize 2D", NODE_CLASS_DISTORT);
   ntype.declare = file_ns::cmp_node_stabilize2d_declare;
@@ -159,5 +150,5 @@ void register_node_type_cmp_stabilize2d()
   ntype.initfunc_api = file_ns::init;
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  nodeRegisterType(&ntype);
+  blender::bke::node_register_type(&ntype);
 }

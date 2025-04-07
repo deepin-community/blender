@@ -5,7 +5,7 @@
 #include "BKE_node.hh"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "COM_Node.h" /* own include */
 
@@ -19,7 +19,7 @@ Node::Node(bNode *editor_node, bool create_sockets)
     : editor_node_tree_(nullptr),
       editor_node_(editor_node),
       in_active_group_(false),
-      instance_key_(NODE_INSTANCE_KEY_NONE)
+      instance_key_(bke::NODE_INSTANCE_KEY_NONE)
 {
   if (create_sockets) {
     bNodeSocket *input = (bNodeSocket *)editor_node->inputs.first;

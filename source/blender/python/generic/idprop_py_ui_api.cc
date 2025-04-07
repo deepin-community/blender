@@ -13,9 +13,9 @@
 #include "BLI_string.h"
 #include "BLI_utildefines.h"
 
-#include "idprop_py_ui_api.h"
+#include "idprop_py_ui_api.hh"
 
-#include "BKE_idprop.h"
+#include "BKE_idprop.hh"
 
 #include "DNA_ID.h"
 
@@ -25,11 +25,11 @@
 #define USE_STRING_COERCE
 
 #ifdef USE_STRING_COERCE
-#  include "py_capi_utils.h"
+#  include "py_capi_utils.hh"
 #endif
-#include "py_capi_rna.h"
+#include "py_capi_rna.hh"
 
-#include "python_utildefines.h"
+#include "python_utildefines.hh"
 
 /* -------------------------------------------------------------------- */
 /** \name UI Data Update
@@ -198,6 +198,11 @@ static bool idprop_ui_data_update_int_default(IDProperty *idprop,
       PyErr_SetString(PyExc_ValueError, "Error converting \"default\" argument to integer");
       return false;
     }
+
+    /* Use the non-array default, even for arrays, also prevent dangling pointer, see #127952. */
+    ui_data->default_array = nullptr;
+    ui_data->default_array_len = 0;
+
     ui_data->default_value = value;
   }
 
@@ -356,6 +361,11 @@ static bool idprop_ui_data_update_bool_default(IDProperty *idprop,
       PyErr_SetString(PyExc_ValueError, "Error converting \"default\" argument to integer");
       return false;
     }
+
+    /* Use the non-array default, even for arrays, also prevent dangling pointer, see #127952. */
+    ui_data->default_array_len = 0;
+    ui_data->default_array = nullptr;
+
     ui_data->default_value = (value != 0);
   }
 
@@ -441,6 +451,11 @@ static bool idprop_ui_data_update_float_default(IDProperty *idprop,
       PyErr_SetString(PyExc_ValueError, "Error converting \"default\" argument to double");
       return false;
     }
+
+    /* Use the non-array default, even for arrays, also prevent dangling pointer, see #127952. */
+    ui_data->default_array_len = 0;
+    ui_data->default_array = nullptr;
+
     ui_data->default_value = value;
   }
 
@@ -597,14 +612,16 @@ static bool idprop_ui_data_update_id(IDProperty *idprop, PyObject *args, PyObjec
     return false;
   }
 
-  int id_type_tmp;
-  if (pyrna_enum_value_from_id(
-          rna_enum_id_type_items, id_type, &id_type_tmp, "IDPropertyUIManager.update") == -1)
-  {
-    return false;
-  }
+  if (id_type != nullptr) {
+    int id_type_tmp;
+    if (pyrna_enum_value_from_id(
+            rna_enum_id_type_items, id_type, &id_type_tmp, "IDPropertyUIManager.update") == -1)
+    {
+      return false;
+    }
 
-  ui_data.id_type = short(id_type_tmp);
+    ui_data.id_type = short(id_type_tmp);
+  }
 
   /* Write back to the property's UI data. */
   IDP_ui_data_free_unique_contents(&ui_data_orig->base, IDP_ui_data_type(idprop), &ui_data.base);
@@ -699,7 +716,7 @@ static void idprop_ui_data_to_dict_int(IDProperty *property, PyObject *dict)
   Py_DECREF(item);
   PyDict_SetItemString(dict, "step", item = PyLong_FromLong(ui_data->step));
   Py_DECREF(item);
-  if (property->type == IDP_ARRAY) {
+  if ((property->type == IDP_ARRAY) && ui_data->default_array) {
     PyObject *list = PyList_New(ui_data->default_array_len);
     for (int i = 0; i < ui_data->default_array_len; i++) {
       PyList_SET_ITEM(list, i, PyLong_FromLong(ui_data->default_array[i]));
@@ -739,7 +756,7 @@ static void idprop_ui_data_to_dict_bool(IDProperty *property, PyObject *dict)
   IDPropertyUIDataBool *ui_data = (IDPropertyUIDataBool *)property->ui_data;
   PyObject *item;
 
-  if (property->type == IDP_ARRAY) {
+  if ((property->type == IDP_ARRAY) && ui_data->default_array) {
     PyObject *list = PyList_New(ui_data->default_array_len);
     for (int i = 0; i < ui_data->default_array_len; i++) {
       PyList_SET_ITEM(list, i, PyBool_FromLong(ui_data->default_array[i]));
@@ -770,7 +787,7 @@ static void idprop_ui_data_to_dict_float(IDProperty *property, PyObject *dict)
   Py_DECREF(item);
   PyDict_SetItemString(dict, "precision", item = PyLong_FromDouble(double(ui_data->precision)));
   Py_DECREF(item);
-  if (property->type == IDP_ARRAY) {
+  if ((property->type == IDP_ARRAY) && ui_data->default_array) {
     PyObject *list = PyList_New(ui_data->default_array_len);
     for (int i = 0; i < ui_data->default_array_len; i++) {
       PyList_SET_ITEM(list, i, PyFloat_FromDouble(ui_data->default_array[i]));

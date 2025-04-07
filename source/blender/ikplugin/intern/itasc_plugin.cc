@@ -33,10 +33,10 @@
 #include "BLI_math_vector.h"
 #include "BLI_utildefines.h"
 
-#include "BKE_action.h"
+#include "BKE_action.hh"
 #include "BKE_armature.hh"
 #include "BKE_constraint.h"
-#include "BKE_global.h"
+#include "BKE_global.hh"
 #include "DNA_action_types.h"
 #include "DNA_armature_types.h"
 #include "DNA_constraint_types.h"
@@ -213,7 +213,7 @@ enum IK_SegmentAxis {
   IK_TRANS_Z = 5,
 };
 
-static int initialize_chain(Object *ob, bPoseChannel *pchan_tip, bConstraint *con)
+static int initialize_chain(Object * /*ob*/, bPoseChannel *pchan_tip, bConstraint *con)
 {
   bPoseChannel *curchan, *pchan_root = nullptr, *chanlist[256], **oldchan;
   PoseTree *tree;
@@ -368,7 +368,7 @@ static int initialize_chain(Object *ob, bPoseChannel *pchan_tip, bConstraint *co
   return treecount;
 }
 
-static bool is_cartesian_constraint(bConstraint *con)
+static bool is_cartesian_constraint(bConstraint * /*con*/)
 {
   // bKinematicConstraint* data=(bKinematicConstraint *)con->data;
 
@@ -556,8 +556,8 @@ static void GetJointRotation(KDL::Rotation &boneRot, int type, double *rot)
   }
 }
 
-static bool target_callback(const iTaSC::Timestamp &timestamp,
-                            const iTaSC::Frame &current,
+static bool target_callback(const iTaSC::Timestamp & /*timestamp*/,
+                            const iTaSC::Frame & /*current*/,
                             iTaSC::Frame &next,
                             void *param)
 {
@@ -589,10 +589,10 @@ static bool target_callback(const iTaSC::Timestamp &timestamp,
       float chanmat[4][4];
       copy_m4_m4(chanmat, pchan->pose_mat);
       copy_v3_v3(chanmat[3], pchan->pose_tail);
-      mul_m4_series(restmat, target->owner->object_to_world, chanmat, target->eeRest);
+      mul_m4_series(restmat, target->owner->object_to_world().ptr(), chanmat, target->eeRest);
     }
     else {
-      mul_m4_m4m4(restmat, target->owner->object_to_world, target->eeRest);
+      mul_m4_m4m4(restmat, target->owner->object_to_world().ptr(), target->eeRest);
     }
     /* blend the target */
     blend_m4_m4m4(tarmat, restmat, tarmat, constraint->enforce);
@@ -602,7 +602,7 @@ static bool target_callback(const iTaSC::Timestamp &timestamp,
 }
 
 static bool base_callback(const iTaSC::Timestamp &timestamp,
-                          const iTaSC::Frame &current,
+                          const iTaSC::Frame & /*current*/,
                           iTaSC::Frame &next,
                           void *param)
 {
@@ -623,10 +623,10 @@ static bool base_callback(const iTaSC::Timestamp &timestamp,
     ikscene->baseFrame.setValue(&chanmat[0][0]);
     /* iTaSC armature is scaled to object scale, scale the base frame too */
     ikscene->baseFrame.p *= ikscene->blScale;
-    mul_m4_m4m4(rootmat, ikscene->blArmature->object_to_world, chanmat);
+    mul_m4_m4m4(rootmat, ikscene->blArmature->object_to_world().ptr(), chanmat);
   }
   else {
-    copy_m4_m4(rootmat, ikscene->blArmature->object_to_world);
+    copy_m4_m4(rootmat, ikscene->blArmature->object_to_world().ptr());
     ikscene->baseFrame = iTaSC::F_identity;
   }
   next.setValue(&rootmat[0][0]);
@@ -705,9 +705,9 @@ static bool base_callback(const iTaSC::Timestamp &timestamp,
   return true;
 }
 
-static bool copypose_callback(const iTaSC::Timestamp &timestamp,
+static bool copypose_callback(const iTaSC::Timestamp & /*timestamp*/,
                               iTaSC::ConstraintValues *const _values,
-                              uint _nvalues,
+                              uint /*nvalues*/,
                               void *_param)
 {
   IK_Target *iktarget = (IK_Target *)_param;
@@ -752,7 +752,7 @@ static bool copypose_callback(const iTaSC::Timestamp &timestamp,
 }
 
 static void copypose_error(const iTaSC::ConstraintValues *values,
-                           uint nvalues,
+                           uint /*nvalues*/,
                            IK_Target *iktarget)
 {
   iTaSC::ConstraintSingleValue *value;
@@ -779,7 +779,7 @@ static void copypose_error(const iTaSC::ConstraintValues *values,
 
 static bool distance_callback(const iTaSC::Timestamp &timestamp,
                               iTaSC::ConstraintValues *const _values,
-                              uint _nvalues,
+                              uint /*nvalues*/,
                               void *_param)
 {
   IK_Target *iktarget = (IK_Target *)_param;
@@ -829,13 +829,13 @@ static bool distance_callback(const iTaSC::Timestamp &timestamp,
 }
 
 static void distance_error(const iTaSC::ConstraintValues *values,
-                           uint _nvalues,
+                           uint /*nvalues*/,
                            IK_Target *iktarget)
 {
   iktarget->blenderConstraint->lin_error = float(values->values[0].y - values->values[0].yd);
 }
 
-static bool joint_callback(const iTaSC::Timestamp &timestamp,
+static bool joint_callback(const iTaSC::Timestamp & /*timestamp*/,
                            iTaSC::ConstraintValues *const _values,
                            uint _nvalues,
                            void *_param)
@@ -1068,7 +1068,7 @@ static void convert_pose(IK_Scene *ikscene)
   int a, joint;
 
   /* assume uniform scaling and take Y scale as general scale for the armature */
-  scale = len_v3(ikscene->blArmature->object_to_world[1]);
+  scale = len_v3(ikscene->blArmature->object_to_world().ptr()[1]);
   rot = ikscene->jointArray(0);
   for (joint = a = 0, ikchan = ikscene->channels;
        a < ikscene->numchan && joint < ikscene->numjoint;
@@ -1109,7 +1109,7 @@ static void BKE_pose_rest(IK_Scene *ikscene)
   int a, joint;
 
   /* assume uniform scaling and take Y scale as general scale for the armature */
-  scale = len_v3(ikscene->blArmature->object_to_world[1]);
+  scale = len_v3(ikscene->blArmature->object_to_world().ptr()[1]);
   /* rest pose is 0 */
   SetToZero(ikscene->jointArray);
   /* except for transY joints */
@@ -1188,7 +1188,7 @@ static IK_Scene *convert_tree(
   }
   ikscene->blArmature = ob;
   /* assume uniform scaling and take Y scale as general scale for the armature */
-  ikscene->blScale = len_v3(ob->object_to_world[1]);
+  ikscene->blScale = len_v3(ob->object_to_world().ptr()[1]);
   ikscene->blInvScale = (ikscene->blScale < KDL::epsilon) ? 0.0f : 1.0f / ikscene->blScale;
 
   std::string joint;
@@ -1676,7 +1676,7 @@ static void create_scene(Depsgraph *depsgraph, Scene *scene, Object *ob, float c
 static int init_scene(Object *ob)
 {
   /* check also if scaling has changed */
-  float scale = len_v3(ob->object_to_world[1]);
+  float scale = len_v3(ob->object_to_world().ptr()[1]);
   IK_Scene *scene;
 
   if (ob->pose->ikdata) {
@@ -1922,7 +1922,7 @@ void itasc_execute_tree(
   }
 }
 
-void itasc_release_tree(Scene *scene, Object *ob, float ctime)
+void itasc_release_tree(Scene * /*scene*/, Object * /*ob*/, float /*ctime*/)
 {
   /* not used for iTaSC */
 }
@@ -1982,7 +1982,7 @@ void itasc_update_param(bPose *pose)
   }
 }
 
-void itasc_test_constraint(Object *ob, bConstraint *cons)
+void itasc_test_constraint(Object * /*ob*/, bConstraint *cons)
 {
   bKinematicConstraint *data = (bKinematicConstraint *)cons->data;
 

@@ -8,7 +8,7 @@
 
 #include "DRW_render.hh"
 
-#include "GPU_shader.h"
+#include "GPU_shader.hh"
 
 #include "UI_resources.hh"
 
@@ -34,6 +34,7 @@ struct OVERLAY_Shaders {
   GPUShader *depth_only;
   GPUShader *edit_curve_handle;
   GPUShader *edit_curve_point;
+  GPUShader *edit_curves_handle;
   GPUShader *edit_curve_wire;
   GPUShader *edit_gpencil_guide_point;
   GPUShader *edit_gpencil_point;
@@ -278,8 +279,8 @@ GPUShader *OVERLAY_shader_armature_degrees_of_freedom_wire()
   OVERLAY_Shaders *sh_data = &e_data.sh_data[draw_ctx->sh_cfg];
   if (!sh_data->armature_dof_wire) {
     sh_data->armature_dof_wire = GPU_shader_create_from_info_name(
-        (draw_ctx->sh_cfg == GPU_SHADER_CFG_CLIPPED) ? "overlay_armature_dof_wire_clipped" :
-                                                       "overlay_armature_dof_wire");
+        (draw_ctx->sh_cfg == GPU_SHADER_CFG_CLIPPED) ? "overlay_armature_dof_clipped" :
+                                                       "overlay_armature_dof");
   }
   return sh_data->armature_dof_wire;
 }
@@ -290,8 +291,8 @@ GPUShader *OVERLAY_shader_armature_degrees_of_freedom_solid()
   OVERLAY_Shaders *sh_data = &e_data.sh_data[draw_ctx->sh_cfg];
   if (!sh_data->armature_dof_solid) {
     sh_data->armature_dof_solid = GPU_shader_create_from_info_name(
-        (draw_ctx->sh_cfg == GPU_SHADER_CFG_CLIPPED) ? "overlay_armature_dof_solid_clipped" :
-                                                       "overlay_armature_dof_solid");
+        (draw_ctx->sh_cfg == GPU_SHADER_CFG_CLIPPED) ? "overlay_armature_dof_clipped" :
+                                                       "overlay_armature_dof");
   }
   return sh_data->armature_dof_solid;
 }
@@ -330,6 +331,18 @@ GPUShader *OVERLAY_shader_edit_curve_point()
                                                        "overlay_edit_curve_point");
   }
   return sh_data->edit_curve_point;
+}
+
+GPUShader *OVERLAY_shader_edit_curves_handle()
+{
+  const DRWContextState *draw_ctx = DRW_context_state_get();
+  OVERLAY_Shaders *sh_data = &e_data.sh_data[draw_ctx->sh_cfg];
+  if (!sh_data->edit_curves_handle) {
+    sh_data->edit_curves_handle = GPU_shader_create_from_info_name(
+        (draw_ctx->sh_cfg == GPU_SHADER_CFG_CLIPPED) ? "overlay_edit_curves_handle_clipped" :
+                                                       "overlay_edit_curves_handle");
+  }
+  return sh_data->edit_curves_handle;
 }
 
 GPUShader *OVERLAY_shader_edit_curve_wire()
@@ -970,7 +983,8 @@ GPUShader *OVERLAY_shader_volume_velocity(bool use_needle, bool use_mac)
         "overlay_volume_velocity_mac");
   }
   else if (!sh_data->volume_velocity_sh) {
-    sh_data->volume_velocity_sh = GPU_shader_create_from_info_name("overlay_volume_velocity");
+    sh_data->volume_velocity_sh = GPU_shader_create_from_info_name(
+        "overlay_volume_velocity_streamline");
   }
 
   if (use_needle) {
@@ -994,7 +1008,8 @@ GPUShader *OVERLAY_shader_volume_gridlines(bool color_with_flags, bool color_ran
         "overlay_volume_gridlines_range");
   }
   else if (!sh_data->volume_gridlines_sh) {
-    sh_data->volume_gridlines_sh = GPU_shader_create_from_info_name("overlay_volume_gridlines");
+    sh_data->volume_gridlines_sh = GPU_shader_create_from_info_name(
+        "overlay_volume_gridlines_flat");
   }
 
   if (color_with_flags) {
@@ -1158,7 +1173,7 @@ OVERLAY_InstanceFormats *OVERLAY_shader_instance_formats_get()
   DRW_shgroup_instance_format(g_formats.point_extra,
                               {
                                   {"pos", DRW_ATTR_FLOAT, 3},
-                                  {"colorid", DRW_ATTR_INT, 1},
+                                  {"vertex_color", DRW_ATTR_FLOAT, 4},
                               });
   DRW_shgroup_instance_format(g_formats.instance_bone,
                               {

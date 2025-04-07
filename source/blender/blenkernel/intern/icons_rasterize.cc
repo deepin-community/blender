@@ -5,7 +5,6 @@
 /** \file
  * \ingroup bke
  */
-#include "MEM_guardedalloc.h"
 
 #include "BLI_bitmap_draw_2d.h"
 #include "BLI_math_color.h"
@@ -17,7 +16,7 @@
 
 #include "BKE_icons.h"
 
-#include "BLI_strict_flags.h"
+#include "BLI_strict_flags.h" /* Keep last. */
 
 struct UserRasterInfo {
   int pt[3][2];
@@ -123,7 +122,7 @@ ImBuf *BKE_icon_geom_rasterize(const Icon_Geom *geom, const uint size_x, const u
       BLI_bitmap_draw_2d_tri_v2i(UNPACK3(data.pt), tri_fill_smooth, &data);
     }
   }
-  IMB_scaleImBuf(ibuf, size_x, size_y);
+  IMB_scale(ibuf, size_x, size_y, IMBScaleFilter::Box, false);
   return ibuf;
 }
 

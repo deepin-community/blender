@@ -2,6 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "AS_asset_library.hh"
 #include "AS_asset_representation.hh"
 
 #include "BLI_listbase.h"
@@ -10,7 +11,7 @@
 
 #include "BKE_asset.hh"
 #include "BKE_context.hh"
-#include "BKE_idprop.h"
+#include "BKE_idprop.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_node_tree_update.hh"
@@ -21,9 +22,7 @@
 #include "NOD_socket.hh"
 #include "NOD_socket_search_link.hh"
 
-#include "BLT_translation.h"
-
-#include "RNA_access.hh"
+#include "BLT_translation.hh"
 
 #include "WM_api.hh"
 
@@ -70,18 +69,18 @@ static void add_reroute_node_fn(nodes::LinkSearchOpParams &params)
 {
   bNode &reroute = params.add_node("NodeReroute");
   if (params.socket.in_out == SOCK_IN) {
-    nodeAddLink(&params.node_tree,
-                &reroute,
-                static_cast<bNodeSocket *>(reroute.outputs.first),
-                &params.node,
-                &params.socket);
+    bke::node_add_link(&params.node_tree,
+                       &reroute,
+                       static_cast<bNodeSocket *>(reroute.outputs.first),
+                       &params.node,
+                       &params.socket);
   }
   else {
-    nodeAddLink(&params.node_tree,
-                &params.node,
-                &params.socket,
-                &reroute,
-                static_cast<bNodeSocket *>(reroute.inputs.first));
+    bke::node_add_link(&params.node_tree,
+                       &params.node,
+                       &params.socket,
+                       &reroute,
+                       static_cast<bNodeSocket *>(reroute.inputs.first));
   }
 }
 
@@ -105,7 +104,7 @@ static void add_group_input_node_fn(nodes::LinkSearchOpParams &params)
   /* Hide the new input in all other group input nodes, to avoid making them taller. */
   for (bNode *node : params.node_tree.all_nodes()) {
     if (node->type == NODE_GROUP_INPUT) {
-      bNodeSocket *new_group_input_socket = nodeFindSocket(
+      bNodeSocket *new_group_input_socket = bke::node_find_socket(
           node, SOCK_OUT, socket_iface->identifier);
       if (new_group_input_socket) {
         new_group_input_socket->flag |= SOCK_HIDDEN;
@@ -118,11 +117,11 @@ static void add_group_input_node_fn(nodes::LinkSearchOpParams &params)
     socket->flag |= SOCK_HIDDEN;
   }
 
-  bNodeSocket *socket = nodeFindSocket(&group_input, SOCK_OUT, socket_iface->identifier);
+  bNodeSocket *socket = bke::node_find_socket(&group_input, SOCK_OUT, socket_iface->identifier);
   if (socket) {
     /* Unhide the socket for the new input in the new node and make a connection to it. */
     socket->flag &= ~SOCK_HIDDEN;
-    nodeAddLink(&params.node_tree, &group_input, socket, &params.node, &params.socket);
+    bke::node_add_link(&params.node_tree, &group_input, socket, &params.node, &params.socket);
 
     bke::node_socket_move_default_value(
         *CTX_data_main(&params.C), params.node_tree, params.socket, *socket);
@@ -143,10 +142,10 @@ static void add_existing_group_input_fn(nodes::LinkSearchOpParams &params,
     socket->flag |= SOCK_HIDDEN;
   }
 
-  bNodeSocket *socket = nodeFindSocket(&group_input, SOCK_OUT, interface_socket.identifier);
+  bNodeSocket *socket = bke::node_find_socket(&group_input, SOCK_OUT, interface_socket.identifier);
   if (socket != nullptr) {
     socket->flag &= ~SOCK_HIDDEN;
-    nodeAddLink(&params.node_tree, &group_input, socket, &params.node, &params.socket);
+    bke::node_add_link(&params.node_tree, &group_input, socket, &params.node, &params.socket);
   }
 }
 
@@ -166,7 +165,7 @@ static void search_link_ops_for_asset_metadata(const bNodeTree &node_tree,
     return;
   }
 
-  const bNodeTreeType &node_tree_type = *node_tree.typeinfo;
+  const bke::bNodeTreeType &node_tree_type = *node_tree.typeinfo;
   const eNodeSocketInOut in_out = socket.in_out == SOCK_OUT ? SOCK_IN : SOCK_OUT;
 
   const IDProperty *sockets = BKE_asset_metadata_idprop_find(
@@ -179,7 +178,7 @@ static void search_link_ops_for_asset_metadata(const bNodeTree &node_tree,
       continue;
     }
     const char *socket_idname = IDP_String(socket_property);
-    const bNodeSocketType *socket_type = nodeSocketTypeFind(socket_idname);
+    const bke::bNodeSocketType *socket_type = bke::node_socket_type_find(socket_idname);
     if (socket_type == nullptr) {
       continue;
     }
@@ -205,12 +204,16 @@ static void search_link_ops_for_asset_metadata(const bNodeTree &node_tree,
            Main &bmain = *CTX_data_main(&params.C);
 
            bNode &node = params.add_node(params.node_tree.typeinfo->group_idname);
-           node.flag &= ~NODE_OPTIONS;
 
-           node.id = asset::asset_local_id_ensure_imported(bmain, asset);
+           bNodeTree *group = reinterpret_cast<bNodeTree *>(
+               asset::asset_local_id_ensure_imported(bmain, asset));
+           node.id = &group->id;
            id_us_plus(node.id);
            BKE_ntree_update_tag_node_property(&params.node_tree, &node);
            DEG_relations_tag_update(&bmain);
+
+           node.flag &= ~NODE_OPTIONS;
+           node.width = group->default_group_node_width;
 
            /* Create the inputs and outputs on the new node. */
            nodes::update_node_declaration_and_sockets(params.node_tree, node);
@@ -218,8 +221,9 @@ static void search_link_ops_for_asset_metadata(const bNodeTree &node_tree,
            bNodeSocket *new_node_socket = bke::node_find_enabled_socket(
                node, in_out, socket_property->name);
            if (new_node_socket != nullptr) {
-             /* Rely on the way #nodeAddLink switches in/out if necessary. */
-             nodeAddLink(&params.node_tree, &params.node, &params.socket, &node, new_node_socket);
+             /* Rely on the way #node_add_link switches in/out if necessary. */
+             bke::node_add_link(
+                 &params.node_tree, &params.node, &params.socket, &node, new_node_socket);
            }
          },
          weight});
@@ -228,14 +232,13 @@ static void search_link_ops_for_asset_metadata(const bNodeTree &node_tree,
   }
 }
 
-static void gather_search_link_ops_for_asset_library(const bContext &C,
-                                                     const bNodeTree &node_tree,
-                                                     const bNodeSocket &socket,
-                                                     const AssetLibraryReference &library_ref,
-                                                     const bool skip_local,
-                                                     Vector<SocketLinkOperation> &search_link_ops)
+static void gather_search_link_ops_for_all_assets(const bContext &C,
+                                                  const bNodeTree &node_tree,
+                                                  const bNodeSocket &socket,
+                                                  Vector<SocketLinkOperation> &search_link_ops)
 {
-  AssetFilterSettings filter_settings{};
+  const AssetLibraryReference library_ref = asset_system::all_library_reference();
+  asset::AssetFilterSettings filter_settings{};
   filter_settings.id_types = FILTER_ID_NT;
 
   asset::list::storage_fetch(&library_ref, &C);
@@ -243,43 +246,9 @@ static void gather_search_link_ops_for_asset_library(const bContext &C,
     if (!asset::filter_matches_asset(&filter_settings, asset)) {
       return true;
     }
-    if (skip_local && asset.is_local_id()) {
-      return true;
-    }
     search_link_ops_for_asset_metadata(node_tree, socket, asset, search_link_ops);
     return true;
   });
-}
-
-static void gather_search_link_ops_for_all_assets(const bContext &C,
-                                                  const bNodeTree &node_tree,
-                                                  const bNodeSocket &socket,
-                                                  Vector<SocketLinkOperation> &search_link_ops)
-{
-  int i;
-  LISTBASE_FOREACH_INDEX (const bUserAssetLibrary *, asset_library, &U.asset_libraries, i) {
-    AssetLibraryReference library_ref{};
-    library_ref.custom_library_index = i;
-    library_ref.type = ASSET_LIBRARY_CUSTOM;
-    /* Skip local assets to avoid duplicates when the asset is part of the local file library. */
-    gather_search_link_ops_for_asset_library(
-        C, node_tree, socket, library_ref, true, search_link_ops);
-  }
-
-  {
-    AssetLibraryReference library_ref{};
-    library_ref.custom_library_index = -1;
-    library_ref.type = ASSET_LIBRARY_ESSENTIALS;
-    gather_search_link_ops_for_asset_library(
-        C, node_tree, socket, library_ref, true, search_link_ops);
-  }
-  {
-    AssetLibraryReference library_ref{};
-    library_ref.custom_library_index = -1;
-    library_ref.type = ASSET_LIBRARY_LOCAL;
-    gather_search_link_ops_for_asset_library(
-        C, node_tree, socket, library_ref, false, search_link_ops);
-  }
 }
 
 /**
@@ -314,7 +283,7 @@ static void gather_socket_link_operations(const bContext &C,
 
   search_link_ops.append({IFACE_("Reroute"), add_reroute_node_fn});
 
-  const bool is_node_group = !(node_tree.id.flag & LIB_EMBEDDED_DATA);
+  const bool is_node_group = !(node_tree.id.flag & ID_FLAG_EMBEDDED_DATA);
 
   if (is_node_group && socket.in_out == SOCK_IN) {
     search_link_ops.append({IFACE_("Group Input"), add_group_input_node_fn});
@@ -327,7 +296,8 @@ static void gather_socket_link_operations(const bContext &C,
       const bNodeTreeInterfaceSocket &interface_socket =
           reinterpret_cast<const bNodeTreeInterfaceSocket &>(item);
       {
-        const bNodeSocketType *from_typeinfo = nodeSocketTypeFind(interface_socket.socket_type);
+        const bke::bNodeSocketType *from_typeinfo = bke::node_socket_type_find(
+            interface_socket.socket_type);
         const eNodeSocketDatatype from = from_typeinfo ? eNodeSocketDatatype(from_typeinfo->type) :
                                                          SOCK_CUSTOM;
         const eNodeSocketDatatype to = eNodeSocketDatatype(socket.typeinfo->type);
@@ -410,8 +380,8 @@ static void link_drag_search_exec_fn(bContext *C, void *arg1, void *arg2)
     new_node->locx -= new_node->width;
   }
 
-  nodeSetSelected(new_node, true);
-  nodeSetActive(&node_tree, new_node);
+  bke::node_set_selected(new_node, true);
+  bke::node_set_active(&node_tree, new_node);
 
   /* Ideally it would be possible to tag the node tree in some way so it updates only after the
    * translate operation is finished, but normally moving nodes around doesn't cause updates. */
@@ -449,8 +419,6 @@ static uiBlock *create_search_popup_block(bContext *C, ARegion *region, void *ar
                               10,
                               UI_searchbox_size_x(),
                               UI_UNIT_Y,
-                              0,
-                              0,
                               "");
   UI_but_func_search_set_sep_string(but, UI_MENU_ARROW_SEP);
   UI_but_func_search_set_listen(but, link_drag_search_listen_fn);
@@ -474,8 +442,6 @@ static uiBlock *create_search_popup_block(bContext *C, ARegion *region, void *ar
            UI_searchbox_size_x(),
            UI_searchbox_size_y(),
            nullptr,
-           0,
-           0,
            0,
            0,
            nullptr);

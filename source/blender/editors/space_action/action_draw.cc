@@ -13,32 +13,28 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "BLI_blenlib.h"
 #include "BLI_math_color.h"
 #include "BLI_utildefines.h"
 
 /* Types --------------------------------------------------------------- */
 
 #include "DNA_anim_types.h"
-#include "DNA_cachefile_types.h"
-#include "DNA_gpencil_legacy_types.h"
 #include "DNA_modifier_types.h"
 #include "DNA_node_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 
-#include "BKE_action.h"
 #include "BKE_bake_geometry_nodes_modifier.hh"
-#include "BKE_context.hh"
-#include "BKE_node_runtime.hh"
 #include "BKE_pointcache.h"
+
+#include "ANIM_action.hh"
 
 /* Everything from source (BIF, BDR, BSE) ------------------------------ */
 
-#include "GPU_immediate.h"
-#include "GPU_matrix.h"
-#include "GPU_state.h"
+#include "GPU_immediate.hh"
+#include "GPU_matrix.hh"
+#include "GPU_state.hh"
 
 #include "UI_interface.hh"
 #include "UI_resources.hh"
@@ -51,6 +47,8 @@
 
 #include "action_intern.hh"
 
+using namespace blender;
+
 /* -------------------------------------------------------------------- */
 /** \name Channel List
  * \{ */
@@ -58,7 +56,7 @@
 void draw_channel_names(bContext *C,
                         bAnimContext *ac,
                         ARegion *region,
-                        const ListBase /* bAnimListElem */ &anim_data)
+                        const ListBase /*bAnimListElem*/ &anim_data)
 {
   bAnimListElem *ale;
   View2D *v2d = &region->v2d;
@@ -228,6 +226,7 @@ static void draw_backdrops(bAnimContext *ac, ListBase &anim_data, View2D *v2d, u
           break;
         }
         case ANIMTYPE_FILLACTD:
+        case ANIMTYPE_FILLACT_LAYERED:
         case ANIMTYPE_DSSKEY:
         case ANIMTYPE_DSWOR: {
           immUniformColor3ubvAlpha(col2b, sel ? col1[3] : col2b[3]);
@@ -373,6 +372,23 @@ static void draw_keyframes(bAnimContext *ac,
                               scale_factor,
                               action_flag);
         break;
+      case ALE_ACTION_LAYERED:
+        ED_add_action_layered_channel(draw_list,
+                                      adt,
+                                      static_cast<bAction *>(ale->key_data),
+                                      ycenter,
+                                      scale_factor,
+                                      action_flag);
+        break;
+      case ALE_ACTION_SLOT:
+        ED_add_action_slot_channel(draw_list,
+                                   adt,
+                                   static_cast<bAction *>(ale->key_data)->wrap(),
+                                   *static_cast<animrig::Slot *>(ale->data),
+                                   ycenter,
+                                   scale_factor,
+                                   action_flag);
+        break;
       case ALE_ACT:
         ED_add_action_channel(draw_list,
                               adt,
@@ -416,7 +432,8 @@ static void draw_keyframes(bAnimContext *ac,
         break;
       case ALE_GREASE_PENCIL_DATA:
         ED_add_grease_pencil_datablock_channel(draw_list,
-                                               ads,
+                                               ac,
+                                               ale->adt,
                                                static_cast<const GreasePencil *>(ale->data),
                                                ycenter,
                                                scale_factor,
@@ -438,6 +455,9 @@ static void draw_keyframes(bAnimContext *ac,
                                   scale_factor,
                                   action_flag);
         break;
+      case ALE_NONE:
+      case ALE_NLASTRIP:
+        break;
     }
   }
 
@@ -446,25 +466,17 @@ static void draw_keyframes(bAnimContext *ac,
   ED_channel_list_free(draw_list);
 }
 
-void draw_channel_strips(bAnimContext *ac, SpaceAction *saction, ARegion *region)
+void draw_channel_strips(bAnimContext *ac,
+                         SpaceAction *saction,
+                         ARegion *region,
+                         ListBase *anim_data)
 {
-  ListBase anim_data = {nullptr, nullptr};
   View2D *v2d = &region->v2d;
-
-  /* build list of channels to draw */
-  eAnimFilter_Flags filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE |
-                              ANIMFILTER_LIST_CHANNELS);
-  size_t items = ANIM_animdata_filter(
-      ac, &anim_data, filter, ac->data, eAnimCont_Types(ac->datatype));
-
-  const int height = ANIM_UI_get_channels_total_height(v2d, items);
-  const float pad_bottom = BLI_listbase_is_empty(ac->markers) ? 0 : UI_MARKER_MARGIN_Y;
-  v2d->tot.ymin = -(height + pad_bottom);
 
   /* Draw the manual frame ranges for actions in the background of the dopesheet.
    * The action editor has already drawn the range for its action so it's not needed. */
   if (ac->datatype == ANIMCONT_DOPESHEET) {
-    draw_channel_action_ranges(&anim_data, v2d);
+    draw_channel_action_ranges(anim_data, v2d);
   }
 
   /* Draw the background strips. */
@@ -476,7 +488,7 @@ void draw_channel_strips(bAnimContext *ac, SpaceAction *saction, ARegion *region
   GPU_blend(GPU_BLEND_ALPHA);
 
   /* first backdrop strips */
-  draw_backdrops(ac, anim_data, v2d, pos);
+  draw_backdrops(ac, *anim_data, v2d, pos);
 
   GPU_blend(GPU_BLEND_NONE);
 
@@ -491,10 +503,10 @@ void draw_channel_strips(bAnimContext *ac, SpaceAction *saction, ARegion *region
   }
   immUnbindProgram();
 
-  draw_keyframes(ac, v2d, saction, anim_data);
+  draw_keyframes(ac, v2d, saction, *anim_data);
 
   /* free temporary channels used for drawing */
-  ANIM_animdata_freelist(&anim_data);
+  ANIM_animdata_freelist(anim_data);
 }
 
 /** \} */

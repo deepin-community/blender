@@ -206,6 +206,13 @@ template<typename MatT, typename RotationT>
                                 const RotationT &rotation);
 
 /**
+ * Create a transform matrix with translation and scale applied in this order.
+ */
+template<typename MatT, int ScaleDim>
+[[nodiscard]] MatT from_loc_scale(const typename MatT::loc_type &location,
+                                  const VecBase<typename MatT::base_type, ScaleDim> &scale);
+
+/**
  * Create a transform matrix with translation, rotation and scale applied in this order.
  */
 template<typename MatT, typename RotationT, int ScaleDim>
@@ -408,8 +415,8 @@ template<typename T>
 /**
  * \brief Create an orthographic projection matrix using OpenGL coordinate convention:
  * Maps each axis range to [-1..1] range for all axes except Z.
- * The Z axis is collapsed to 0 which eliminates the depth component. So it cannot be used with
- * depth testing.
+ * The Z axis is almost collapsed to 0 which eliminates the depth component.
+ * So it should not be used with depth testing.
  * The resulting matrix can be used with either #project_point or #transform_point.
  */
 template<typename T> MatBase<T, 4, 4> orthographic_infinite(T left, T right, T bottom, T top);
@@ -443,6 +450,14 @@ template<typename T>
  */
 template<typename T>
 [[nodiscard]] MatBase<T, 4, 4> perspective_infinite(T left, T right, T bottom, T top, T near_clip);
+
+/**
+ * \brief Translate a projection matrix after creation in the screen plane.
+ *  Usually used for anti-aliasing jittering.
+ * `offset` is the translation vector in projected space.
+ */
+template<typename T>
+[[nodiscard]] MatBase<T, 4, 4> translate(const MatBase<T, 4, 4> &mat, const VecBase<T, 2> &offset);
 
 }  // namespace projection
 
@@ -1213,6 +1228,19 @@ template<typename T>
   return to_quaternion<T>(MatBase<T, 3, 3>(mat));
 }
 
+/**
+ * This is "safe" in the sense that the input matrix may not actually encode a rotation but can
+ * also contain shearing etc.
+ */
+template<typename T>
+[[nodiscard]] inline QuaternionBase<T> normalized_to_quaternion_safe(const MatBase<T, 3, 3> &mat)
+{
+  /* Conversion to quaternion asserts when the matrix contains some kinds of shearing, conversion
+   * to euler does not. */
+  /* TODO: Find a better algorithm that can convert untrusted matrices to quaternions directly. */
+  return to_quaternion(to_euler(mat));
+}
+
 template<bool AllowNegativeScale, typename T, int NumCol, int NumRow>
 [[nodiscard]] inline VecBase<T, 3> to_scale(const MatBase<T, NumCol, NumRow> &mat)
 {
@@ -1316,6 +1344,26 @@ inline void to_loc_rot_scale(const MatBase<T, 4, 4> &mat,
   to_rot_scale<AllowNegativeScale>(MatBase<T, 3, 3>(mat), r_rotation, r_scale);
 }
 
+/**
+ * Same as #to_loc_rot_scale but is handles matrices that are not only location, rotation and scale
+ * more gracefully, e.g. when the matrix has skew.
+ */
+template<bool AllowNegativeScale, typename T, typename RotationT>
+inline void to_loc_rot_scale_safe(const MatBase<T, 4, 4> &mat,
+                                  VecBase<T, 3> &r_location,
+                                  RotationT &r_rotation,
+                                  VecBase<T, 3> &r_scale)
+{
+  EulerXYZBase<T> euler_rotation;
+  to_loc_rot_scale<AllowNegativeScale>(mat, r_location, euler_rotation, r_scale);
+  if constexpr (std::is_same_v<std::decay_t<RotationT>, QuaternionBase<T>>) {
+    r_rotation = to_quaternion(euler_rotation);
+  }
+  else {
+    r_rotation = RotationT(euler_rotation);
+  }
+}
+
 template<typename MatT> [[nodiscard]] MatT from_location(const typename MatT::loc_type &location)
 {
   MatT mat = MatT::identity();
@@ -1364,6 +1412,15 @@ template<typename MatT, typename RotationT>
   using MatRotT =
       MatBase<typename MatT::base_type, MatT::loc_type::type_length, MatT::loc_type::type_length>;
   MatT mat = MatT(from_rotation<MatRotT>(rotation));
+  mat.location() = location;
+  return mat;
+}
+
+template<typename MatT, int ScaleDim>
+[[nodiscard]] MatT from_loc_scale(const typename MatT::loc_type &location,
+                                  const VecBase<typename MatT::base_type, ScaleDim> &scale)
+{
+  MatT mat = MatT(from_scale<MatT>(scale));
   mat.location() = location;
   return mat;
 }
@@ -1573,7 +1630,8 @@ MatBase<T, 4, 4> orthographic(T left, T right, T bottom, T top, T near_clip, T f
   return mat;
 }
 
-template<typename T> MatBase<T, 4, 4> orthographic_infinite(T left, T right, T bottom, T top)
+template<typename T>
+MatBase<T, 4, 4> orthographic_infinite(T left, T right, T bottom, T top, T near_clip)
 {
   const T x_delta = right - left;
   const T y_delta = top - bottom;
@@ -1584,8 +1642,13 @@ template<typename T> MatBase<T, 4, 4> orthographic_infinite(T left, T right, T b
     mat[3][0] = -(right + left) / x_delta;
     mat[1][1] = T(2.0) / y_delta;
     mat[3][1] = -(top + bottom) / y_delta;
-    mat[2][2] = 0.0f;
-    mat[3][2] = 0.0f;
+    /* Page 17. Choosing an epsilon for 32 bit floating-point precision. */
+    constexpr float eps = 2.4e-7f;
+    /* From "Projection Matrix Tricks" by Eric Lengyel GDC 2007.
+     * Following same procedure as the reference but for orthographic matrix.
+     * This avoids degenerate matrix (0 determinant). */
+    mat[2][2] = -eps;
+    mat[3][2] = -1.0f - eps * near_clip;
   }
   return mat;
 }
@@ -1647,6 +1710,23 @@ template<typename T>
   mat[0][0] /= near_clip;
   mat[1][1] /= near_clip;
   return mat;
+}
+
+template<typename T>
+[[nodiscard]] MatBase<T, 4, 4> translate(const MatBase<T, 4, 4> &mat, const VecBase<T, 2> &offset)
+{
+  MatBase<T, 4, 4> result = mat;
+  const bool is_perspective = mat[2][3] == -1.0f;
+  const bool is_perspective_infinite = mat[2][2] == -1.0f;
+  if (is_perspective || is_perspective_infinite) {
+    result[2][0] -= mat[0][0] * offset.x / math::length(float3(mat[0][0], mat[1][0], mat[2][0]));
+    result[2][1] -= mat[1][1] * offset.y / math::length(float3(mat[0][1], mat[1][1], mat[2][1]));
+  }
+  else {
+    result[3][0] += offset.x;
+    result[3][1] += offset.y;
+  }
+  return result;
 }
 
 extern template float4x4 orthographic(

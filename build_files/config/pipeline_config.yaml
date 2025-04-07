@@ -13,13 +13,11 @@ buildbot:
     cuda12:
         version: '12.1.1'
     hip:
-        version: '5.5.30571'
-    hiprt:
-        version: '2.0.3a134c7'
+        version: '5.7.32000'
     optix:
-        version: '7.3.0'
+        version: '7.4.0'
     ocloc:
-        version: '101.4723p0'
+        version: '101.5972'
     cmake:
         default:
             version: any
@@ -31,4 +29,6 @@ buildbot:
         linux-x86_64:
             overrides: {}
         windows-amd64:
+            overrides: {}
+        windows-arm64:
             overrides: {}

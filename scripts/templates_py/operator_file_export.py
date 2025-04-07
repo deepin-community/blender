@@ -3,8 +3,8 @@ import bpy
 
 def write_some_data(context, filepath, use_some_setting):
     print("running write_some_data...")
-    f = open(filepath, 'w', encoding='utf-8')
-    f.write("Hello World %s" % use_some_setting)
+    f = open(filepath, "w", encoding='utf-8')
+    f.write("Hello World {:s}".format(use_some_setting))
     f.close()
 
     return {'FINISHED'}

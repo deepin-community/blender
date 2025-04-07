@@ -18,8 +18,8 @@
 #include "BLI_hash.h"
 #include "BLI_utildefines.h"
 
-#include "GPU_shader.h"
-#include "GPU_vertex_format.h" /* GPU_VERT_ATTR_MAX_LEN */
+#include "GPU_shader.hh"
+#include "GPU_vertex_format.hh" /* GPU_VERT_ATTR_MAX_LEN */
 #include "gpu_shader_create_info.hh"
 
 namespace blender::gpu {
@@ -64,6 +64,8 @@ class ShaderInterface {
   uint8_t enabled_ima_mask_ = 0;
   uint64_t enabled_tex_mask_ = 0;
   uint16_t enabled_ssbo_mask_ = 0;
+  /* Bitmask to apply to enabled_ssbo_mask_ to get attributes that are sourced from SSBOs. */
+  uint16_t ssbo_attr_mask_ = 0;
   /** Location of builtin uniforms. Fast access, no lookup needed. */
   int32_t builtins_[GPU_NUM_UNIFORMS];
   int32_t builtin_blocks_[GPU_NUM_UNIFORM_BLOCKS];

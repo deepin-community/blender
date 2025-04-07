@@ -15,19 +15,17 @@
 #include "DNA_object_types.h"
 
 #include "ED_gizmo_library.hh"
-#include "ED_screen.hh"
 
 #include "UI_resources.hh"
 
 #include "MEM_guardedalloc.h"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
-#include "WM_api.hh"
 #include "WM_types.hh"
 
-#include "view3d_intern.h" /* own include */
+#include "view3d_intern.hh" /* own include */
 
 /* -------------------------------------------------------------------- */
 /** \name Force Field Gizmos
@@ -72,6 +70,11 @@ static void WIDGETGROUP_forcefield_setup(const bContext * /*C*/, wmGizmoGroup *g
 
   UI_GetThemeColor3fv(TH_GIZMO_PRIMARY, gz->color);
   UI_GetThemeColor3fv(TH_GIZMO_HI, gz->color_hi);
+
+  /* All gizmos must perform undo. */
+  LISTBASE_FOREACH (wmGizmo *, gz_iter, &gzgroup->gizmos) {
+    WM_gizmo_set_flag(gz_iter, WM_GIZMO_NEEDS_UNDO, true);
+  }
 }
 
 static void WIDGETGROUP_forcefield_refresh(const bContext *C, wmGizmoGroup *gzgroup)
@@ -89,8 +92,8 @@ static void WIDGETGROUP_forcefield_refresh(const bContext *C, wmGizmoGroup *gzgr
     const float ofs[3] = {0.0f, -size, 0.0f};
 
     PointerRNA field_ptr = RNA_pointer_create(&ob->id, &RNA_FieldSettings, pd);
-    WM_gizmo_set_matrix_location(gz, ob->object_to_world[3]);
-    WM_gizmo_set_matrix_rotation_from_z_axis(gz, ob->object_to_world[2]);
+    WM_gizmo_set_matrix_location(gz, ob->object_to_world().location());
+    WM_gizmo_set_matrix_rotation_from_z_axis(gz, ob->object_to_world().ptr()[2]);
     WM_gizmo_set_matrix_offset_location(gz, ofs);
     WM_gizmo_set_flag(gz, WM_GIZMO_HIDDEN, false);
     WM_gizmo_target_property_def_rna(gz, "offset", &field_ptr, "strength", -1);

@@ -14,18 +14,16 @@
 #include "BKE_appdir.hh"
 #include "BKE_blendfile.hh"
 #include "BKE_context.hh"
-#include "BKE_global.h"
 #include "BKE_main.hh"
-#include "BKE_report.h"
+#include "BKE_report.hh"
 #include "BKE_screen.hh"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #ifdef WIN32
 #  include "BLI_winstuff.h"
 #endif
 
-#include "ED_asset.hh"
 #include "ED_fileselect.hh"
 #include "ED_screen.hh"
 #include "ED_select_utils.hh"
@@ -598,7 +596,7 @@ static int file_select_exec(bContext *C, wmOperator *op)
   int ret_val = OPERATOR_FINISHED;
 
   const FileSelectParams *params = ED_fileselect_get_active_params(sfile);
-  if (sfile && params) {
+  if (params) {
     int idx = params->highlight_file;
     int numfiles = filelist_files_ensure(sfile->files);
 
@@ -1836,9 +1834,10 @@ static int file_external_operation_exec(bContext *C, wmOperator *op)
   PointerRNA op_props;
   WM_operator_properties_create_ptr(&op_props, ot);
   RNA_string_set(&op_props, "filepath", filepath);
-  if (WM_operator_name_call_ptr(C, ot, WM_OP_INVOKE_DEFAULT, &op_props, nullptr) ==
-      OPERATOR_FINISHED)
-  {
+  const int retval = WM_operator_name_call_ptr(C, ot, WM_OP_INVOKE_DEFAULT, &op_props, nullptr);
+  WM_operator_properties_free(&op_props);
+
+  if (retval == OPERATOR_FINISHED) {
     WM_cursor_set(CTX_wm_window(C), WM_CURSOR_DEFAULT);
     return OPERATOR_FINISHED;
   }
@@ -1850,13 +1849,13 @@ static int file_external_operation_exec(bContext *C, wmOperator *op)
   return OPERATOR_CANCELLED;
 }
 
-static std::string file_external_operation_description(bContext * /*C*/,
-                                                       wmOperatorType * /*ot*/,
-                                                       PointerRNA *ptr)
+static std::string file_external_operation_get_description(bContext * /*C*/,
+                                                           wmOperatorType * /*ot*/,
+                                                           PointerRNA *ptr)
 {
   const char *description = "";
   RNA_enum_description(file_external_operation, RNA_enum_get(ptr, "operation"), &description);
-  return description;
+  return TIP_(description);
 }
 
 void FILE_OT_external_operation(wmOperatorType *ot)
@@ -1870,7 +1869,7 @@ void FILE_OT_external_operation(wmOperatorType *ot)
 
   /* api callbacks */
   ot->exec = file_external_operation_exec;
-  ot->get_description = file_external_operation_description;
+  ot->get_description = file_external_operation_get_description;
 
   /* flags */
   ot->flag = OPTYPE_REGISTER; /* No undo! */
@@ -1906,8 +1905,14 @@ static void file_os_operations_menu_item(uiLayout *layout,
   RNA_enum_name(file_external_operation, operation, &title);
 
   PointerRNA props_ptr;
-  uiItemFullO_ptr(
-      layout, ot, title, ICON_NONE, nullptr, WM_OP_INVOKE_DEFAULT, UI_ITEM_NONE, &props_ptr);
+  uiItemFullO_ptr(layout,
+                  ot,
+                  IFACE_(title),
+                  ICON_NONE,
+                  nullptr,
+                  WM_OP_INVOKE_DEFAULT,
+                  UI_ITEM_NONE,
+                  &props_ptr);
   RNA_string_set(&props_ptr, "filepath", path);
   if (operation) {
     RNA_enum_set(&props_ptr, "operation", operation);
@@ -2700,6 +2705,18 @@ static int file_directory_new_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
+static int file_directory_new_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+{
+  /* NOTE: confirm is needed because this operator is invoked
+   * when entering a path from the file selector. Without a confirmation,
+   * a typo will create the path without any prompt. See #128567. */
+  if (RNA_boolean_get(op->ptr, "confirm")) {
+    return WM_operator_confirm_ex(
+        C, op, IFACE_("Create new directory?"), nullptr, IFACE_("Create"), ALERT_ICON_NONE, false);
+  }
+  return file_directory_new_exec(C, op);
+}
+
 void FILE_OT_directory_new(wmOperatorType *ot)
 {
   PropertyRNA *prop;
@@ -2710,7 +2727,7 @@ void FILE_OT_directory_new(wmOperatorType *ot)
   ot->idname = "FILE_OT_directory_new";
 
   /* api callbacks */
-  ot->invoke = WM_operator_confirm_or_exec;
+  ot->invoke = file_directory_new_invoke;
   ot->exec = file_directory_new_exec;
   /* File browsing only operator (not asset browsing). */
   ot->poll = ED_operator_file_browsing_active; /* <- important, handler is on window level */
@@ -2748,12 +2765,18 @@ static void file_expand_directory(bContext *C)
       /* While path handling expansion typically doesn't support home directory expansion
        * in Blender, this is a convenience to be able to type in a single character.
        * Even though this is a UNIX convention, it's harmless to expand on WIN32 as well. */
-      char tmpstr[sizeof(params->dir) - 1];
-      STRNCPY(tmpstr, params->dir + 1);
-      BLI_path_join(params->dir, sizeof(params->dir), BKE_appdir_folder_home(), tmpstr);
+      if (const char *home_dir = BKE_appdir_folder_home()) {
+        char tmpstr[sizeof(params->dir) - 1];
+        STRNCPY(tmpstr, params->dir + 1);
+        BLI_path_join(params->dir, sizeof(params->dir), home_dir, tmpstr);
+      }
+      else {
+        /* Fall back to the default root. */
+        params->dir[0] = '\0';
+      }
     }
 
-    else if (params->dir[0] == '\0')
+    if (params->dir[0] == '\0')
 #ifndef WIN32
     {
       params->dir[0] = '/';
@@ -3171,14 +3194,13 @@ static int file_delete_exec(bContext *C, wmOperator *op)
   }
 
   if (report_error) {
+    const char *error_prefix = "Could not delete file or directory: ";
+    const char *errno_message = errno ? strerror(errno) : "unknown error";
     if (error_message != nullptr) {
-      BKE_reportf(op->reports, RPT_ERROR, "Could not delete file or directory: %s", error_message);
+      BKE_reportf(op->reports, RPT_ERROR, "%s%s, %s", error_prefix, error_message, errno_message);
     }
     else {
-      BKE_reportf(op->reports,
-                  RPT_ERROR,
-                  "Could not delete file or directory: %s",
-                  errno ? strerror(errno) : "unknown error");
+      BKE_reportf(op->reports, RPT_ERROR, "%s%s", error_prefix, errno_message);
     }
   }
 
@@ -3186,6 +3208,12 @@ static int file_delete_exec(bContext *C, wmOperator *op)
   WM_event_add_notifier(C, NC_SPACE | ND_SPACE_FILE_LIST, nullptr);
 
   return OPERATOR_FINISHED;
+}
+
+static int file_delete_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+{
+  return WM_operator_confirm_ex(
+      C, op, IFACE_("Delete selected files?"), nullptr, IFACE_("Delete"), ALERT_ICON_NONE, false);
 }
 
 void FILE_OT_delete(wmOperatorType *ot)
@@ -3196,7 +3224,7 @@ void FILE_OT_delete(wmOperatorType *ot)
   ot->idname = "FILE_OT_delete";
 
   /* api callbacks */
-  ot->invoke = WM_operator_confirm;
+  ot->invoke = file_delete_invoke;
   ot->exec = file_delete_exec;
   ot->poll = file_delete_poll; /* <- important, handler is on window level */
 }

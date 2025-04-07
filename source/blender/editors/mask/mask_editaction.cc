@@ -14,13 +14,11 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
 #include "BLI_utildefines.h"
 
 #include "DNA_mask_types.h"
 #include "DNA_scene_types.h"
 
-#include "BKE_fcurve.h"
 #include "BKE_mask.h"
 
 #include "ED_anim_api.hh"
@@ -232,11 +230,13 @@ bool ED_masklayer_frames_delete(MaskLayer *mask_layer)
   return changed;
 }
 
-void ED_masklayer_frames_duplicate(MaskLayer *mask_layer)
+bool ED_masklayer_frames_duplicate(MaskLayer *mask_layer)
 {
+  bool changed = false;
+
   /* Error checking. */
   if (mask_layer == nullptr) {
-    return;
+    return changed;
   }
 
   /* Duplicate selected frames. */
@@ -252,8 +252,11 @@ void ED_masklayer_frames_duplicate(MaskLayer *mask_layer)
 
       /* XXX: how to handle duplicate frames? */
       BLI_insertlinkafter(&mask_layer->splines_shapes, mask_layer_shape, mask_shape_dupe);
+      changed = true;
     }
   }
+
+  return changed;
 }
 
 /* -------------------------------------- */

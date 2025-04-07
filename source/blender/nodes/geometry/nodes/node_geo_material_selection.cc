@@ -4,16 +4,12 @@
 
 #include "node_geometry_util.hh"
 
-#include "UI_interface.hh"
-#include "UI_resources.hh"
-
 #include "DNA_mesh_types.h"
 
 #include "BLI_task.hh"
 
 #include "BKE_curves.hh"
 #include "BKE_grease_pencil.hh"
-#include "BKE_material.h"
 
 namespace blender::nodes::node_geo_material_selection_cc {
 
@@ -104,6 +100,29 @@ class MaterialSelectionFieldInput final : public bke::GeometryFieldInput {
             domain_mask);
         return attributes.adapt_domain<bool>(std::move(selection), AttrDomain::Curve, domain);
       }
+      case GeometryComponent::Type::Curve: {
+        const Curves *curves_id = context.curves_id();
+        if (!curves_id) {
+          return {};
+        }
+        const bke::CurvesGeometry *curves = context.curves_or_strokes();
+        if (!curves) {
+          return {};
+        }
+        const AttrDomain domain = context.domain();
+        const IndexMask domain_mask = (domain == AttrDomain::Curve) ?
+                                          mask :
+                                          IndexMask(curves->curves_num());
+        const AttributeAccessor attributes = curves->attributes();
+        const VArray<int> material_indices = *attributes.lookup_or_default<int>(
+            "material_index", AttrDomain::Curve, 0);
+        VArray<bool> selection = select_by_material({curves_id->mat, curves_id->totcol},
+                                                    material_,
+                                                    attributes,
+                                                    AttrDomain::Curve,
+                                                    domain_mask);
+        return attributes.adapt_domain<bool>(std::move(selection), AttrDomain::Curve, domain);
+      }
       default:
         return {};
     }
@@ -140,13 +159,13 @@ static void node_geo_exec(GeoNodeExecParams params)
 
 static void node_register()
 {
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
 
   geo_node_type_base(
       &ntype, GEO_NODE_MATERIAL_SELECTION, "Material Selection", NODE_CLASS_GEOMETRY);
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
-  nodeRegisterType(&ntype);
+  blender::bke::node_register_type(&ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

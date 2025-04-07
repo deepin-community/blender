@@ -62,7 +62,7 @@ ccl_device_inline float4 madd4(const float4 a, const float4 b, const float4 c)
 ccl_device_inline int fast_rint(float x)
 {
   /* used by sin/cos/tan range reduction. */
-#ifdef __KERNEL_SSE41__
+#ifdef __KERNEL_SSE42__
   /* Single `roundps` instruction on SSE4.1+ for gcc/clang but not MSVC 19.35:
    * float_to_int(rintf(x)); so we use the equivalent intrinsics. */
   __m128 vec = _mm_set_ss(x);
@@ -632,6 +632,19 @@ ccl_device_inline float fast_ierff(float x)
     p = madd(p, w, 2.83297682f);
   }
   return p * x;
+}
+
+/* Fast inverse cube root for positive x, with two Newton iterations to improve accuracy. */
+ccl_device_inline float fast_inv_cbrtf(float x)
+{
+  util_assert(x >= 0.0f);
+
+  /* Constant is roughly `cbrt(2^127)`, but tweaked a bit to balance the error across the entire
+   * range. The exact value is not critical. */
+  float y = __int_as_float(0x54a24242 - __float_as_int(x) / 3);
+  y = (2.0f / 3) * y + 1 / (3 * y * y * x);
+  y = (2.0f / 3) * y + 1 / (3 * y * y * x);
+  return y;
 }
 
 CCL_NAMESPACE_END

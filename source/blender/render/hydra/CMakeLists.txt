@@ -14,7 +14,7 @@ if(WIN32)
 endif()
 add_definitions(-DBOOST_ALL_NO_LIB)
 
-# Precompiled Linux libs are made with GCC, and USD uses some extensions
+# Pre-compiled Linux libraries are made with GCC, and USD uses some extensions
 # which lead to an incompatible ABI for Clang. Using those extensions with
 # Clang as well works around the issue.
 if(UNIX AND NOT APPLE)
@@ -33,6 +33,12 @@ if(WIN32)
   # warning alert.
   # Silence them by restore warn C4100 back to w4
   remove_cc_flag("/w34100")
+  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
+    # USD currently does not support the new preprocessor,
+    # so we remove it here and disable sse2neon
+    remove_cc_flag("/Zc:preprocessor")
+    add_definitions(-DDISABLE_SSE2NEON)
+  endif()
 endif()
 
 set(INC
@@ -47,7 +53,7 @@ set(INC
   ../../gpu
   ../../gpu/intern
   ../../python/intern
-  # RNA_prototypes.h
+  # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
   ..
 )
@@ -95,5 +101,5 @@ set(SRC
 
 blender_add_lib(bf_render_hydra "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 
-# RNA_prototypes.h
+# RNA_prototypes.hh
 add_dependencies(bf_render_hydra bf_rna)

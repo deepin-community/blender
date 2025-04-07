@@ -23,31 +23,31 @@
 
 #include "BLI_fileops.h"
 #include "BLI_listbase.h"
-#include "BLI_path_util.h"
+#include "BLI_path_utils.hh"
 #include "BLI_string.h"
 #include "BLI_string_utf8.h"
 #include "BLI_threads.h"
 #include "BLI_utildefines.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "RNA_types.hh"
 
-#include "bpy.h"
-#include "bpy_capi_utils.h"
-#include "bpy_intern_string.h"
-#include "bpy_path.h"
-#include "bpy_props.h"
-#include "bpy_rna.h"
-#include "bpy_traceback.h"
+#include "bpy.hh"
+#include "bpy_capi_utils.hh"
+#include "bpy_intern_string.hh"
+#include "bpy_path.hh"
+#include "bpy_props.hh"
+#include "bpy_rna.hh"
+#include "bpy_traceback.hh"
 
-#include "bpy_app_translations.h"
+#include "bpy_app_translations.hh"
 
 #include "DNA_text_types.h"
 
 #include "BKE_appdir.hh"
 #include "BKE_context.hh"
-#include "BKE_global.h" /* Only for script checking. */
+#include "BKE_global.hh" /* Only for script checking. */
 #include "BKE_main.hh"
 #include "BKE_text.h"
 
@@ -55,21 +55,21 @@
 #  include "CCL_api.h"
 #endif
 
-#include "BPY_extern.h"
-#include "BPY_extern_python.h"
-#include "BPY_extern_run.h"
+#include "BPY_extern.hh"
+#include "BPY_extern_python.hh"
+#include "BPY_extern_run.hh"
 
-#include "../generic/py_capi_utils.h"
+#include "../generic/py_capi_utils.hh"
 
 /* `inittab` initialization functions. */
-#include "../bmesh/bmesh_py_api.h"
+#include "../bmesh/bmesh_py_api.hh"
 #include "../generic/bgl.h"
-#include "../generic/bl_math_py_api.h"
-#include "../generic/blf_py_api.h"
-#include "../generic/idprop_py_api.h"
-#include "../generic/imbuf_py_api.h"
-#include "../gpu/gpu_py_api.h"
-#include "../mathutils/mathutils.h"
+#include "../generic/bl_math_py_api.hh"
+#include "../generic/blf_py_api.hh"
+#include "../generic/idprop_py_api.hh"
+#include "../generic/imbuf_py_api.hh"
+#include "../gpu/gpu_py_api.hh"
+#include "../mathutils/mathutils.hh"
 
 /* Logging types to use anywhere in the Python modules. */
 
@@ -128,10 +128,10 @@ void bpy_context_set(bContext *C, PyGILState_STATE *gilstate)
 #ifdef TIME_PY_RUN
     if (bpy_timer_count == 0) {
       /* Record time from the beginning. */
-      bpy_timer = BLI_check_seconds_timer();
+      bpy_timer = BLI_time_now_seconds();
       bpy_timer_run = bpy_timer_run_tot = 0.0;
     }
-    bpy_timer_run = BLI_check_seconds_timer();
+    bpy_timer_run = BLI_time_now_seconds();
 
     bpy_timer_count++;
 #endif
@@ -157,7 +157,7 @@ void bpy_context_clear(bContext * /*C*/, const PyGILState_STATE *gilstate)
 #endif
 
 #ifdef TIME_PY_RUN
-    bpy_timer_run_tot += BLI_check_seconds_timer() - bpy_timer_run;
+    bpy_timer_run_tot += BLI_time_now_seconds() - bpy_timer_run;
     bpy_timer_count++;
 #endif
   }
@@ -316,7 +316,7 @@ static _inittab bpy_internal_modules[] = {
  * Show an error just to avoid silent failure in the unlikely event something goes wrong,
  * in this case a developer will need to track down the root cause.
  */
-static void pystatus_exit_on_error(PyStatus status)
+static void pystatus_exit_on_error(const PyStatus &status)
 {
   if (UNLIKELY(PyStatus_Exception(status))) {
     fputs("Internal error initializing Python!\n", stderr);
@@ -329,6 +329,7 @@ static void pystatus_exit_on_error(PyStatus status)
 void BPY_python_start(bContext *C, int argc, const char **argv)
 {
 #ifndef WITH_PYTHON_MODULE
+  BLI_assert_msg(Py_IsInitialized() == 0, "Python has already been initialized");
 
   /* #PyPreConfig (early-configuration). */
   {
@@ -384,7 +385,12 @@ void BPY_python_start(bContext *C, int argc, const char **argv)
     PyStatus status;
     bool has_python_executable = false;
 
-    PyConfig_InitPythonConfig(&config);
+    if (py_use_system_env) {
+      PyConfig_InitPythonConfig(&config);
+    }
+    else {
+      PyConfig_InitIsolatedConfig(&config);
+    }
 
     /* Suppress error messages when calculating the module search path.
      * While harmless, it's noisy. */
@@ -478,6 +484,8 @@ void BPY_python_start(bContext *C, int argc, const char **argv)
 
     /* Initialize Python (also acquires lock). */
     status = Py_InitializeFromConfig(&config);
+    PyConfig_Clear(&config);
+
     pystatus_exit_on_error(status);
 
     if (!has_python_executable) {
@@ -552,6 +560,10 @@ void BPY_python_start(bContext *C, int argc, const char **argv)
 
 void BPY_python_end(const bool do_python_exit)
 {
+#ifndef WITH_PYTHON_MODULE
+  BLI_assert_msg(Py_IsInitialized() != 0, "Python must be initialized");
+#endif
+
   PyGILState_STATE gilstate;
 
   /* Finalizing, no need to grab the state, except when we are a module. */
@@ -593,7 +605,7 @@ void BPY_python_end(const bool do_python_exit)
 
 #ifdef TIME_PY_RUN
   /* Measure time since Python started. */
-  bpy_timer = BLI_check_seconds_timer() - bpy_timer;
+  bpy_timer = BLI_time_now_seconds() - bpy_timer;
 
   printf("*bpy stats* - ");
   printf("tot exec: %d,  ", bpy_timer_count);
@@ -612,6 +624,8 @@ void BPY_python_end(const bool do_python_exit)
 
 void BPY_python_reset(bContext *C)
 {
+  BLI_assert_msg(Py_IsInitialized() != 0, "Python must be initialized");
+
   /* Unrelated security stuff. */
   G.f &= ~(G_FLAG_SCRIPT_AUTOEXEC_FAIL | G_FLAG_SCRIPT_AUTOEXEC_FAIL_QUIET);
   G.autoexec_fail[0] = '\0';
@@ -625,6 +639,11 @@ void BPY_python_use_system_env()
 {
   BLI_assert(!Py_IsInitialized());
   py_use_system_env = true;
+}
+
+bool BPY_python_use_system_env_get()
+{
+  return py_use_system_env;
 }
 
 void BPY_python_backtrace(FILE *fp)
@@ -757,12 +776,6 @@ int BPY_context_member_get(bContext *C, const char *member, bContextDataResult *
         PyObject *list_item = seq_fast_items[i];
 
         if (BPy_StructRNA_Check(list_item)) {
-#if 0
-          CollectionPointerLink *link = MEM_callocN(sizeof(CollectionPointerLink),
-                                                    "bpy_context_get");
-          link->ptr = ((BPy_StructRNA *)item)->ptr;
-          BLI_addtail(&result->list, link);
-#endif
           ptr = &(((BPy_StructRNA *)list_item)->ptr);
           CTX_data_list_add_ptr(result, ptr);
         }
@@ -967,7 +980,13 @@ bool BPY_string_is_keyword(const char *str)
   return false;
 }
 
-/* EVIL: define `text.cc` functions here (declared in `BKE_text.h`). */
+/* -------------------------------------------------------------------- */
+/** \name Character Classification
+ *
+ * Define `text.cc` functions here (declared in `BKE_text.h`),
+ * This could be removed if Blender gets its own unicode library.
+ * \{ */
+
 int text_check_identifier_unicode(const uint ch)
 {
   return (ch < 255 && text_check_identifier(char(ch))) || Py_UNICODE_ISALNUM(ch);
@@ -977,3 +996,5 @@ int text_check_identifier_nodigit_unicode(const uint ch)
 {
   return (ch < 255 && text_check_identifier_nodigit(char(ch))) || Py_UNICODE_ISALPHA(ch);
 }
+
+/** \} */

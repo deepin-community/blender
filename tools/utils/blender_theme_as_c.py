@@ -29,7 +29,7 @@ C_SOURCE_HEADER = r'''/* SPDX-FileCopyrightText: 2018 Blender Authors
 
 #include "DNA_userdef_types.h"
 
-#include "BLO_readfile.h"
+#include "BLO_userdef_default.h"
 
 /* clang-format off */
 
@@ -59,7 +59,7 @@ def repr_f32(f):
         f_test = round(f, i)
         f_test_round = round_float_32(f_test)
         if f_test_round == f_round:
-            return "%.*f" % (i, f_test)
+            return "{:.{:d}f}".format(f_test, i)
     return f_str
 
 
@@ -95,7 +95,7 @@ def dna_rename_defs(blend):
     )
 
     re_dna_struct_rename_elem = re.compile(
-        r'DNA_STRUCT_RENAME_ELEM+\('
+        r'DNA_STRUCT_RENAME_MEMBER+\('
         r'([a-zA-Z0-9_]+)' r',\s*'
         r'([a-zA-Z0-9_]+)' r',\s*'
         r'([a-zA-Z0-9_]+)' r'\)',

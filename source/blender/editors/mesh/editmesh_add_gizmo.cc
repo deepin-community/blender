@@ -15,7 +15,8 @@
 
 #include "BKE_context.hh"
 #include "BKE_editmesh.hh"
-#include "BKE_scene.h"
+#include "BKE_object_types.hh"
+#include "BKE_scene.hh"
 
 #include "BLI_math_geom.h"
 #include "BLI_math_matrix.h"
@@ -36,8 +37,6 @@
 #include "WM_types.hh"
 
 #include "UI_resources.hh"
-
-#include "BLT_translation.h"
 
 #include "mesh_intern.hh" /* own include */
 
@@ -64,9 +63,8 @@ static void calc_initial_placement_point_from_view(bContext *C,
 
   bool use_mouse_project = true; /* TODO: make optional */
 
-  float cursor_matrix[4][4];
+  const blender::float4x4 cursor_matrix = scene->cursor.matrix<blender::float4x4>();
   float orient_matrix[3][3];
-  BKE_scene_cursor_to_mat4(&scene->cursor, cursor_matrix);
 
   const float dots[3] = {
       dot_v3v3(rv3d->viewinv[2], cursor_matrix[0]),
@@ -318,8 +316,8 @@ static int add_primitive_cube_gizmo_exec(bContext *C, wmOperator *op)
     PropertyRNA *prop_matrix = RNA_struct_find_property(op->ptr, "matrix");
     if (RNA_property_is_set(op->ptr, prop_matrix)) {
       RNA_property_float_get_array(op->ptr, prop_matrix, &matrix[0][0]);
-      invert_m4_m4(obedit->world_to_object, obedit->object_to_world);
-      mul_m4_m4m4(matrix, obedit->world_to_object, matrix);
+      invert_m4_m4(obedit->runtime->world_to_object.ptr(), obedit->object_to_world().ptr());
+      mul_m4_m4m4(matrix, obedit->world_to_object().ptr(), matrix);
     }
     else {
       /* For the first update the widget may not set the matrix. */
@@ -389,8 +387,8 @@ void MESH_OT_primitive_cube_add_gizmo(wmOperatorType *ot)
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 
-  ED_object_add_mesh_props(ot);
-  ED_object_add_generic_props(ot, true);
+  blender::ed::object::add_mesh_props(ot);
+  blender::ed::object::add_generic_props(ot, true);
 
   /* hidden props */
   PropertyRNA *prop = RNA_def_float_matrix(

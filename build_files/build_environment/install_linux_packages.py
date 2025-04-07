@@ -149,13 +149,6 @@ BUILD_MANDATORY_SUBPACKAGES = (
                                   DISTRO_ID_ARCH: "git",
                                   },
             ),
-    Package(name="Subversion (aka svn)",
-            distro_package_names={DISTRO_ID_DEBIAN: "subversion",
-                                  DISTRO_ID_FEDORA: "subversion",
-                                  DISTRO_ID_SUSE: "subversion",
-                                  DISTRO_ID_ARCH: "subversion",
-                                  },
-            ),
     Package(name="CMake",
             distro_package_names={DISTRO_ID_DEBIAN: "cmake",
                                   DISTRO_ID_FEDORA: "cmake",
@@ -722,7 +715,7 @@ PACKAGES_ALL = (
                                   DISTRO_ID_ARCH: "clang",  # clang-format is part of the main clang package.
                                   },
             ),
-    Package(name="Python", is_mandatory=True, version="3.11.6", version_short="3.11", version_min="3.11", version_mex="3.13",
+    Package(name="Python", is_mandatory=True, version="3.11.9", version_short="3.11", version_min="3.11", version_mex="3.13",
             sub_packages=PYTHON_SUBPACKAGES,
             distro_package_names={DISTRO_ID_DEBIAN: "python3-dev",
                                   DISTRO_ID_FEDORA: "python3-devel",
@@ -762,7 +755,7 @@ PACKAGES_ALL = (
                                   DISTRO_ID_ARCH: "imath",
                                   },
             ),
-    Package(name="OpenEXR Library", is_mandatory=False, version="3.2.1", version_short="3.2", version_min="3.0", version_mex="4.0",
+    Package(name="OpenEXR Library", is_mandatory=False, version="3.2.4", version_short="3.2", version_min="3.0", version_mex="4.0",
             sub_packages=(),
             distro_package_names={DISTRO_ID_DEBIAN: "libopenexr-dev",
                                   DISTRO_ID_FEDORA: "openexr-devel",
@@ -770,7 +763,7 @@ PACKAGES_ALL = (
                                   DISTRO_ID_ARCH: "openexr",
                                   },
             ),
-    Package(name="OpenImageIO Library", is_mandatory=True, version="2.5.6.0", version_short="2.5", version_min="2.5.0", version_mex="2.6.0",
+    Package(name="OpenImageIO Library", is_mandatory=True, version="2.5.11.0", version_short="2.5", version_min="2.5.0", version_mex="2.6.0",
             sub_packages=(
                 Package(name="OpenImageIO Tools", is_mandatory=False,
                         distro_package_names={DISTRO_ID_DEBIAN: "openimageio-tools",
@@ -869,7 +862,7 @@ PACKAGES_ALL = (
                                   DISTRO_ID_ARCH: "materialx-git",
                                   },
             ),
-    Package(name="USD Library", is_mandatory=False, version="23.11", version_short="23.11", version_min="20.05", version_mex="24.00",
+    Package(name="USD Library", is_mandatory=False, version="24.05", version_short="24.05", version_min="22.05", version_mex="25.00",
             sub_packages=(),
             distro_package_names={DISTRO_ID_DEBIAN: None,
                                   DISTRO_ID_FEDORA: "usd-devel",
@@ -884,7 +877,7 @@ PACKAGES_ALL = (
                                   DISTRO_ID_ARCH: "opencollada",
                                   },
             ),
-    Package(name="Embree Library", is_mandatory=False, version="4.1.0", version_short="4.1", version_min="3.13", version_mex="5.0",
+    Package(name="Embree Library", is_mandatory=False, version="4.3.2", version_short="4.3", version_min="3.13", version_mex="5.0",
             sub_packages=(),
             distro_package_names={DISTRO_ID_DEBIAN: "libembree-dev",
                                   DISTRO_ID_FEDORA: "embree-devel",
@@ -892,7 +885,7 @@ PACKAGES_ALL = (
                                   DISTRO_ID_ARCH: "embree",
                                   },
             ),
-    Package(name="OpenImageDenoiser Library", is_mandatory=False, version="2.2.0", version_short="2.2", version_min="2.0.0", version_mex="3.0",
+    Package(name="OpenImageDenoiser Library", is_mandatory=False, version="2.3.0", version_short="2.3", version_min="2.0.0", version_mex="3.0",
             sub_packages=(),
             distro_package_names={DISTRO_ID_DEBIAN: None,
                                   DISTRO_ID_FEDORA: "oidn-devel",
@@ -900,7 +893,7 @@ PACKAGES_ALL = (
                                   DISTRO_ID_ARCH: "openimagedenoise",
                                   },
             ),
-    Package(name="Level Zero Library", is_mandatory=False, version="1.15.8", version_short="1.15", version_min="1.7", version_mex="2.0",
+    Package(name="Level Zero Library", is_mandatory=False, version="1.16.1", version_short="1.16", version_min="1.7", version_mex="2.0",
             sub_packages=(),
             distro_package_names={DISTRO_ID_DEBIAN: None,
                                   DISTRO_ID_FEDORA: "oneapi-level-zero-devel",
@@ -908,7 +901,7 @@ PACKAGES_ALL = (
                                   DISTRO_ID_ARCH: "level-zero-headers",  # ???
                                   },
             ),
-    Package(name="OpenPGL Library", is_mandatory=False, version="0.5.0", version_short="0.5", version_min="0.5.0", version_mex="0.6",
+    Package(name="OpenPGL Library", is_mandatory=False, version="0.6.0", version_short="0.6", version_min="0.5.0", version_mex="0.7",
             sub_packages=(),
             distro_package_names={DISTRO_ID_DEBIAN: None,
                                   DISTRO_ID_FEDORA: "openpgl-devel",
@@ -1039,8 +1032,8 @@ class PackageInstaller:
     @classmethod
     def version_match(cls, version, ref_version):
         """
-        Return True if the `version` string falls into the version range covered by the `ref_version` string.
-        `version` should be at least as long as `ref_version` (in term of version number items).
+        Return True if the ``version`` string falls into the version range covered by the ``ref_version`` string.
+        ``version`` should be at least as long as ``ref_version`` (in term of version number items).
         E.g. 3.3.2:
           - matches 3.3
           - matches 3.3.2
@@ -1168,13 +1161,13 @@ class PackageInstaller:
 
     def package_find(self, package, package_distro_name):
         """
-        Generic euristics to try and find 'best macthing version' for a given package.
-        For most packages it just ensures given package name version matches the exact version from the `package`,
+        Generic heuristics to try and find 'best matching version' for a given package.
+        For most packages it just ensures given package name version matches the exact version from the ``package``,
         or at least fits within the [version_min, version_mex[ range.
         But some, like e.g. python, llvm or boost, can have packages available for several versions,
         with complex naming (like 'python3.10', 'llvm-9-dev', etc.).
         This code attempts to find the best matching one possible, based on a set of 'possible names'
-        generated by the distro-specific `package_name_version_gen` generator.
+        generated by the distro-specific ``package_name_version_gen`` generator.
         """
         # Check 'exact' version match on given name.
         if self.package_query_version_match(package_distro_name, package.version_short):
@@ -1227,7 +1220,7 @@ class PackageInstaller:
     def packages_install(self, packages, parent_packages=()):
         """
         Install all given packages and their sub-packages.
-        This call is recursive, parent_packages is a tuple of the ancestors of current `package`, in calling order
+        This call is recursive, parent_packages is a tuple of the ancestors of current ``package``, in calling order
         (grand-parent, parent).
         """
         def package_info_name(package, parent_packages):
@@ -1710,7 +1703,7 @@ def argparse_create():
         "Attempt to install dependencies to build Blender from current linux distribution's packages only.\n"
         "\n"
         "By default, only installs critical tools and dependencies to build Blender, excluding any library provided\n"
-        "by the precompiled SVN repository.\n"
+        "by the precompiled git-lfs repository.\n"
         "`make update` should then be ran after this script to download all precompiled libraries.\n"
         "\n"
         "When ran with the `--all` option, this tool will try to install all mandatory and optional dependencies\n"

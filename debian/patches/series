@@ -1,5 +1,7 @@
 0001-install_in_usr_share.patch
 0002-do_not_use_version_number_in_system_path.patch
 0003-locales_directory_install.patch
-0004-double-promotion-not-error.patch
-0005-device-pointer-type.patch
+0004-fix_FTBFS_s390x.patch
+0005-fix_FTBFS_ffmpeg7.patch
+0006-fix_FTBFS_py313.patch
+0007-fix_FTBFS_on_riscv64.patch

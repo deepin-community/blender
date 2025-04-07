@@ -19,10 +19,10 @@
 #include "BKE_movieclip.h"
 #include "BKE_tracking.h"
 
-#include "GPU_texture.h"
+#include "GPU_texture.hh"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "UI_interface.hh"
 #include "UI_resources.hh"
@@ -67,16 +67,7 @@ static void node_composit_buts_keyingscreen(uiLayout *layout, bContext *C, Point
 {
   bNode *node = (bNode *)ptr->data;
 
-  uiTemplateID(layout,
-               C,
-               ptr,
-               "clip",
-               nullptr,
-               nullptr,
-               nullptr,
-               UI_TEMPLATE_ID_FILTER_ALL,
-               false,
-               nullptr);
+  uiTemplateID(layout, C, ptr, "clip", nullptr, nullptr, nullptr);
 
   if (node->id) {
     MovieClip *clip = (MovieClip *)node->id;
@@ -171,15 +162,15 @@ void register_node_type_cmp_keyingscreen()
 {
   namespace file_ns = blender::nodes::node_composite_keyingscreen_cc;
 
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
 
   cmp_node_type_base(&ntype, CMP_NODE_KEYINGSCREEN, "Keying Screen", NODE_CLASS_MATTE);
   ntype.declare = file_ns::cmp_node_keyingscreen_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_keyingscreen;
   ntype.initfunc_api = file_ns::node_composit_init_keyingscreen;
-  node_type_storage(
+  blender::bke::node_type_storage(
       &ntype, "NodeKeyingScreenData", node_free_standard_storage, node_copy_standard_storage);
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  nodeRegisterType(&ntype);
+  blender::bke::node_register_type(&ntype);
 }

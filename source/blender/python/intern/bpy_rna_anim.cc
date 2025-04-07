@@ -20,34 +20,33 @@
 #include "DNA_anim_types.h"
 #include "DNA_scene_types.h"
 
-#include "ED_keyframes_edit.hh"
 #include "ED_keyframing.hh"
 
 #include "ANIM_keyframing.hh"
 
-#include "BKE_anim_data.h"
+#include "BKE_anim_data.hh"
 #include "BKE_animsys.h"
 #include "BKE_context.hh"
-#include "BKE_fcurve.h"
-#include "BKE_global.h"
+#include "BKE_fcurve.hh"
+#include "BKE_global.hh"
 #include "BKE_idtype.hh"
 #include "BKE_lib_id.hh"
-#include "BKE_report.h"
+#include "BKE_report.hh"
 
 #include "RNA_access.hh"
 #include "RNA_enum_types.hh"
 #include "RNA_path.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
 
-#include "bpy_capi_utils.h"
-#include "bpy_rna.h"
-#include "bpy_rna_anim.h"
+#include "bpy_capi_utils.hh"
+#include "bpy_rna.hh"
+#include "bpy_rna_anim.hh"
 
-#include "../generic/py_capi_rna.h"
-#include "../generic/python_utildefines.h"
+#include "../generic/py_capi_rna.hh"
+#include "../generic/python_utildefines.hh"
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_build.hh"
@@ -229,10 +228,13 @@ static int pyrna_struct_keyframe_parse(PointerRNA *ptr,
                                        int *r_index,
                                        float *r_cfra,
                                        const char **r_group_name,
-                                       int *r_options)
+                                       int *r_options,
+                                       eBezTriple_KeyframeType *r_keytype)
 {
-  static const char *kwlist[] = {"data_path", "index", "frame", "group", "options", nullptr};
+  static const char *kwlist[] = {
+      "data_path", "index", "frame", "group", "options", "keytype", nullptr};
   PyObject *pyoptions = nullptr;
+  char *keytype_name = nullptr;
   const char *path;
 
   /* NOTE: `parse_str` MUST start with `s|ifsO!`. */
@@ -245,7 +247,8 @@ static int pyrna_struct_keyframe_parse(PointerRNA *ptr,
                                    r_cfra,
                                    r_group_name,
                                    &PySet_Type,
-                                   &pyoptions))
+                                   &pyoptions,
+                                   &keytype_name))
   {
     return -1;
   }
@@ -270,18 +273,30 @@ static int pyrna_struct_keyframe_parse(PointerRNA *ptr,
     *r_options |= INSERTKEY_NO_USERPREF;
   }
 
+  if (r_keytype) {
+    int keytype_as_int = 0;
+    if (keytype_name && pyrna_enum_value_from_id(rna_enum_beztriple_keyframe_type_items,
+                                                 keytype_name,
+                                                 &keytype_as_int,
+                                                 error_prefix) == -1)
+    {
+      return -1;
+    }
+    *r_keytype = eBezTriple_KeyframeType(keytype_as_int);
+  }
+
   return 0; /* success */
 }
 
 char pyrna_struct_keyframe_insert_doc[] =
     ".. method:: keyframe_insert(data_path, index=-1, frame=bpy.context.scene.frame_current, "
-    "group=\"\", options=set())\n"
+    "group=\"\", options=set(), keytype='KEYFRAME')\n"
     "\n"
     "   Insert a keyframe on the property given, adding fcurves and animation data when "
     "necessary.\n"
     "\n"
     "   :arg data_path: path to the property to key, analogous to the fcurve's data path.\n"
-    "   :type data_path: string\n"
+    "   :type data_path: str\n"
     "   :arg index: array index of the property to key.\n"
     "      Defaults to -1 which will key all indices or a single channel if the property is not "
     "an array.\n"
@@ -304,17 +319,21 @@ char pyrna_struct_keyframe_insert_doc[] =
     "      - ``INSERTKEY_AVAILABLE`` Only insert into already existing F-Curves.\n"
     "      - ``INSERTKEY_CYCLE_AWARE`` Take cyclic extrapolation into account "
     "(Cycle-Aware Keying option).\n"
-    "   :type flag: set\n"
+    "   :type options: set[str]\n"
+    "   :arg keytype: Type of the key: 'KEYFRAME', 'BREAKDOWN', 'MOVING_HOLD', 'EXTREME', "
+    "'JITTER', or 'GENERATED'\n"
+    "   :type keytype: str\n"
     "   :return: Success of keyframe insertion.\n"
-    "   :rtype: boolean\n";
+    "   :rtype: bool\n";
 PyObject *pyrna_struct_keyframe_insert(BPy_StructRNA *self, PyObject *args, PyObject *kw)
 {
+  using namespace blender::animrig;
   /* args, pyrna_struct_keyframe_parse handles these */
   const char *path_full = nullptr;
   int index = -1;
   float cfra = FLT_MAX;
   const char *group_name = nullptr;
-  const char keytype = BEZT_KEYTYPE_KEYFRAME; /* XXX: Expose this as a one-off option... */
+  eBezTriple_KeyframeType keytype = BEZT_KEYTYPE_KEYFRAME;
   int options = 0;
 
   PYRNA_STRUCT_CHECK_OBJ(self);
@@ -322,13 +341,14 @@ PyObject *pyrna_struct_keyframe_insert(BPy_StructRNA *self, PyObject *args, PyOb
   if (pyrna_struct_keyframe_parse(&self->ptr,
                                   args,
                                   kw,
-                                  "s|$ifsO!:bpy_struct.keyframe_insert()",
+                                  "s|$ifsO!s:bpy_struct.keyframe_insert()",
                                   "bpy_struct.keyframe_insert()",
                                   &path_full,
                                   &index,
                                   &cfra,
                                   &group_name,
-                                  &options) == -1)
+                                  &options,
+                                  &keytype) == -1)
   {
     return nullptr;
   }
@@ -368,40 +388,57 @@ PyObject *pyrna_struct_keyframe_insert(BPy_StructRNA *self, PyObject *args, PyOb
     if (prop) {
       NlaStrip *strip = static_cast<NlaStrip *>(ptr.data);
       FCurve *fcu = BKE_fcurve_find(&strip->fcurves, RNA_property_identifier(prop), index);
-      result = blender::animrig::insert_keyframe_direct(&reports,
-                                                        ptr,
-                                                        prop,
-                                                        fcu,
-                                                        &anim_eval_context,
-                                                        eBezTriple_KeyframeType(keytype),
-                                                        nullptr,
-                                                        eInsertKeyFlags(options));
+      result = insert_keyframe_direct(&reports,
+                                      ptr,
+                                      prop,
+                                      fcu,
+                                      &anim_eval_context,
+                                      eBezTriple_KeyframeType(keytype),
+                                      nullptr,
+                                      eInsertKeyFlags(options));
     }
     else {
       BKE_reportf(&reports, RPT_ERROR, "Could not resolve path (%s)", path_full);
     }
   }
   else {
-    ID *id = self->ptr.owner_id;
+    BLI_assert(BKE_id_is_in_global_main(self->ptr.owner_id));
 
-    BLI_assert(BKE_id_is_in_global_main(id));
-    result = (blender::animrig::insert_keyframe(G_MAIN,
-                                                &reports,
-                                                id,
-                                                nullptr,
-                                                group_name,
-                                                path_full,
-                                                index,
-                                                &anim_eval_context,
-                                                eBezTriple_KeyframeType(keytype),
-                                                eInsertKeyFlags(options)) != 0);
+    const std::optional<blender::StringRefNull> channel_group = group_name ?
+                                                                    std::optional(group_name) :
+                                                                    std::nullopt;
+    PointerRNA id_pointer = RNA_id_pointer_create(self->ptr.owner_id);
+    CombinedKeyingResult combined_result = insert_keyframes(G_MAIN,
+                                                            &id_pointer,
+                                                            channel_group,
+                                                            {{path_full, {}, index}},
+                                                            std::nullopt,
+                                                            anim_eval_context,
+                                                            eBezTriple_KeyframeType(keytype),
+                                                            eInsertKeyFlags(options));
+    const int success_count = combined_result.get_count(SingleKeyingResult::SUCCESS);
+    if (success_count == 0) {
+      /* Ideally this would use the GUI presentation of RPT_ERROR, as the resulting pop-up has more
+       * vertical space than the single-line warning in the status bar. However, semantically these
+       * may not be errors at all, as skipping the keying of certain properties due to the 'only
+       * insert available' flag is not an error.
+       *
+       * Furthermore, using RPT_ERROR here would cause this function to raise a Python exception,
+       * rather than returning a boolean. */
+      combined_result.generate_reports(&reports, RPT_WARNING);
+    }
+    result = success_count != 0;
   }
 
   MEM_freeN((void *)path_full);
 
-  if (BPy_reports_to_error(&reports, PyExc_RuntimeError, true) == -1) {
+  if (BPy_reports_to_error(&reports, PyExc_RuntimeError, false) == -1) {
+    BKE_reports_free(&reports);
     return nullptr;
   }
+  BKE_report_print_level_set(&reports, G.quiet ? RPT_WARNING : RPT_DEBUG);
+  BPy_reports_write_stdout(&reports, nullptr);
+  BKE_reports_free(&reports);
 
   if (result) {
     WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN | NA_EDITED, nullptr);
@@ -418,7 +455,7 @@ char pyrna_struct_keyframe_delete_doc[] =
     "\n"
     "   :arg data_path: path to the property to remove a key, analogous to the fcurve's data "
     "path.\n"
-    "   :type data_path: string\n"
+    "   :type data_path: str\n"
     "   :arg index: array index of the property to remove a key. Defaults to -1 removing all "
     "indices or a single channel if the property is not an array.\n"
     "   :type index: int\n"
@@ -428,7 +465,7 @@ char pyrna_struct_keyframe_delete_doc[] =
     "yet.\n"
     "   :type group: str\n"
     "   :return: Success of keyframe deletion.\n"
-    "   :rtype: boolean\n";
+    "   :rtype: bool\n";
 PyObject *pyrna_struct_keyframe_delete(BPy_StructRNA *self, PyObject *args, PyObject *kw)
 {
   /* args, pyrna_struct_keyframe_parse handles these */
@@ -442,12 +479,13 @@ PyObject *pyrna_struct_keyframe_delete(BPy_StructRNA *self, PyObject *args, PyOb
   if (pyrna_struct_keyframe_parse(&self->ptr,
                                   args,
                                   kw,
-                                  "s|$ifsO!:bpy_struct.keyframe_delete()",
+                                  "s|$ifsOs!:bpy_struct.keyframe_delete()",
                                   "bpy_struct.keyframe_insert()",
                                   &path_full,
                                   &index,
                                   &cfra,
                                   &group_name,
+                                  nullptr,
                                   nullptr) == -1)
   {
     return nullptr;
@@ -514,8 +552,12 @@ PyObject *pyrna_struct_keyframe_delete(BPy_StructRNA *self, PyObject *args, PyOb
     }
   }
   else {
+    RNAPath rna_path = {path_full, std::nullopt, index};
+    if (index < 0) {
+      rna_path.index = std::nullopt;
+    }
     result = (blender::animrig::delete_keyframe(
-                  G.main, &reports, self->ptr.owner_id, nullptr, path_full, index, cfra) != 0);
+                  G.main, &reports, self->ptr.owner_id, rna_path, cfra) != 0);
   }
 
   MEM_freeN((void *)path_full);
@@ -533,12 +575,12 @@ char pyrna_struct_driver_add_doc[] =
     "   Adds driver(s) to the given property\n"
     "\n"
     "   :arg path: path to the property to drive, analogous to the fcurve's data path.\n"
-    "   :type path: string\n"
+    "   :type path: str\n"
     "   :arg index: array index of the property drive. Defaults to -1 for all indices or a single "
     "channel if the property is not an array.\n"
     "   :type index: int\n"
-    "   :return: The driver(s) added.\n"
-    "   :rtype: :class:`bpy.types.FCurve` or list if index is -1 with an array property.\n";
+    "   :return: The driver added or a list of drivers when index is -1.\n"
+    "   :rtype: :class:`bpy.types.FCurve` | list[:class:`bpy.types.FCurve`]\n";
 PyObject *pyrna_struct_driver_add(BPy_StructRNA *self, PyObject *args)
 {
   const char *path, *path_full;
@@ -596,7 +638,7 @@ PyObject *pyrna_struct_driver_add(BPy_StructRNA *self, PyObject *args)
 
     bContext *context = BPY_context_get();
     WM_event_add_notifier(BPY_context_get(), NC_ANIMATION | ND_FCURVES_ORDER, nullptr);
-    DEG_id_tag_update(id, ID_RECALC_COPY_ON_WRITE);
+    DEG_id_tag_update(id, ID_RECALC_SYNC_TO_EVAL);
     DEG_relations_tag_update(CTX_data_main(context));
   }
   else {
@@ -617,12 +659,12 @@ char pyrna_struct_driver_remove_doc[] =
     "   Remove driver(s) from the given property\n"
     "\n"
     "   :arg path: path to the property to drive, analogous to the fcurve's data path.\n"
-    "   :type path: string\n"
+    "   :type path: str\n"
     "   :arg index: array index of the property drive. Defaults to -1 for all indices or a single "
     "channel if the property is not an array.\n"
     "   :type index: int\n"
     "   :return: Success of driver removal.\n"
-    "   :rtype: boolean\n";
+    "   :rtype: bool\n";
 PyObject *pyrna_struct_driver_remove(BPy_StructRNA *self, PyObject *args)
 {
   const char *path, *path_full;
@@ -645,7 +687,7 @@ PyObject *pyrna_struct_driver_remove(BPy_StructRNA *self, PyObject *args)
 
   BKE_reports_init(&reports, RPT_STORE);
 
-  result = ANIM_remove_driver(&reports, (ID *)self->ptr.owner_id, path_full, index, 0);
+  result = ANIM_remove_driver(self->ptr.owner_id, path_full, index);
 
   if (path != path_full) {
     MEM_freeN((void *)path_full);

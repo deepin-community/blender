@@ -21,7 +21,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   const bNode *node = b.node_or_null();
 
-  b.add_input<decl::String>("Name").is_attribute_name();
+  b.add_input<decl::String>("Name").is_attribute_name().hide_label();
 
   if (node != nullptr) {
     const NodeGeometryInputNamedAttribute &storage = node_storage(*node);
@@ -48,7 +48,7 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
   const NodeDeclaration &declaration = *params.node_type().static_declaration;
   search_link_ops_for_declarations(params, declaration.inputs);
 
-  const bNodeType &node_type = params.node_type();
+  const blender::bke::bNodeType &node_type = params.node_type();
   if (params.in_out() == SOCK_OUT) {
     const std::optional<eCustomDataType> type = bke::socket_type_to_custom_data_type(
         eNodeSocketDatatype(params.other_socket().type));
@@ -90,6 +90,12 @@ static void node_geo_exec(GeoNodeExecParams params)
     params.set_default_remaining_outputs();
     return;
   }
+  if (bke::attribute_name_is_anonymous(name)) {
+    params.error_message_add(NodeWarningType::Info,
+                             TIP_("Anonymous attributes can't be accessed by name"));
+    params.set_default_remaining_outputs();
+    return;
+  }
 
   params.used_named_attribute(name, NamedAttributeUsage::Read);
 
@@ -113,7 +119,7 @@ static void node_rna(StructRNA *srna)
 
 static void node_register()
 {
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
 
   geo_node_type_base(&ntype, GEO_NODE_INPUT_NAMED_ATTRIBUTE, "Named Attribute", NODE_CLASS_INPUT);
   ntype.geometry_node_execute = node_geo_exec;
@@ -121,11 +127,11 @@ static void node_register()
   ntype.gather_link_search_ops = node_gather_link_searches;
   ntype.declare = node_declare;
   ntype.initfunc = node_init;
-  node_type_storage(&ntype,
-                    "NodeGeometryInputNamedAttribute",
-                    node_free_standard_storage,
-                    node_copy_standard_storage);
-  nodeRegisterType(&ntype);
+  blender::bke::node_type_storage(&ntype,
+                                  "NodeGeometryInputNamedAttribute",
+                                  node_free_standard_storage,
+                                  node_copy_standard_storage);
+  blender::bke::node_register_type(&ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

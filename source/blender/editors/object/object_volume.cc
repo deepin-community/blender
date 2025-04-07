@@ -10,7 +10,7 @@
 
 #include "BLI_listbase.h"
 #include "BLI_math_base.h"
-#include "BLI_path_util.h"
+#include "BLI_path_utils.hh"
 #include "BLI_string.h"
 
 #include "DNA_object_types.h"
@@ -22,7 +22,7 @@
 #include "BKE_context.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
-#include "BKE_report.h"
+#include "BKE_report.hh"
 #include "BKE_volume.hh"
 
 #include "WM_api.hh"
@@ -32,7 +32,9 @@
 #include "ED_object.hh"
 #include "ED_screen.hh"
 
-#include "object_intern.h"
+#include "object_intern.hh"
+
+namespace blender::ed::object {
 
 /* Volume Add */
 
@@ -41,12 +43,9 @@ static Object *object_volume_add(bContext *C, wmOperator *op, const char *name)
   ushort local_view_bits;
   float loc[3], rot[3];
 
-  if (!ED_object_add_generic_get_opts(
-          C, op, 'Z', loc, rot, nullptr, nullptr, &local_view_bits, nullptr))
-  {
-    return nullptr;
-  }
-  return ED_object_add_type(C, OB_VOLUME, name, loc, rot, false, local_view_bits);
+  add_generic_get_opts(C, op, 'Z', loc, rot, nullptr, nullptr, &local_view_bits, nullptr);
+
+  return add_type(C, OB_VOLUME, name, loc, rot, false, local_view_bits);
 }
 
 static int object_volume_add_exec(bContext *C, wmOperator *op)
@@ -68,7 +67,7 @@ void OBJECT_OT_volume_add(wmOperatorType *ot)
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 
-  ED_object_add_generic_props(ot, false);
+  add_generic_props(ot, false);
 }
 
 /* Volume Import */
@@ -79,7 +78,7 @@ static int volume_import_exec(bContext *C, wmOperator *op)
   const bool is_relative_path = RNA_boolean_get(op->ptr, "relative_path");
   bool imported = false;
 
-  ListBase ranges = ED_image_filesel_detect_sequences(bmain, op, false);
+  ListBase ranges = ED_image_filesel_detect_sequences(BKE_main_blendfile_path(bmain), op, false);
   LISTBASE_FOREACH (ImageFrameRange *, range, &ranges) {
     char filepath[FILE_MAX];
     BLI_path_split_file_part(range->filepath, filepath, sizeof(filepath));
@@ -176,5 +175,7 @@ void OBJECT_OT_volume_import(wmOperatorType *ot)
       "Detect Sequences",
       "Automatically detect animated sequences in selected volume files (based on file names)");
 
-  ED_object_add_generic_props(ot, false);
+  add_generic_props(ot, false);
 }
+
+}  // namespace blender::ed::object

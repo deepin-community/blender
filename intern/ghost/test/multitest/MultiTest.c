@@ -40,9 +40,9 @@
 #include "WindowData.h"
 
 /* GPU API. */
-#include "GPU_context.h"
-#include "GPU_immediate.h"
-#include "GPU_init_exit.h"
+#include "GPU_context.hh"
+#include "GPU_immediate.hh"
+#include "GPU_init_exit.hh"
 
 extern int datatoc_bfont_ttf_size;
 extern char const datatoc_bfont_ttf[];
@@ -874,6 +874,7 @@ MultiTestApp *multitestapp_new(void)
   if (!app->sys) {
     fatal("Unable to create ghost system");
   }
+  GPU_backend_ghost_system_set(app->sys);
 
   if (!GHOST_AddEventConsumer(app->sys, consumer)) {
     fatal("Unable to add multitest event consumer ");

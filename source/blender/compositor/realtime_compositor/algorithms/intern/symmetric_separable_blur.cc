@@ -7,8 +7,8 @@
 #include "BLI_math_vector.hh"
 #include "BLI_math_vector_types.hh"
 
-#include "GPU_shader.h"
-#include "GPU_texture.h"
+#include "GPU_shader.hh"
+#include "GPU_texture.hh"
 
 #include "COM_context.hh"
 #include "COM_result.hh"
@@ -77,7 +77,7 @@ static Result horizontal_pass(Context &context,
    * pass. */
   const int2 transposed_domain = int2(domain.size.y, domain.size.x);
 
-  Result output = context.create_temporary_result(input.type());
+  Result output = context.create_result(input.type());
   output.allocate_texture(transposed_domain);
   output.bind_as_image(shader, "output_img");
 

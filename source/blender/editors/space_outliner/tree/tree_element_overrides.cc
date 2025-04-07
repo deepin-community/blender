@@ -6,7 +6,7 @@
  * \ingroup spoutliner
  */
 
-#include "BKE_collection.h"
+#include "BKE_collection.hh"
 #include "BKE_lib_override.hh"
 
 #include "BLI_function_ref.hh"
@@ -14,7 +14,7 @@
 #include "BLI_map.hh"
 #include "BLI_utildefines.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "DNA_space_types.h"
 
@@ -76,7 +76,7 @@ TreeElementOverridesBase::TreeElementOverridesBase(TreeElement &legacy_te, ID &i
 
 StringRefNull TreeElementOverridesBase::get_warning() const
 {
-  if (id.flag & LIB_LIB_OVERRIDE_RESYNC_LEFTOVER) {
+  if (id.flag & ID_FLAG_LIB_OVERRIDE_RESYNC_LEFTOVER) {
     return RPT_("This override data-block is not needed anymore, but was detected as user-edited");
   }
 
@@ -343,6 +343,9 @@ void OverrideRNAPathTreeBuilder::build_path(TreeElement &parent,
       name = RNA_struct_name_get_alloc(&elem->next->ptr, name_buf, sizeof(name_buf), nullptr);
       const char *coll_item_path = RNA_path_append(
           previous_path, &elem->ptr, elem->prop, coll_item_idx, name);
+      if (name && (name != name_buf)) {
+        MEM_freeN(name);
+      }
 
       te_to_expand = &ensure_label_element_for_ptr(
           *te_to_expand, coll_item_path, elem->next->ptr, index);
@@ -356,7 +359,10 @@ void OverrideRNAPathTreeBuilder::build_path(TreeElement &parent,
       elem_path = new_path;
     }
   }
-  BLI_freelistN(&path_elems);
+  LISTBASE_FOREACH_MUTABLE (PropertyElemRNA *, elem, &path_elems) {
+    MEM_delete(elem);
+  }
+  BLI_listbase_clear(&path_elems);
 
   /* Special case: Overriding collections, e.g. adding or removing items. In this case we add
    * elements for all collection items to show full context, and indicate which ones were
@@ -408,6 +414,9 @@ void OverrideRNAPathTreeBuilder::ensure_entire_collection(
                                                  &override_data.override_rna_prop,
                                                  item_idx,
                                                  name);
+    if (name && (name != name_buf)) {
+      MEM_freeN(name);
+    }
     IDOverrideLibraryPropertyOperation *item_operation =
         BKE_lib_override_library_property_operation_find(&override_data.override_property,
                                                          nullptr,

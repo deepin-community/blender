@@ -17,13 +17,13 @@
 #include <algorithm>
 #include <cstring>
 
-#include "CLG_log.h"
-
 #include "DNA_ID.h"
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 #include "DNA_userdef_types.h"
 #include "DNA_windowmanager_types.h"
+
+#include "BLF_api.hh"
 
 #include "BLI_blenlib.h"
 #include "BLI_utildefines.h"
@@ -31,17 +31,16 @@
 #include "BKE_appdir.hh"
 #include "BKE_blender_version.h"
 #include "BKE_context.hh"
-#include "BKE_screen.hh"
 
-#include "BLT_translation.h"
-
-#include "BLF_api.hh"
+#include "BLT_translation.hh"
 
 #include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
 
 #include "ED_datafiles.h"
 #include "ED_screen.hh"
+
+#include "RNA_access.hh"
 
 #include "UI_interface.hh"
 #include "UI_interface_icons.hh"
@@ -71,12 +70,14 @@ static void wm_block_splash_add_label(uiBlock *block, const char *label, int x, 
   UI_block_emboss_set(block, UI_EMBOSS_NONE);
 
   uiBut *but = uiDefBut(
-      block, UI_BTYPE_LABEL, 0, label, 0, y, x, UI_UNIT_Y, nullptr, 0, 0, 0, 0, nullptr);
+      block, UI_BTYPE_LABEL, 0, label, 0, y, x, UI_UNIT_Y, nullptr, 0, 0, nullptr);
   UI_but_drawflag_disable(but, UI_BUT_TEXT_LEFT);
   UI_but_drawflag_enable(but, UI_BUT_TEXT_RIGHT);
 
-  /* 1 = UI_SELECT, internal flag to draw in white. */
-  UI_but_flag_enable(but, 1);
+  /* Regardless of theme, this text should always be bright white. */
+  uchar color[4] = {255, 255, 255, 255};
+  UI_but_color_set(but, color);
+
   UI_block_emboss_set(block, UI_EMBOSS);
 }
 
@@ -161,7 +162,7 @@ static ImBuf *wm_block_splash_image(int width, int *r_height)
     ibuf->planes = 32; /* The image might not have an alpha channel. */
     height = (width * ibuf->y) / ibuf->x;
     if (width != ibuf->x || height != ibuf->y) {
-      IMB_scaleImBuf(ibuf, width, height);
+      IMB_scale(ibuf, width, height, IMBScaleFilter::Box, false);
     }
 
     wm_block_splash_image_roundcorners_add(ibuf);
@@ -199,20 +200,42 @@ static void wm_block_splash_close_on_fileselect(bContext *C, void *arg1, void * 
   }
 }
 
+#if defined(__APPLE__)
+/* Check if Blender is running under Rosetta for the purpose of displaying a splash screen warning.
+ * From Apple's WWDC 2020 Session - Explore the new system architecture of Apple Silicon Macs.
+ * Time code: 14:31 - https://developer.apple.com/videos/play/wwdc2020/10686/ */
+
+#  include <sys/sysctl.h>
+
+static int is_using_macos_rosetta()
+{
+  int ret = 0;
+  size_t size = sizeof(ret);
+
+  if (sysctlbyname("sysctl.proc_translated", &ret, &size, nullptr, 0) != -1) {
+    return ret;
+  }
+  /* If "sysctl.proc_translated" is not present then must be native. */
+  if (errno == ENOENT) {
+    return 0;
+  }
+  return -1;
+}
+#endif /* __APPLE__ */
+
 static uiBlock *wm_block_splash_create(bContext *C, ARegion *region, void * /*arg*/)
 {
   const uiStyle *style = UI_style_get_dpi();
 
   uiBlock *block = UI_block_begin(C, region, "splash", UI_EMBOSS);
 
-  /* note on UI_BLOCK_NO_WIN_CLIP, the window size is not always synchronized
+  /* Note on #UI_BLOCK_NO_WIN_CLIP, the window size is not always synchronized
    * with the OS when the splash shows, window clipping in this case gives
    * ugly results and clipping the splash isn't useful anyway, just disable it #32938. */
   UI_block_flag_enable(block, UI_BLOCK_LOOP | UI_BLOCK_KEEP_OPEN | UI_BLOCK_NO_WIN_CLIP);
   UI_block_theme_style_set(block, UI_BLOCK_THEME_STYLE_POPUP);
 
-  const int text_points_max = std::max(style->widget.points, style->widgetlabel.points);
-  int splash_width = text_points_max * 45 * UI_SCALE_FAC;
+  int splash_width = style->widget.points * 45 * UI_SCALE_FAC;
   CLAMP_MAX(splash_width, CTX_wm_window(C)->sizex * 0.7f);
   int splash_height;
 
@@ -250,9 +273,12 @@ static uiBlock *wm_block_splash_create(bContext *C, ARegion *region, void * /*ar
   if (cfgdir.has_value()) {
     BLI_path_join(userpref, sizeof(userpref), cfgdir->c_str(), BLENDER_USERPREF_FILE);
   }
+  else {
+    userpref[0] = '\0';
+  }
 
   /* Draw setup screen if no preferences have been saved yet. */
-  if (!BLI_exists(userpref)) {
+  if (!(userpref[0] && BLI_exists(userpref))) {
     mt = WM_menutype_find("WM_MT_splash_quick_setup", true);
 
     /* The #UI_BLOCK_QUICK_SETUP flag prevents the button text from being left-aligned,
@@ -268,6 +294,46 @@ static uiBlock *wm_block_splash_create(bContext *C, ARegion *region, void * /*ar
   if (mt) {
     UI_menutype_draw(C, mt, layout);
   }
+
+/* Displays a warning if blender is being emulated via Rosetta (macOS) or XTA (Windows) */
+#if defined(__APPLE__) || defined(_M_X64)
+#  if defined(__APPLE__)
+  if (is_using_macos_rosetta() > 0) {
+#  elif defined(_M_X64)
+  if (strncmp(BLI_getenv("PROCESSOR_IDENTIFIER"), "ARM", 3) == 0) {
+#  endif
+    uiItemS_ex(layout, 2.0f, LayoutSeparatorType::Line);
+
+    uiLayout *split = uiLayoutSplit(layout, 0.725, true);
+    uiLayout *row1 = uiLayoutRow(split, true);
+    uiLayout *row2 = uiLayoutRow(split, true);
+
+    uiItemL(row1, RPT_("Intel binary detected. Expect reduced performance."), ICON_ERROR);
+
+    PointerRNA op_ptr;
+    uiItemFullO(row2,
+                "WM_OT_url_open",
+                CTX_IFACE_(BLT_I18NCONTEXT_OPERATOR_DEFAULT, "Learn More"),
+                ICON_URL,
+                nullptr,
+                WM_OP_INVOKE_DEFAULT,
+                UI_ITEM_NONE,
+                &op_ptr);
+#  if defined(__APPLE__)
+    RNA_string_set(
+        &op_ptr,
+        "url",
+        "https://docs.blender.org/manual/en/latest/getting_started/installing/macos.html");
+#  elif defined(_M_X64)
+    RNA_string_set(
+        &op_ptr,
+        "url",
+        "https://docs.blender.org/manual/en/latest/getting_started/installing/windows.html");
+#  endif
+
+    uiItemS(layout);
+  }
+#endif
 
   UI_block_bounds_set_centered(block, 0);
 
@@ -299,9 +365,9 @@ void WM_OT_splash(wmOperatorType *ot)
 
 static uiBlock *wm_block_about_create(bContext *C, ARegion *region, void * /*arg*/)
 {
+  constexpr bool show_color = false;
   const uiStyle *style = UI_style_get_dpi();
-  const int text_points_max = std::max(style->widget.points, style->widgetlabel.points);
-  const int dialog_width = text_points_max * 42 * UI_SCALE_FAC;
+  const int dialog_width = style->widget.points * 42 * UI_SCALE_FAC;
 
   uiBlock *block = UI_block_begin(C, region, "about", UI_EMBOSS);
 
@@ -314,18 +380,11 @@ static uiBlock *wm_block_about_create(bContext *C, ARegion *region, void * /*arg
 /* Blender logo. */
 #ifndef WITH_HEADLESS
 
-  const uchar *blender_logo_data = (const uchar *)datatoc_blender_logo_png;
-  size_t blender_logo_data_size = datatoc_blender_logo_png_size;
-  ImBuf *ibuf = IMB_ibImageFromMemory(
-      blender_logo_data, blender_logo_data_size, IB_rect, nullptr, "blender_logo");
+  float size = 0.2f * dialog_width;
+
+  ImBuf *ibuf = UI_svg_icon_bitmap(ICON_BLENDER_LOGO_LARGE, size, show_color);
 
   if (ibuf) {
-    int width = 0.5 * dialog_width;
-    int height = (width * ibuf->y) / ibuf->x;
-
-    IMB_premultiply_alpha(ibuf);
-    IMB_scaleImBuf(ibuf, width, height);
-
     bTheme *btheme = UI_GetTheme();
     const uchar *color = btheme->tui.wcol_menu_back.text_sel;
 
@@ -336,7 +395,7 @@ static uiBlock *wm_block_about_create(bContext *C, ARegion *region, void * /*arg
     /* The logo image. */
     row = uiLayoutRow(layout, false);
     uiLayoutSetAlignment(row, UI_LAYOUT_ALIGN_LEFT);
-    uiDefButImage(block, ibuf, 0, U.widget_unit, width, height, color);
+    uiDefButImage(block, ibuf, 0, U.widget_unit, ibuf->x, ibuf->y, show_color ? nullptr : color);
 
     /* Padding below the logo. */
     row = uiLayoutRow(layout, false);

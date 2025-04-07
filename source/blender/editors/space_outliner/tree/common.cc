@@ -17,11 +17,10 @@
 #include "DNA_outliner_types.h"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "../outliner_intern.hh"
 #include "common.hh"
-#include "tree_display.hh"
 
 namespace blender::ed::outliner {
 

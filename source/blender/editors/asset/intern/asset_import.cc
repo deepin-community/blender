@@ -10,13 +10,11 @@
 
 #include "DNA_space_types.h"
 
-#include "BLO_readfile.h"
+#include "BLO_readfile.hh"
 
 #include "WM_api.hh"
 
 #include "ED_asset_import.hh"
-
-using namespace blender;
 
 namespace blender::ed::asset {
 
@@ -26,7 +24,7 @@ ID *asset_local_id_ensure_imported(Main &bmain, const asset_system::AssetReprese
     return local_id;
   }
 
-  std::string blend_path = asset.get_identifier().full_library_path();
+  std::string blend_path = asset.full_library_path();
   if (blend_path.empty()) {
     return nullptr;
   }

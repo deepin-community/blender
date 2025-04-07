@@ -8,7 +8,9 @@
 
 #pragma once
 
-#include "GPU_platform.h"
+#include "BLI_vector.hh"
+
+#include "GPU_platform.hh"
 
 namespace blender::gpu {
 
@@ -26,6 +28,7 @@ class GPUPlatformGlobal {
   char *gpu_name = nullptr;
   eGPUBackendType backend = GPU_BACKEND_NONE;
   GPUArchitectureType architecture_type = GPU_ARCHITECTURE_IMR;
+  Vector<GPUDevice> devices;
 
  public:
   void init(eGPUDeviceType gpu_device,

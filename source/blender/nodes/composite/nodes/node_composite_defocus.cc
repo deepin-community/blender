@@ -80,16 +80,7 @@ static void node_composit_buts_defocus(uiLayout *layout, bContext *C, PointerRNA
   col = uiLayoutColumn(layout, false);
   uiItemR(col, ptr, "use_preview", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
 
-  uiTemplateID(layout,
-               C,
-               ptr,
-               "scene",
-               nullptr,
-               nullptr,
-               nullptr,
-               UI_TEMPLATE_ID_FILTER_ALL,
-               false,
-               nullptr);
+  uiTemplateID(layout, C, ptr, "scene", nullptr, nullptr, nullptr);
 
   col = uiLayoutColumn(layout, false);
   uiItemR(col, ptr, "use_zbuffer", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
@@ -115,16 +106,16 @@ class DefocusOperation : public NodeOperation {
 
     Result radius = compute_defocus_radius();
 
-    const int maximum_defocus_radius = compute_maximum_defocus_radius();
+    const int maximum_defocus_radius = math::ceil(compute_maximum_defocus_radius());
 
     /* The special zero value indicate a circle, in which case, the roundness should be set to
      * 1, and the number of sides can be anything and is arbitrarily set to 3. */
     const bool is_circle = node_storage(bnode()).bktype == 0;
-    const int2 kernel_size = int2(maximum_defocus_radius * 2);
+    const int2 kernel_size = int2(maximum_defocus_radius * 2 + 1);
     const int sides = is_circle ? 3 : node_storage(bnode()).bktype;
     const float rotation = node_storage(bnode()).rotation;
     const float roundness = is_circle ? 1.0f : 0.0f;
-    const BokehKernel &bokeh_kernel = context().cache_manager().bokeh_kernels.get(
+    const Result &bokeh_kernel = context().cache_manager().bokeh_kernels.get(
         context(), kernel_size, sides, rotation, roundness, 0.0f, 0.0f);
 
     GPUShader *shader = context().get_shader("compositor_defocus_blur");
@@ -137,7 +128,7 @@ class DefocusOperation : public NodeOperation {
 
     radius.bind_as_texture(shader, "radius_tx");
 
-    GPU_texture_filter_mode(bokeh_kernel.texture(), true);
+    GPU_texture_filter_mode(bokeh_kernel, true);
     bokeh_kernel.bind_as_texture(shader, "weights_tx");
 
     const Domain domain = compute_domain();
@@ -176,7 +167,7 @@ class DefocusOperation : public NodeOperation {
     Result &input_radius = get_input("Z");
     input_radius.bind_as_texture(shader, "radius_tx");
 
-    Result output_radius = context().create_temporary_result(ResultType::Float);
+    Result output_radius = context().create_result(ResultType::Float);
     const Domain domain = input_radius.domain();
     output_radius.allocate_texture(domain);
     output_radius.bind_as_image(shader, "radius_img");
@@ -205,7 +196,7 @@ class DefocusOperation : public NodeOperation {
     Result &input_depth = get_input("Z");
     input_depth.bind_as_texture(shader, "depth_tx");
 
-    Result output_radius = context().create_temporary_result(ResultType::Float);
+    Result output_radius = context().create_result(ResultType::Float);
     const Domain domain = input_depth.domain();
     output_radius.allocate_texture(domain);
     output_radius.bind_as_image(shader, "radius_img");
@@ -221,7 +212,7 @@ class DefocusOperation : public NodeOperation {
      * focus---that is, objects whose defocus radius is small---are not affected by nearby out of
      * focus objects, hence the use of dilation. */
     const float morphological_radius = compute_maximum_defocus_radius();
-    Result eroded_radius = context().create_temporary_result(ResultType::Float);
+    Result eroded_radius = context().create_result(ResultType::Float);
     morphological_blur(context(), output_radius, eroded_radius, float2(morphological_radius));
     output_radius.release();
 
@@ -231,6 +222,10 @@ class DefocusOperation : public NodeOperation {
   /* Computes the maximum possible defocus radius in pixels. */
   float compute_maximum_defocus_radius()
   {
+    if (node_storage(bnode()).no_zbuf) {
+      return node_storage(bnode()).maxblur;
+    }
+
     const float maximum_diameter = compute_maximum_diameter_of_circle_of_confusion();
     const float pixels_per_meter = compute_pixels_per_meter();
     const float radius = (maximum_diameter / 2.0f) * pixels_per_meter;
@@ -352,14 +347,15 @@ void register_node_type_cmp_defocus()
 {
   namespace file_ns = blender::nodes::node_composite_defocus_cc;
 
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
 
   cmp_node_type_base(&ntype, CMP_NODE_DEFOCUS, "Defocus", NODE_CLASS_OP_FILTER);
   ntype.declare = file_ns::cmp_node_defocus_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_defocus;
   ntype.initfunc = file_ns::node_composit_init_defocus;
-  node_type_storage(&ntype, "NodeDefocus", node_free_standard_storage, node_copy_standard_storage);
+  blender::bke::node_type_storage(
+      &ntype, "NodeDefocus", node_free_standard_storage, node_copy_standard_storage);
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  nodeRegisterType(&ntype);
+  blender::bke::node_register_type(&ntype);
 }

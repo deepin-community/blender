@@ -9,7 +9,7 @@
 namespace blender::compositor {
 
 /* TODO(manzanilla): After removing tiled implementation, implement a default #determine_resolution
- * for all constant operations and make all initialization and deinitilization methods final. */
+ * for all constant operations and make all initialization and de-initialization methods final. */
 /**
  * Base class for operations that are always constant. Operations that can be constant only when
  * all their inputs are so, are evaluated into primitive constants (Color/Vector/Value) during
@@ -28,7 +28,7 @@ class ConstantOperation : public NodeOperation {
 
   void update_memory_buffer(MemoryBuffer *output,
                             const rcti &area,
-                            Span<MemoryBuffer *> inputs) final;
+                            Span<MemoryBuffer *> inputs) override;
 };
 
 }  // namespace blender::compositor

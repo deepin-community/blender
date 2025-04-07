@@ -21,20 +21,20 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "BLI_blenlib.h"
 #include "BLI_utildefines.h"
 
 #include "BKE_context.hh"
-#include "BKE_fcurve.h"
+#include "BKE_fcurve.hh"
 #include "BKE_screen.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "UI_interface.hh"
 #include "UI_resources.hh"
@@ -86,7 +86,7 @@ static PointerRNA *fmodifier_get_pointers(const bContext *C, const Panel *panel,
   }
 
   if (C != nullptr && CTX_wm_space_graph(C)) {
-    FCurve *fcu = ANIM_graph_context_fcurve(C);
+    const FCurve *fcu = ANIM_graph_context_fcurve(C);
     uiLayoutSetActive(panel->layout, !(fcu->flag & FCURVE_MOD_OFF));
   }
 
@@ -199,6 +199,7 @@ static PanelType *fmodifier_subpanel_register(ARegionType *region_type,
 {
   PanelType *panel_type = static_cast<PanelType *>(MEM_callocN(sizeof(PanelType), __func__));
 
+  BLI_assert(parent != nullptr);
   SNPRINTF(panel_type->idname, "%s_%s", parent->idname, name);
   STRNCPY(panel_type->label, label);
   STRNCPY(panel_type->category, "Modifiers");
@@ -209,7 +210,6 @@ static PanelType *fmodifier_subpanel_register(ARegionType *region_type,
   panel_type->poll = poll;
   panel_type->flag = PANEL_TYPE_DEFAULT_CLOSED;
 
-  BLI_assert(parent != nullptr);
   STRNCPY(panel_type->parent_id, parent->idname);
   panel_type->parent = parent;
   BLI_addtail(&parent->children, BLI_genericNodeN(panel_type));
@@ -333,8 +333,6 @@ static void fmodifier_panel_header(const bContext *C, Panel *panel)
                             UI_UNIT_X,
                             UI_UNIT_Y,
                             nullptr,
-                            0.0,
-                            0.0,
                             0.0,
                             0.0,
                             TIP_("Delete Modifier"));
@@ -695,8 +693,6 @@ static void envelope_panel_draw(const bContext *C, Panel *panel)
                         nullptr,
                         0,
                         0,
-                        0,
-                        0,
                         TIP_("Add a new control-point to the envelope on the current frame"));
   UI_but_func_set(but, fmod_envelope_addpoint_cb, env, nullptr);
 
@@ -724,8 +720,6 @@ static void envelope_panel_draw(const bContext *C, Panel *panel)
                        0.9 * UI_UNIT_X,
                        UI_UNIT_Y,
                        nullptr,
-                       0.0,
-                       0.0,
                        0.0,
                        0.0,
                        TIP_("Delete envelope control point"));
@@ -906,8 +900,7 @@ void ANIM_fmodifier_panels(const bContext *C,
                    nullptr); /* There shouldn't be fewer panels than modifiers with UIs. */
       }
 
-      PointerRNA *fcm_ptr = static_cast<PointerRNA *>(
-          MEM_mallocN(sizeof(PointerRNA), "panel customdata"));
+      PointerRNA *fcm_ptr = MEM_new<PointerRNA>("panel customdata");
       *fcm_ptr = RNA_pointer_create(owner_id, &RNA_FModifier, fcm);
       UI_panel_custom_data_set(panel, fcm_ptr);
 

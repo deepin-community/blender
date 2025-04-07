@@ -173,6 +173,19 @@ static void mark_bezier_vector_edges_sharp(const int profile_point_num,
   }
 }
 
+static float4x4 build_point_matrix(const float3 &location,
+                                   const float3 &tangent,
+                                   const float3 &normal)
+{
+  float4x4 matrix = float4x4::identity();
+  matrix.x_axis() = tangent;
+  /* Normal and tangent may not be orthogonal in case of custom normals. */
+  matrix.y_axis() = math::normalize(math::cross(normal, tangent));
+  matrix.z_axis() = normal;
+  matrix.location() = location;
+  return matrix;
+}
+
 static void fill_mesh_positions(const int main_point_num,
                                 const int profile_point_num,
                                 const Span<float3> main_positions,
@@ -184,7 +197,7 @@ static void fill_mesh_positions(const int main_point_num,
 {
   if (profile_point_num == 1) {
     for (const int i_ring : IndexRange(main_point_num)) {
-      float4x4 point_matrix = math::from_orthonormal_axes<float4x4>(
+      float4x4 point_matrix = build_point_matrix(
           main_positions[i_ring], normals[i_ring], tangents[i_ring]);
       if (!radii.is_empty()) {
         point_matrix = math::scale(point_matrix, float3(radii[i_ring]));
@@ -194,7 +207,7 @@ static void fill_mesh_positions(const int main_point_num,
   }
   else {
     for (const int i_ring : IndexRange(main_point_num)) {
-      float4x4 point_matrix = math::from_orthonormal_axes<float4x4>(
+      float4x4 point_matrix = build_point_matrix(
           main_positions[i_ring], normals[i_ring], tangents[i_ring]);
       if (!radii.is_empty()) {
         point_matrix = math::scale(point_matrix, float3(radii[i_ring]));
@@ -333,7 +346,7 @@ static ResultOffsets calculate_result_offsets(const CurvesInfo &info, const bool
 }
 
 static AttrDomain get_attribute_domain_for_mesh(const AttributeAccessor &mesh_attributes,
-                                                const AttributeIDRef &attribute_id)
+                                                const StringRef attribute_id)
 {
   /* Only use a different domain if it is builtin and must only exist on one domain. */
   if (!mesh_attributes.is_builtin(attribute_id)) {
@@ -350,20 +363,20 @@ static AttrDomain get_attribute_domain_for_mesh(const AttributeAccessor &mesh_at
 
 static bool should_add_attribute_to_mesh(const AttributeAccessor &curve_attributes,
                                          const AttributeAccessor &mesh_attributes,
-                                         const AttributeIDRef &id,
+                                         const StringRef id,
                                          const AttributeMetaData &meta_data,
-                                         const AnonymousAttributePropagationInfo &propagation_info)
+                                         const AttributeFilter &attribute_filter)
 {
 
   /* The position attribute has special non-generic evaluation. */
-  if (id.name() == "position") {
+  if (id == "position") {
     return false;
   }
   /* Don't propagate built-in curves attributes that are not built-in on meshes. */
   if (curve_attributes.is_builtin(id) && !mesh_attributes.is_builtin(id)) {
     return false;
   }
-  if (id.is_anonymous() && !propagation_info.propagate(id.anonymous_id())) {
+  if (attribute_filter.allow_skip(id)) {
     return false;
   }
   if (meta_data.data_type == CD_PROP_STRING) {
@@ -376,12 +389,27 @@ static GSpan evaluate_attribute(const GVArray &src,
                                 const CurvesGeometry &curves,
                                 Vector<std::byte> &buffer)
 {
-  if (curves.is_single_type(CURVE_TYPE_POLY) && src.is_span()) {
-    return src.get_internal_span();
+  /* Poly curves evaluated points match the curve points, no need to interpolate. */
+  if (curves.is_single_type(CURVE_TYPE_POLY)) {
+    if (src.is_span()) {
+      return src.get_internal_span();
+    }
+    buffer.reinitialize(curves.points_num() * src.type().size());
+    src.materialize(buffer.data());
+    GMutableSpan eval{src.type(), buffer.data(), curves.points_num()};
+    return eval;
   }
+
+  if (src.is_span()) {
+    buffer.reinitialize(curves.evaluated_points_num() * src.type().size());
+    GMutableSpan eval{src.type(), buffer.data(), curves.evaluated_points_num()};
+    curves.interpolate_to_evaluated(src.get_internal_span(), eval);
+    return eval;
+  }
+  GVArraySpan src_buffer(src);
   buffer.reinitialize(curves.evaluated_points_num() * src.type().size());
   GMutableSpan eval{src.type(), buffer.data(), curves.evaluated_points_num()};
-  curves.interpolate_to_evaluated(src.get_internal_span(), eval);
+  curves.interpolate_to_evaluated(src_buffer, eval);
   return eval;
 }
 
@@ -474,7 +502,7 @@ static void build_mesh_positions(const CurvesInfo &curves_info,
   }
   const Span<float3> tangents = curves_info.main.evaluated_tangents();
   const Span<float3> normals = curves_info.main.evaluated_normals();
-  Span<float> radii_eval = {};
+  Span<float> radii_eval;
   if (const GVArray radii = *curves_info.main.attributes().lookup("radius", AttrDomain::Point)) {
     radii_eval = evaluate_attribute(radii, curves_info.main, eval_buffer).typed<float>();
   }
@@ -528,7 +556,7 @@ static void copy_main_point_data_to_mesh_faces(const Span<T> src,
 }
 
 static bool try_sharing_point_data(const CurvesGeometry &main,
-                                   const AttributeIDRef &id,
+                                   const StringRef id,
                                    const GAttributeReader &src,
                                    MutableAttributeAccessor mesh_attributes)
 {
@@ -560,7 +588,7 @@ static bool try_direct_evaluate_point_data(const CurvesGeometry &main,
 }
 
 static void copy_main_point_domain_attribute_to_mesh(const CurvesInfo &curves_info,
-                                                     const AttributeIDRef &id,
+                                                     const StringRef id,
                                                      const ResultOffsets &offsets,
                                                      const AttrDomain dst_domain,
                                                      const GAttributeReader &src_attribute,
@@ -711,7 +739,7 @@ static void copy_indices_to_offset_ranges(const VArray<T> &src,
   /* This unnecessarily instantiates the "is single" case (which should be handled elsewhere if
    * it's ever used for attributes), but the alternative is duplicating the function for spans and
    * other virtual arrays. */
-  devirtualize_varray(src, [&](const auto &src) {
+  devirtualize_varray(src, [&](const auto src) {
     threading::parallel_for(curve_indices.index_range(), 512, [&](IndexRange range) {
       for (const int i : range) {
         dst.slice(mesh_offsets[i]).fill(src[curve_indices[i]]);
@@ -787,7 +815,7 @@ static void write_sharp_bezier_edges(const CurvesInfo &curves_info,
 Mesh *curve_to_mesh_sweep(const CurvesGeometry &main,
                           const CurvesGeometry &profile,
                           const bool fill_caps,
-                          const AnonymousAttributePropagationInfo &propagation_info)
+                          const AttributeFilter &attribute_filter)
 {
   const CurvesInfo curves_info = get_curves_info(main, profile);
 
@@ -843,6 +871,9 @@ Mesh *curve_to_mesh_sweep(const CurvesGeometry &main,
 
   Vector<std::byte> eval_buffer;
 
+  /* Make sure curve attributes can be interpolated. */
+  main.ensure_can_interpolate_to_evaluated();
+
   build_mesh_positions(curves_info, offsets, eval_buffer, *mesh);
 
   mesh->tag_overlapping_none();
@@ -880,54 +911,61 @@ Mesh *curve_to_mesh_sweep(const CurvesGeometry &main,
   sharp_edges.finish();
 
   const AttributeAccessor main_attributes = main.attributes();
-  main_attributes.for_all([&](const AttributeIDRef &id, const AttributeMetaData meta_data) {
-    if (!should_add_attribute_to_mesh(
-            main_attributes, mesh_attributes, id, meta_data, propagation_info))
+  main_attributes.foreach_attribute([&](const AttributeIter &iter) {
+    if (!should_add_attribute_to_mesh(main_attributes,
+                                      mesh_attributes,
+                                      iter.name,
+                                      {iter.domain, iter.data_type},
+                                      attribute_filter))
     {
-      return true;
+      return;
     }
 
-    const AttrDomain src_domain = meta_data.domain;
-    const eCustomDataType type = meta_data.data_type;
-    const GAttributeReader src = main_attributes.lookup(id, src_domain, type);
-    const AttrDomain dst_domain = get_attribute_domain_for_mesh(mesh_attributes, id);
+    const AttrDomain src_domain = iter.domain;
+    const eCustomDataType type = iter.data_type;
+    const GAttributeReader src = iter.get();
+    const AttrDomain dst_domain = get_attribute_domain_for_mesh(mesh_attributes, iter.name);
 
     if (src_domain == AttrDomain::Point) {
       copy_main_point_domain_attribute_to_mesh(
-          curves_info, id, offsets, dst_domain, src, eval_buffer, mesh_attributes);
+          curves_info, iter.name, offsets, dst_domain, src, eval_buffer, mesh_attributes);
     }
     else if (src_domain == AttrDomain::Curve) {
       GSpanAttributeWriter dst = mesh_attributes.lookup_or_add_for_write_only_span(
-          id, dst_domain, type);
+          iter.name, dst_domain, type);
       if (dst) {
         copy_curve_domain_attribute_to_mesh(
             offsets, offsets.main_indices, dst_domain, *src, dst.span);
       }
       dst.finish();
     }
-
-    return true;
   });
 
-  const AttributeAccessor profile_attributes = profile.attributes();
-  profile_attributes.for_all([&](const AttributeIDRef &id, const AttributeMetaData meta_data) {
-    if (main_attributes.contains(id)) {
-      return true;
-    }
-    if (!should_add_attribute_to_mesh(
-            profile_attributes, mesh_attributes, id, meta_data, propagation_info))
-    {
-      return true;
-    }
-    const AttrDomain src_domain = meta_data.domain;
-    const eCustomDataType type = meta_data.data_type;
-    const GVArray src = *profile_attributes.lookup(id, src_domain, type);
+  /* Make sure profile attributes can be interpolated. */
+  profile.ensure_can_interpolate_to_evaluated();
 
-    const AttrDomain dst_domain = get_attribute_domain_for_mesh(mesh_attributes, id);
+  const AttributeAccessor profile_attributes = profile.attributes();
+  profile_attributes.foreach_attribute([&](const AttributeIter &iter) {
+    if (main_attributes.contains(iter.name)) {
+      return;
+    }
+    if (!should_add_attribute_to_mesh(profile_attributes,
+                                      mesh_attributes,
+                                      iter.name,
+                                      {iter.domain, iter.data_type},
+                                      attribute_filter))
+    {
+      return;
+    }
+    const AttrDomain src_domain = iter.domain;
+    const eCustomDataType type = iter.data_type;
+    const GVArray src = *iter.get();
+
+    const AttrDomain dst_domain = get_attribute_domain_for_mesh(mesh_attributes, iter.name);
     GSpanAttributeWriter dst = mesh_attributes.lookup_or_add_for_write_only_span(
-        id, dst_domain, type);
+        iter.name, dst_domain, type);
     if (!dst) {
-      return true;
+      return;
     }
 
     if (src_domain == AttrDomain::Point) {
@@ -943,7 +981,6 @@ Mesh *curve_to_mesh_sweep(const CurvesGeometry &main,
     }
 
     dst.finish();
-    return true;
   });
 
   return mesh;
@@ -959,11 +996,10 @@ static CurvesGeometry get_curve_single_vert()
   return curves;
 }
 
-Mesh *curve_to_wire_mesh(const CurvesGeometry &curve,
-                         const AnonymousAttributePropagationInfo &propagation_info)
+Mesh *curve_to_wire_mesh(const CurvesGeometry &curve, const AttributeFilter &attribute_filter)
 {
   static const CurvesGeometry vert_curve = get_curve_single_vert();
-  return curve_to_mesh_sweep(curve, vert_curve, false, propagation_info);
+  return curve_to_mesh_sweep(curve, vert_curve, false, attribute_filter);
 }
 
 }  // namespace blender::bke

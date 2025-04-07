@@ -13,13 +13,13 @@
  * `DrawMultiBuf`. See implementation details at their definition.
  */
 
-#include "BKE_global.h"
+#include "BKE_global.hh"
 #include "BLI_map.hh"
 #include "DRW_gpu_wrapper.hh"
 
 #include "draw_command_shared.hh"
 #include "draw_handle.hh"
-#include "draw_state.h"
+#include "draw_state.hh"
 #include "draw_view.hh"
 
 /* Forward declarations. */
@@ -67,10 +67,10 @@ struct RecordingState {
     }
 
     if (G.debug & G_DEBUG_GPU) {
-      GPU_storagebuf_unbind_all();
+      GPU_storagebuf_debug_unbind_all();
       GPU_texture_image_unbind_all();
       GPU_texture_unbind_all();
-      GPU_uniformbuf_unbind_all();
+      GPU_uniformbuf_debug_unbind_all();
     }
   }
 };
@@ -172,10 +172,10 @@ struct ResourceBind {
     /** NOTE: Texture is used for both Sampler and Image binds. */
     GPUTexture *texture;
     GPUTexture **texture_ref;
-    GPUVertBuf *vertex_buf;
-    GPUVertBuf **vertex_buf_ref;
-    GPUIndexBuf *index_buf;
-    GPUIndexBuf **index_buf_ref;
+    gpu::VertBuf *vertex_buf;
+    gpu::VertBuf **vertex_buf_ref;
+    gpu::IndexBuf *index_buf;
+    gpu::IndexBuf **index_buf_ref;
   };
 
   ResourceBind() = default;
@@ -192,13 +192,13 @@ struct ResourceBind {
       : slot(slot_), is_reference(false), type(Type::UniformAsStorageBuf), uniform_buf(res){};
   ResourceBind(int slot_, GPUUniformBuf **res, Type /*type*/)
       : slot(slot_), is_reference(true), type(Type::UniformAsStorageBuf), uniform_buf_ref(res){};
-  ResourceBind(int slot_, GPUVertBuf *res, Type /*type*/)
+  ResourceBind(int slot_, gpu::VertBuf *res, Type /*type*/)
       : slot(slot_), is_reference(false), type(Type::VertexAsStorageBuf), vertex_buf(res){};
-  ResourceBind(int slot_, GPUVertBuf **res, Type /*type*/)
+  ResourceBind(int slot_, gpu::VertBuf **res, Type /*type*/)
       : slot(slot_), is_reference(true), type(Type::VertexAsStorageBuf), vertex_buf_ref(res){};
-  ResourceBind(int slot_, GPUIndexBuf *res, Type /*type*/)
+  ResourceBind(int slot_, gpu::IndexBuf *res, Type /*type*/)
       : slot(slot_), is_reference(false), type(Type::IndexAsStorageBuf), index_buf(res){};
-  ResourceBind(int slot_, GPUIndexBuf **res, Type /*type*/)
+  ResourceBind(int slot_, gpu::IndexBuf **res, Type /*type*/)
       : slot(slot_), is_reference(true), type(Type::IndexAsStorageBuf), index_buf_ref(res){};
   ResourceBind(int slot_, draw::Image *res)
       : slot(slot_), is_reference(false), type(Type::Image), texture(draw::as_texture(res)){};
@@ -208,9 +208,9 @@ struct ResourceBind {
       : sampler(state), slot(slot_), is_reference(false), type(Type::Sampler), texture(res){};
   ResourceBind(int slot_, GPUTexture **res, GPUSamplerState state)
       : sampler(state), slot(slot_), is_reference(true), type(Type::Sampler), texture_ref(res){};
-  ResourceBind(int slot_, GPUVertBuf *res)
+  ResourceBind(int slot_, gpu::VertBuf *res)
       : slot(slot_), is_reference(false), type(Type::BufferSampler), vertex_buf(res){};
-  ResourceBind(int slot_, GPUVertBuf **res)
+  ResourceBind(int slot_, gpu::VertBuf **res)
       : slot(slot_), is_reference(true), type(Type::BufferSampler), vertex_buf_ref(res){};
 
   void execute() const;
@@ -303,11 +303,11 @@ struct SpecializeConstant {
   /* Value of the constant or a reference to it. */
   union {
     int int_value;
-    int uint_value;
+    uint uint_value;
     float float_value;
     bool bool_value;
     const int *int_ref;
-    const int *uint_ref;
+    const uint *uint_ref;
     const float *float_ref;
     const bool *bool_ref;
   };
@@ -331,12 +331,16 @@ struct SpecializeConstant {
       : shader(sh), float_value(val), location(loc), type(Type::FloatValue){};
   SpecializeConstant(GPUShader *sh, int loc, const int &val)
       : shader(sh), int_value(val), location(loc), type(Type::IntValue){};
+  SpecializeConstant(GPUShader *sh, int loc, const uint &val)
+      : shader(sh), uint_value(val), location(loc), type(Type::UintValue){};
   SpecializeConstant(GPUShader *sh, int loc, const bool &val)
       : shader(sh), bool_value(val), location(loc), type(Type::BoolValue){};
   SpecializeConstant(GPUShader *sh, int loc, const float *val)
       : shader(sh), float_ref(val), location(loc), type(Type::FloatReference){};
   SpecializeConstant(GPUShader *sh, int loc, const int *val)
       : shader(sh), int_ref(val), location(loc), type(Type::IntReference){};
+  SpecializeConstant(GPUShader *sh, int loc, const uint *val)
+      : shader(sh), uint_ref(val), location(loc), type(Type::UintReference){};
   SpecializeConstant(GPUShader *sh, int loc, const bool *val)
       : shader(sh), bool_ref(val), location(loc), type(Type::BoolReference){};
 
@@ -345,10 +349,12 @@ struct SpecializeConstant {
 };
 
 struct Draw {
-  GPUBatch *batch;
-  uint instance_len;
-  uint vertex_len;
-  uint vertex_first;
+  gpu::Batch *batch;
+  uint16_t instance_len;
+  uint8_t expand_prim_type; /* #GPUPrimType */
+  uint8_t expand_prim_len;
+  uint32_t vertex_first;
+  uint32_t vertex_len;
   ResourceHandle handle;
 #ifdef WITH_METAL_BACKEND
   /* Shader is required for extracting SSBO vertex fetch expansion parameters during draw command
@@ -356,22 +362,53 @@ struct Draw {
   GPUShader *shader;
 #endif
 
+  Draw() = default;
+
+  Draw(gpu::Batch *batch,
+       uint instance_len,
+       uint vertex_len,
+       uint vertex_first,
+#ifdef WITH_METAL_BACKEND
+       GPUShader *shader,
+#endif
+       GPUPrimType expanded_prim_type,
+       uint expanded_prim_len,
+       ResourceHandle handle)
+  {
+    this->batch = batch;
+    this->handle = handle;
+#ifdef WITH_METAL_BACKEND
+    this->shader = shader;
+#endif
+    BLI_assert(instance_len < SHRT_MAX);
+    this->instance_len = uint16_t(instance_len);
+    this->vertex_len = vertex_len;
+    this->vertex_first = vertex_first;
+    this->expand_prim_type = expanded_prim_type;
+    this->expand_prim_len = expanded_prim_len;
+  }
+
+  bool is_primitive_expansion() const
+  {
+    return expand_prim_type != GPU_PRIM_NONE;
+  }
+
   void execute(RecordingState &state) const;
   std::string serialize() const;
 };
 
 struct DrawMulti {
-  GPUBatch *batch;
+  gpu::Batch *batch;
   DrawMultiBuf *multi_draw_buf;
   uint group_first;
   uint uuid;
 
   void execute(RecordingState &state) const;
-  std::string serialize(std::string line_prefix) const;
+  std::string serialize(const std::string &line_prefix) const;
 };
 
 struct DrawIndirect {
-  GPUBatch *batch;
+  gpu::Batch *batch;
   GPUStorageBuf **indirect_buf;
   ResourceHandle handle;
 
@@ -465,7 +502,13 @@ union Undetermined {
 };
 
 /** Try to keep the command size as low as possible for performance. */
-BLI_STATIC_ASSERT(sizeof(Undetermined) <= /*24*/ 32, "One of the command type is too large.")
+
+#ifdef WITH_METAL_BACKEND
+/* TODO(fclem): Remove. */
+BLI_STATIC_ASSERT(sizeof(Undetermined) <= 32, "One of the command type is too large.")
+#else
+BLI_STATIC_ASSERT(sizeof(Undetermined) <= 24, "One of the command type is too large.")
+#endif
 
 /** \} */
 
@@ -499,20 +542,23 @@ class DrawCommandBuf {
 
   void append_draw(Vector<Header, 0> &headers,
                    Vector<Undetermined, 0> &commands,
-                   GPUBatch *batch,
+                   gpu::Batch *batch,
                    uint instance_len,
                    uint vertex_len,
                    uint vertex_first,
                    ResourceHandle handle,
-                   uint /*custom_id*/
+                   uint custom_id,
 #ifdef WITH_METAL_BACKEND
-                   ,
-                   GPUShader *shader = nullptr
+                   GPUShader *shader,
 #endif
-  )
+                   GPUPrimType expanded_prim_type,
+                   uint16_t expanded_prim_len)
   {
     vertex_first = vertex_first != -1 ? vertex_first : 0;
     instance_len = instance_len != -1 ? instance_len : 1;
+
+    BLI_assert_msg(custom_id == 0, "Custom ID is not supported in PassSimple");
+    UNUSED_VARS_NDEBUG(custom_id);
 
     int64_t index = commands.append_and_get_index({});
     headers.append({Type::Draw, uint(index)});
@@ -520,12 +566,12 @@ class DrawCommandBuf {
                             instance_len,
                             vertex_len,
                             vertex_first,
-                            handle
 #ifdef WITH_METAL_BACKEND
-                            ,
-                            shader
+                            shader,
 #endif
-    };
+                            expanded_prim_type,
+                            expanded_prim_len,
+                            handle};
   }
 
   void bind(RecordingState &state,
@@ -551,10 +597,10 @@ class DrawCommandBuf {
  * `DrawGroup` as a container. This is done automatically for any successive commands with the
  * same state.
  *
- * A `DrawGroup` is the combination of a `GPUBatch` (VBO state) and a `command::DrawMulti`
+ * A `DrawGroup` is the combination of a `gpu::Batch` (VBO state) and a `command::DrawMulti`
  * (Pipeline State).
  *
- * Inside each `DrawGroup` all instances of a same `GPUBatch` is merged into a single indirect
+ * Inside each `DrawGroup` all instances of a same `gpu::Batch` is merged into a single indirect
  * command.
  *
  * To support this arbitrary reordering, we only need to know the offset of all the commands for a
@@ -581,7 +627,7 @@ class DrawMultiBuf {
   using DrawCommandBuf = StorageArrayBuffer<DrawCommand, 16, true>;
   using ResourceIdBuf = StorageArrayBuffer<uint, 128, true>;
 
-  using DrawGroupKey = std::pair<uint, GPUBatch *>;
+  using DrawGroupKey = std::pair<uint, gpu::Batch *>;
   using DrawGroupMap = Map<DrawGroupKey, uint>;
   /** Maps a DrawMulti command and a gpu batch to their unique DrawGroup command. */
   DrawGroupMap group_ids_;
@@ -619,21 +665,23 @@ class DrawMultiBuf {
 
   void append_draw(Vector<Header, 0> &headers,
                    Vector<Undetermined, 0> &commands,
-                   GPUBatch *batch,
+                   gpu::Batch *batch,
                    uint instance_len,
                    uint vertex_len,
                    uint vertex_first,
                    ResourceHandle handle,
-                   uint custom_id
+                   uint custom_id,
 #ifdef WITH_METAL_BACKEND
-                   ,
-                   GPUShader *shader
+                   GPUShader *shader,
 #endif
-  )
+                   GPUPrimType expanded_prim_type,
+                   uint16_t expanded_prim_len)
   {
     /* Custom draw-calls cannot be batched and will produce one group per draw. */
     const bool custom_group = ((vertex_first != 0 && vertex_first != -1) || vertex_len != -1);
 
+    BLI_assert(vertex_len != 0);
+    vertex_len = vertex_len == -1 ? 0 : vertex_len;
     instance_len = instance_len != -1 ? instance_len : 1;
 
     /* If there was some state changes since previous call, we have to create another command. */
@@ -663,22 +711,23 @@ class DrawMultiBuf {
       group.next = cmd.group_first;
       group.len = instance_len;
       group.front_facing_len = inverted ? 0 : instance_len;
-      group.gpu_batch = batch;
-      group.front_proto_len = 0;
-      group.back_proto_len = 0;
-      group.vertex_len = vertex_len;
-      group.vertex_first = vertex_first;
+      group.front_facing_counter = 0;
+      group.back_facing_counter = 0;
+      group.desc.vertex_len = vertex_len;
+      group.desc.vertex_first = vertex_first;
+      group.desc.gpu_batch = batch;
+      group.desc.expand_prim_type = expanded_prim_type;
+      group.desc.expand_prim_len = expanded_prim_len;
+      BLI_assert_msg(expanded_prim_len < (1 << 3), "Not enough bits to store primitive expansion");
 #ifdef WITH_METAL_BACKEND
-      /* If SSBO vertex fetch is used, shader must be known to extract vertex expansion parameters.
-       */
-      group.gpu_shader = shader;
+      group.desc.gpu_shader = shader;
 #endif
       /* Custom group are not to be registered in the group_ids_. */
       if (!custom_group) {
         group_id = new_group_id;
       }
-      /* For serialization only. */
-      (inverted ? group.back_proto_len : group.front_proto_len)++;
+      /* For serialization only. Reset before use on GPU. */
+      (inverted ? group.back_facing_counter : group.front_facing_counter)++;
       /* Append to list. */
       cmd.group_first = new_group_id;
     }
@@ -686,13 +735,19 @@ class DrawMultiBuf {
       DrawGroup &group = group_buf_[group_id];
       group.len += instance_len;
       group.front_facing_len += inverted ? 0 : instance_len;
+      /* For serialization only. Reset before use on GPU. */
+      (inverted ? group.back_facing_counter : group.front_facing_counter)++;
+      /* NOTE: We assume that primitive expansion is coupled to the shader itself. Meaning we rely
+       * on shader bind to isolate the expanded draws into their own group (as there could be
+       * regular draws and extended draws using the same batch mixed inside the same pass). This
+       * will cause issues if this assumption is broken. Also it is very hard to detect this case
+       * for error checking. At least we can check that expansion settings don't change inside a
+       * group. */
+      BLI_assert(group.desc.expand_prim_type == expanded_prim_type);
+      BLI_assert(group.desc.expand_prim_len == expanded_prim_len);
 #ifdef WITH_METAL_BACKEND
-      /* If SSBO vertex fetch is used, shader must be known to extract vertex expansion parameters.
-       */
-      group.gpu_shader = shader;
+      BLI_assert(group.desc.gpu_shader == shader);
 #endif
-      /* For serialization only. */
-      (inverted ? group.back_proto_len : group.front_proto_len)++;
     }
   }
 

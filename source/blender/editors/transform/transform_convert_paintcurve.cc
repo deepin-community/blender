@@ -13,14 +13,14 @@
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector.h"
 
-#include "BKE_context.hh"
+#include "BKE_brush.hh"
 #include "BKE_paint.hh"
 
 #include "transform.hh"
 #include "transform_convert.hh"
 
 struct TransDataPaintCurve {
-  PaintCurvePoint *pcp; /* initial curve point */
+  PaintCurvePoint *pcp; /* Initial curve point. */
   char id;
 };
 
@@ -113,9 +113,9 @@ static void PaintCurvePointToTransData(PaintCurvePoint *pcp,
 static void createTransPaintCurveVerts(bContext *C, TransInfo *t)
 {
   Paint *paint = BKE_paint_get_active_from_context(C);
+  Brush *br = (paint) ? BKE_paint_brush(paint) : nullptr;
   PaintCurve *pc;
   PaintCurvePoint *pcp;
-  Brush *br;
   TransData *td = nullptr;
   TransData2D *td2d = nullptr;
   TransDataPaintCurve *tdpc = nullptr;
@@ -126,11 +126,10 @@ static void createTransPaintCurveVerts(bContext *C, TransInfo *t)
 
   tc->data_len = 0;
 
-  if (!paint || !paint->brush || !paint->brush->paint_curve) {
+  if (!paint || !br) {
     return;
   }
 
-  br = paint->brush;
   pc = br->paint_curve;
 
   for (pcp = pc->points, i = 0; i < pc->tot_points; i++, pcp++) {
@@ -204,6 +203,12 @@ static void flushTransPaintCurve(TransInfo *t)
   for (i = 0; i < tc->data_len; i++, tdpc++, td2d++) {
     PaintCurvePoint *pcp = tdpc->pcp;
     copy_v2_v2(pcp->bez.vec[tdpc->id], td2d->loc);
+  }
+
+  if (t->context) {
+    Paint *paint = BKE_paint_get_active_from_context(t->context);
+    Brush *br = (paint) ? BKE_paint_brush(paint) : nullptr;
+    BKE_brush_tag_unsaved_changes(br);
   }
 }
 

@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <BLI_span.hh>
+#include "BLI_span.hh"
 
 /** \file
  * \ingroup sequencer
@@ -13,7 +13,6 @@
 struct ListBase;
 struct Scene;
 struct Sequence;
-struct SeqCollection;
 
 void seq_update_sound_bounds_recursive(const Scene *scene, Sequence *metaseq);
 
@@ -40,7 +39,7 @@ void seq_time_effect_range_set(const Scene *scene, Sequence *seq);
 /**
  * Update strip `startdisp` and `enddisp` (n-input effects have no length to calculate these).
  */
-void seq_time_update_effects_strip_range(const Scene *scene, blender::Span<Sequence *> &effects);
+void seq_time_update_effects_strip_range(const Scene *scene, blender::Span<Sequence *> effects);
 void seq_time_translate_handles(const Scene *scene, Sequence *seq, const int offset);
 float seq_time_media_playback_rate_factor_get(const Scene *scene, const Sequence *seq);
 int seq_time_strip_original_content_length_get(const Scene *scene, const Sequence *seq);

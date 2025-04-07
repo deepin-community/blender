@@ -22,7 +22,7 @@
 
 #include "BKE_armature.hh"
 #include "BKE_context.hh"
-#include "BKE_idprop.h"
+#include "BKE_idprop.hh"
 #include "BKE_layer.hh"
 #include "BKE_main.hh"
 #include "BKE_object.hh"
@@ -55,7 +55,7 @@ static CLG_LogRef LOG = {"ed.undo.armature"};
  * bones and collections together.
  */
 static void remap_ebone_bone_collection_references(
-    ListBase /* EditBone */ *edit_bones,
+    ListBase /*EditBone*/ *edit_bones,
     const blender::Map<BoneCollection *, BoneCollection *> &bcoll_map)
 {
   LISTBASE_FOREACH (EditBone *, ebone, edit_bones) {
@@ -72,7 +72,7 @@ static void remap_ebone_bone_collection_references(
 struct UndoArmature {
   EditBone *act_edbone;
   char active_collection_name[MAX_NAME];
-  ListBase /* EditBone */ ebones;
+  ListBase /*EditBone*/ ebones;
   BoneCollection **collection_array;
   int collection_array_num;
   int collection_root_count;
@@ -221,15 +221,14 @@ static bool armature_undosys_step_encode(bContext *C, Main *bmain, UndoStep *us_
    * outside of this list will be moved out of edit-mode when reading back undo steps. */
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
-  uint objects_len = 0;
-  Object **objects = ED_undo_editmode_objects_from_view_layer(scene, view_layer, &objects_len);
+  blender::Vector<Object *> objects = ED_undo_editmode_objects_from_view_layer(scene, view_layer);
 
   us->scene_ref.ptr = scene;
   us->elems = static_cast<ArmatureUndoStep_Elem *>(
-      MEM_callocN(sizeof(*us->elems) * objects_len, __func__));
-  us->elems_len = objects_len;
+      MEM_callocN(sizeof(*us->elems) * objects.size(), __func__));
+  us->elems_len = objects.size();
 
-  for (uint i = 0; i < objects_len; i++) {
+  for (uint i = 0; i < objects.size(); i++) {
     Object *ob = objects[i];
     ArmatureUndoStep_Elem *elem = &us->elems[i];
 
@@ -239,7 +238,6 @@ static bool armature_undosys_step_encode(bContext *C, Main *bmain, UndoStep *us_
     arm->needs_flush_to_id = 1;
     us->step.data_size += elem->data.undo_size;
   }
-  MEM_freeN(objects);
 
   bmain->is_memfile_undo_flush_needed = true;
 

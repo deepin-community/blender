@@ -90,6 +90,7 @@ NODE_DEFINE(Camera)
   panorama_type_enum.insert("fisheye_equidistant", PANORAMA_FISHEYE_EQUIDISTANT);
   panorama_type_enum.insert("fisheye_equisolid", PANORAMA_FISHEYE_EQUISOLID);
   panorama_type_enum.insert("fisheye_lens_polynomial", PANORAMA_FISHEYE_LENS_POLYNOMIAL);
+  panorama_type_enum.insert("panorama_central_cylindrical", PANORAMA_CENTRAL_CYLINDRICAL);
   SOCKET_ENUM(panorama_type, "Panorama Type", panorama_type_enum, PANORAMA_EQUIRECTANGULAR);
 
   SOCKET_FLOAT(fisheye_fov, "Fisheye FOV", M_PI_F);
@@ -107,6 +108,11 @@ NODE_DEFINE(Camera)
   SOCKET_FLOAT(fisheye_polynomial_k2, "Fisheye Polynomial K2", 0.0f);
   SOCKET_FLOAT(fisheye_polynomial_k3, "Fisheye Polynomial K3", 0.0f);
   SOCKET_FLOAT(fisheye_polynomial_k4, "Fisheye Polynomial K4", 0.0f);
+
+  SOCKET_FLOAT(central_cylindrical_range_u_min, "Central Cylindrical Range U Min", -M_PI_F);
+  SOCKET_FLOAT(central_cylindrical_range_u_max, "Central Cylindrical Range U Max", M_PI_F);
+  SOCKET_FLOAT(central_cylindrical_range_v_min, "Central Cylindrical Range V Min", -1.0f);
+  SOCKET_FLOAT(central_cylindrical_range_v_max, "Central Cylindrical Range V Max", 1.0f);
 
   static NodeEnum stereo_eye_enum;
   stereo_eye_enum.insert("none", STEREO_NONE);
@@ -269,7 +275,6 @@ void Camera::update(Scene *scene)
 
   rastertocamera = screentocamera * rastertoscreen;
   full_rastertocamera = screentocamera * full_rastertoscreen;
-  cameratoraster = screentoraster * cameratoscreen;
 
   cameratoworld = matrix;
   screentoworld = cameratoworld * screentocamera;
@@ -348,7 +353,6 @@ void Camera::update(Scene *scene)
   }
 
   if (need_motion == Scene::MOTION_PASS) {
-    /* TODO(sergey): Support perspective (zoom, fov) motion. */
     if (camera_type == CAMERA_PANORAMA) {
       if (have_motion) {
         kcam->motion_pass_pre = transform_inverse(motion[0]);
@@ -360,9 +364,19 @@ void Camera::update(Scene *scene)
       }
     }
     else {
-      if (have_motion) {
-        kcam->perspective_pre = cameratoraster * transform_inverse(motion[0]);
-        kcam->perspective_post = cameratoraster * transform_inverse(motion[motion.size() - 1]);
+      if (have_motion || fov != fov_pre || fov != fov_post) {
+        /* Note the values for perspective_pre/perspective_post calculated for MOTION_PASS are
+         * different to those calculated for MOTION_BLUR below, so the code has not been combined.
+         */
+        ProjectionTransform cameratoscreen_pre = projection_perspective(
+            fov_pre, nearclip, farclip);
+        ProjectionTransform cameratoscreen_post = projection_perspective(
+            fov_post, nearclip, farclip);
+        ProjectionTransform cameratoraster_pre = screentoraster * cameratoscreen_pre;
+        ProjectionTransform cameratoraster_post = screentoraster * cameratoscreen_post;
+        kcam->perspective_pre = cameratoraster_pre * transform_inverse(motion[0]);
+        kcam->perspective_post = cameratoraster_post *
+                                 transform_inverse(motion[motion.size() - 1]);
       }
       else {
         kcam->perspective_pre = worldtoraster;
@@ -379,9 +393,6 @@ void Camera::update(Scene *scene)
 
     /* TODO(sergey): Support other types of camera. */
     if (use_perspective_motion && camera_type == CAMERA_PERSPECTIVE) {
-      /* TODO(sergey): Move to an utility function and de-duplicate with
-       * calculation above.
-       */
       ProjectionTransform screentocamera_pre = projection_inverse(
           projection_perspective(fov_pre, nearclip, farclip));
       ProjectionTransform screentocamera_post = projection_inverse(
@@ -395,7 +406,7 @@ void Camera::update(Scene *scene)
 
   /* depth of field */
   kcam->aperturesize = aperturesize;
-  kcam->focaldistance = focaldistance;
+  kcam->focaldistance = max(focaldistance, 1e-5f);
   kcam->blades = (blades < 3) ? 0.0f : blades;
   kcam->bladesrotation = bladesrotation;
 
@@ -420,6 +431,10 @@ void Camera::update(Scene *scene)
   kcam->fisheye_lens_polynomial_bias = fisheye_polynomial_k0;
   kcam->fisheye_lens_polynomial_coefficients = make_float4(
       fisheye_polynomial_k1, fisheye_polynomial_k2, fisheye_polynomial_k3, fisheye_polynomial_k4);
+  kcam->central_cylindrical_range = make_float4(-central_cylindrical_range_u_min,
+                                                -central_cylindrical_range_u_max,
+                                                central_cylindrical_range_v_min,
+                                                central_cylindrical_range_v_max);
 
   switch (stereo_eye) {
     case STEREO_LEFT:
@@ -474,7 +489,7 @@ void Camera::update(Scene *scene)
   previous_need_motion = need_motion;
 }
 
-void Camera::device_update(Device * /* device */, DeviceScene *dscene, Scene *scene)
+void Camera::device_update(Device * /*device*/, DeviceScene *dscene, Scene *scene)
 {
   update(scene);
 
@@ -593,40 +608,70 @@ BoundBox Camera::viewplane_bounds_get()
    * checks we need in a more clear and smart fashion? */
   BoundBox bounds = BoundBox::empty;
 
+  const float max_aperture_size = aperture_ratio < 1.0f ? aperturesize / aperture_ratio :
+                                                          aperturesize;
+
   if (camera_type == CAMERA_PANORAMA) {
+    const float extend = max_aperture_size + nearclip;
     if (use_spherical_stereo == false) {
-      bounds.grow(make_float3(cameratoworld.x.w, cameratoworld.y.w, cameratoworld.z.w), nearclip);
+      bounds.grow(make_float3(cameratoworld.x.w, cameratoworld.y.w, cameratoworld.z.w), extend);
     }
     else {
       float half_eye_distance = interocular_distance * 0.5f;
 
       bounds.grow(
           make_float3(cameratoworld.x.w + half_eye_distance, cameratoworld.y.w, cameratoworld.z.w),
-          nearclip);
+          extend);
 
       bounds.grow(
           make_float3(cameratoworld.z.w, cameratoworld.y.w + half_eye_distance, cameratoworld.z.w),
-          nearclip);
+          extend);
 
       bounds.grow(
           make_float3(cameratoworld.x.w - half_eye_distance, cameratoworld.y.w, cameratoworld.z.w),
-          nearclip);
+          extend);
 
       bounds.grow(
           make_float3(cameratoworld.x.w, cameratoworld.y.w - half_eye_distance, cameratoworld.z.w),
-          nearclip);
+          extend);
     }
   }
   else {
-    bounds.grow(transform_raster_to_world(0.0f, 0.0f));
-    bounds.grow(transform_raster_to_world(0.0f, (float)height));
-    bounds.grow(transform_raster_to_world((float)width, (float)height));
-    bounds.grow(transform_raster_to_world((float)width, 0.0f));
+    /* max_aperture_size = Max horizontal distance a ray travels from aperture edge to focus point.
+     * Scale that value based on the ratio between focaldistance and nearclip to figure out the
+     * horizontal distance the DOF ray will travel before reaching the nearclip plane, where it
+     * will start rendering from.
+     * In some cases (focus distance is close to camera, and nearclip plane is far from camera),
+     * this scaled value is larger than nearclip, in which case we add it to `extend` to extend the
+     * bounding box to account for these rays.
+     *
+     * ----------------- nearclip plane
+     *           / scaled_horz_dof_ray, nearclip
+     *          /
+     *         /
+     *        / max_aperture_size, focaldistance
+     *       /|
+     *      / |
+     *     /  |
+     *    /   |
+     *   ------ max_aperture_size, 0
+     *  0, 0
+     */
+
+    const float scaled_horz_dof_ray = (max_aperture_size > 0.0f) ?
+                                          max_aperture_size * (nearclip / focaldistance) :
+                                          0.0f;
+    const float extend = max_aperture_size + max(nearclip, scaled_horz_dof_ray);
+
+    bounds.grow(transform_raster_to_world(0.0f, 0.0f), extend);
+    bounds.grow(transform_raster_to_world(0.0f, (float)height), extend);
+    bounds.grow(transform_raster_to_world((float)width, (float)height), extend);
+    bounds.grow(transform_raster_to_world((float)width, 0.0f), extend);
     if (camera_type == CAMERA_PERSPECTIVE) {
       /* Center point has the most distance in local Z axis,
        * use it to construct bounding box/
        */
-      bounds.grow(transform_raster_to_world(0.5f * width, 0.5f * height));
+      bounds.grow(transform_raster_to_world(0.5f * width, 0.5f * height), extend);
     }
   }
   return bounds;

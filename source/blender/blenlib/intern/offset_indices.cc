@@ -12,6 +12,32 @@ OffsetIndices<int> accumulate_counts_to_offsets(MutableSpan<int> counts_to_offse
                                                 const int start_offset)
 {
   int offset = start_offset;
+  int64_t offset_i64 = start_offset;
+
+  for (const int i : counts_to_offsets.index_range().drop_back(1)) {
+    const int count = counts_to_offsets[i];
+    BLI_assert(count >= 0);
+    counts_to_offsets[i] = offset;
+    offset += count;
+#ifndef NDEBUG
+    offset_i64 += count;
+#endif
+  }
+  counts_to_offsets.last() = offset;
+
+  BLI_assert_msg(offset == offset_i64, "Integer overflow occured");
+  UNUSED_VARS_NDEBUG(offset_i64);
+
+  return OffsetIndices<int>(counts_to_offsets);
+}
+
+std::optional<OffsetIndices<int>> accumulate_counts_to_offsets_with_overflow_check(
+    MutableSpan<int> counts_to_offsets, int start_offset)
+{
+  /* This variant was measured to be about ~8% slower than the version without overflow check.
+   * Since this function is often a serial bottleneck, we use a separate code path for when an
+   * overflow check is requested. */
+  int64_t offset = start_offset;
   for (const int i : counts_to_offsets.index_range().drop_back(1)) {
     const int count = counts_to_offsets[i];
     BLI_assert(count >= 0);
@@ -19,15 +45,21 @@ OffsetIndices<int> accumulate_counts_to_offsets(MutableSpan<int> counts_to_offse
     offset += count;
   }
   counts_to_offsets.last() = offset;
+  const bool has_overflow = offset >= std::numeric_limits<int>::max();
+  if (has_overflow) {
+    return std::nullopt;
+  }
   return OffsetIndices<int>(counts_to_offsets);
 }
 
 void fill_constant_group_size(const int size, const int start_offset, MutableSpan<int> offsets)
 {
-  threading::parallel_for(offsets.index_range(), 1024, [&](const IndexRange range) {
-    for (const int64_t i : range) {
-      offsets[i] = size * i + start_offset;
-    }
+  threading::memory_bandwidth_bound_task(offsets.size_in_bytes(), [&]() {
+    threading::parallel_for(offsets.index_range(), 1024, [&](const IndexRange range) {
+      for (const int64_t i : range) {
+        offsets[i] = size * i + start_offset;
+      }
+    });
   });
 }
 
@@ -52,11 +84,39 @@ void gather_group_sizes(const OffsetIndices<int> offsets,
                         const Span<int> indices,
                         MutableSpan<int> sizes)
 {
-  threading::parallel_for(indices.index_range(), 4096, [&](const IndexRange range) {
-    for (const int i : range) {
-      sizes[i] = offsets[indices[i]].size();
+  threading::memory_bandwidth_bound_task(
+      sizes.size_in_bytes() + offsets.data().size_in_bytes() + indices.size_in_bytes(), [&]() {
+        threading::parallel_for(indices.index_range(), 4096, [&](const IndexRange range) {
+          for (const int i : range) {
+            sizes[i] = offsets[indices[i]].size();
+          }
+        });
+      });
+}
+
+int sum_group_sizes(const OffsetIndices<int> offsets, const Span<int> indices)
+{
+  int count = 0;
+  for (const int i : indices) {
+    count += offsets[i].size();
+  }
+  return count;
+}
+
+int sum_group_sizes(const OffsetIndices<int> offsets, const IndexMask &mask)
+{
+  int count = 0;
+  mask.foreach_segment_optimized([&](const auto segment) {
+    if constexpr (std::is_same_v<std::decay_t<decltype(segment)>, IndexRange>) {
+      count += offsets[segment].size();
+    }
+    else {
+      for (const int64_t i : segment) {
+        count += offsets[i].size();
+      }
     }
   });
+  return count;
 }
 
 OffsetIndices<int> gather_selected_offsets(const OffsetIndices<int> src_offsets,

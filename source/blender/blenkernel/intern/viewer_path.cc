@@ -95,6 +95,12 @@ void BKE_viewer_path_blend_write(BlendWriter *writer, const ViewerPath *viewer_p
         BLO_write_struct(writer, RepeatZoneViewerPathElem, typed_elem);
         break;
       }
+      case VIEWER_PATH_ELEM_TYPE_FOREACH_GEOMETRY_ELEMENT_ZONE: {
+        const auto *typed_elem = reinterpret_cast<ForeachGeometryElementZoneViewerPathElem *>(
+            elem);
+        BLO_write_struct(writer, ForeachGeometryElementZoneViewerPathElem, typed_elem);
+        break;
+      }
     }
     BLO_write_string(writer, elem->ui_name);
   }
@@ -102,20 +108,21 @@ void BKE_viewer_path_blend_write(BlendWriter *writer, const ViewerPath *viewer_p
 
 void BKE_viewer_path_blend_read_data(BlendDataReader *reader, ViewerPath *viewer_path)
 {
-  BLO_read_list(reader, &viewer_path->path);
+  BLO_read_struct_list(reader, ViewerPathElem, &viewer_path->path);
   LISTBASE_FOREACH (ViewerPathElem *, elem, &viewer_path->path) {
-    BLO_read_data_address(reader, &elem->ui_name);
+    BLO_read_string(reader, &elem->ui_name);
     switch (ViewerPathElemType(elem->type)) {
       case VIEWER_PATH_ELEM_TYPE_GROUP_NODE:
       case VIEWER_PATH_ELEM_TYPE_SIMULATION_ZONE:
       case VIEWER_PATH_ELEM_TYPE_VIEWER_NODE:
       case VIEWER_PATH_ELEM_TYPE_REPEAT_ZONE:
+      case VIEWER_PATH_ELEM_TYPE_FOREACH_GEOMETRY_ELEMENT_ZONE:
       case VIEWER_PATH_ELEM_TYPE_ID: {
         break;
       }
       case VIEWER_PATH_ELEM_TYPE_MODIFIER: {
         auto *typed_elem = reinterpret_cast<ModifierViewerPathElem *>(elem);
-        BLO_read_data_address(reader, &typed_elem->modifier_name);
+        BLO_read_string(reader, &typed_elem->modifier_name);
         break;
       }
     }
@@ -128,34 +135,37 @@ void BKE_viewer_path_foreach_id(LibraryForeachIDData *data, ViewerPath *viewer_p
     switch (ViewerPathElemType(elem->type)) {
       case VIEWER_PATH_ELEM_TYPE_ID: {
         auto *typed_elem = reinterpret_cast<IDViewerPathElem *>(elem);
-        BKE_LIB_FOREACHID_PROCESS_ID(data, typed_elem->id, IDWALK_CB_NOP);
+        BKE_LIB_FOREACHID_PROCESS_ID(data, typed_elem->id, IDWALK_CB_DIRECT_WEAK_LINK);
         break;
       }
       case VIEWER_PATH_ELEM_TYPE_MODIFIER:
       case VIEWER_PATH_ELEM_TYPE_GROUP_NODE:
       case VIEWER_PATH_ELEM_TYPE_SIMULATION_ZONE:
       case VIEWER_PATH_ELEM_TYPE_VIEWER_NODE:
-      case VIEWER_PATH_ELEM_TYPE_REPEAT_ZONE: {
+      case VIEWER_PATH_ELEM_TYPE_REPEAT_ZONE:
+      case VIEWER_PATH_ELEM_TYPE_FOREACH_GEOMETRY_ELEMENT_ZONE: {
         break;
       }
     }
   }
 }
 
-void BKE_viewer_path_id_remap(ViewerPath *viewer_path, const IDRemapper *mappings)
+void BKE_viewer_path_id_remap(ViewerPath *viewer_path,
+                              const blender::bke::id::IDRemapper &mappings)
 {
   LISTBASE_FOREACH (ViewerPathElem *, elem, &viewer_path->path) {
     switch (ViewerPathElemType(elem->type)) {
       case VIEWER_PATH_ELEM_TYPE_ID: {
         auto *typed_elem = reinterpret_cast<IDViewerPathElem *>(elem);
-        BKE_id_remapper_apply(mappings, &typed_elem->id, ID_REMAP_APPLY_DEFAULT);
+        mappings.apply(&typed_elem->id, ID_REMAP_APPLY_DEFAULT);
         break;
       }
       case VIEWER_PATH_ELEM_TYPE_MODIFIER:
       case VIEWER_PATH_ELEM_TYPE_GROUP_NODE:
       case VIEWER_PATH_ELEM_TYPE_SIMULATION_ZONE:
       case VIEWER_PATH_ELEM_TYPE_VIEWER_NODE:
-      case VIEWER_PATH_ELEM_TYPE_REPEAT_ZONE: {
+      case VIEWER_PATH_ELEM_TYPE_REPEAT_ZONE:
+      case VIEWER_PATH_ELEM_TYPE_FOREACH_GEOMETRY_ELEMENT_ZONE: {
         break;
       }
     }
@@ -189,6 +199,9 @@ ViewerPathElem *BKE_viewer_path_elem_new(const ViewerPathElemType type)
     }
     case VIEWER_PATH_ELEM_TYPE_REPEAT_ZONE: {
       return &make_elem<RepeatZoneViewerPathElem>(type)->base;
+    }
+    case VIEWER_PATH_ELEM_TYPE_FOREACH_GEOMETRY_ELEMENT_ZONE: {
+      return &make_elem<ForeachGeometryElementZoneViewerPathElem>(type)->base;
     }
   }
   BLI_assert_unreachable();
@@ -228,6 +241,12 @@ RepeatZoneViewerPathElem *BKE_viewer_path_elem_new_repeat_zone()
 {
   return reinterpret_cast<RepeatZoneViewerPathElem *>(
       BKE_viewer_path_elem_new(VIEWER_PATH_ELEM_TYPE_REPEAT_ZONE));
+}
+
+ForeachGeometryElementZoneViewerPathElem *BKE_viewer_path_elem_new_foreach_geometry_element_zone()
+{
+  return reinterpret_cast<ForeachGeometryElementZoneViewerPathElem *>(
+      BKE_viewer_path_elem_new(VIEWER_PATH_ELEM_TYPE_FOREACH_GEOMETRY_ELEMENT_ZONE));
 }
 
 ViewerPathElem *BKE_viewer_path_elem_copy(const ViewerPathElem *src)
@@ -276,6 +295,14 @@ ViewerPathElem *BKE_viewer_path_elem_copy(const ViewerPathElem *src)
       new_elem->iteration = old_elem->iteration;
       break;
     }
+    case VIEWER_PATH_ELEM_TYPE_FOREACH_GEOMETRY_ELEMENT_ZONE: {
+      const auto *old_elem = reinterpret_cast<const ForeachGeometryElementZoneViewerPathElem *>(
+          src);
+      auto *new_elem = reinterpret_cast<ForeachGeometryElementZoneViewerPathElem *>(dst);
+      new_elem->zone_output_node_id = old_elem->zone_output_node_id;
+      new_elem->index = old_elem->index;
+      break;
+    }
   }
   return dst;
 }
@@ -317,8 +344,15 @@ bool BKE_viewer_path_elem_equal(const ViewerPathElem *a,
       const auto *a_elem = reinterpret_cast<const RepeatZoneViewerPathElem *>(a);
       const auto *b_elem = reinterpret_cast<const RepeatZoneViewerPathElem *>(b);
       return a_elem->repeat_output_node_id == b_elem->repeat_output_node_id &&
-             ((flag & VIEWER_PATH_EQUAL_FLAG_IGNORE_REPEAT_ITERATION) != 0 ||
+             ((flag & VIEWER_PATH_EQUAL_FLAG_IGNORE_ITERATION) != 0 ||
               a_elem->iteration == b_elem->iteration);
+    }
+    case VIEWER_PATH_ELEM_TYPE_FOREACH_GEOMETRY_ELEMENT_ZONE: {
+      const auto *a_elem = reinterpret_cast<const ForeachGeometryElementZoneViewerPathElem *>(a);
+      const auto *b_elem = reinterpret_cast<const ForeachGeometryElementZoneViewerPathElem *>(b);
+      return a_elem->zone_output_node_id == b_elem->zone_output_node_id &&
+             ((flag & VIEWER_PATH_EQUAL_FLAG_IGNORE_ITERATION) != 0 ||
+              a_elem->index == b_elem->index);
     }
   }
   return false;
@@ -331,7 +365,8 @@ void BKE_viewer_path_elem_free(ViewerPathElem *elem)
     case VIEWER_PATH_ELEM_TYPE_GROUP_NODE:
     case VIEWER_PATH_ELEM_TYPE_SIMULATION_ZONE:
     case VIEWER_PATH_ELEM_TYPE_VIEWER_NODE:
-    case VIEWER_PATH_ELEM_TYPE_REPEAT_ZONE: {
+    case VIEWER_PATH_ELEM_TYPE_REPEAT_ZONE:
+    case VIEWER_PATH_ELEM_TYPE_FOREACH_GEOMETRY_ELEMENT_ZONE: {
       break;
     }
     case VIEWER_PATH_ELEM_TYPE_MODIFIER: {

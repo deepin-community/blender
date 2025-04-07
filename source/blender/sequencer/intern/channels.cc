@@ -11,14 +11,13 @@
 #include "MEM_guardedalloc.h"
 
 #include "DNA_listBase.h"
-#include "DNA_scene_types.h"
 #include "DNA_sequence_types.h"
 
 #include "BLI_blenlib.h"
 
+#include "BLT_translation.hh"
+
 #include "SEQ_channels.hh"
-#include "SEQ_iterator.hh"
-#include "SEQ_relations.hh"
 #include "SEQ_sequencer.hh"
 
 ListBase *SEQ_channels_displayed_get(Editing *ed)
@@ -34,10 +33,10 @@ void SEQ_channels_displayed_set(Editing *ed, ListBase *channels)
 void SEQ_channels_ensure(ListBase *channels)
 {
   /* Allocate channels. Channel 0 is never used, but allocated to prevent off by 1 issues. */
-  for (int i = 0; i < MAXSEQ + 1; i++) {
+  for (int i = 0; i < SEQ_MAX_CHANNELS + 1; i++) {
     SeqTimelineChannel *channel = static_cast<SeqTimelineChannel *>(
         MEM_callocN(sizeof(SeqTimelineChannel), "seq timeline channel"));
-    SNPRINTF(channel->name, "Channel %d", i);
+    SNPRINTF(channel->name, DATA_("Channel %d"), i);
     channel->index = i;
     BLI_addtail(channels, channel);
   }

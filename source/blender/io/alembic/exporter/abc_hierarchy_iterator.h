@@ -10,7 +10,6 @@
 
 #include <string>
 
-#include <Alembic/Abc/OArchive.h>
 #include <Alembic/Abc/OObject.h>
 
 struct Depsgraph;
@@ -40,7 +39,7 @@ class ABCHierarchyIterator : public AbstractHierarchyIterator {
  public:
   ABCHierarchyIterator(Main *bmain,
                        Depsgraph *depsgraph,
-                       ABCArchive *abc_archive_,
+                       ABCArchive *abc_archive,
                        const AlembicExportParams &params);
 
   virtual void iterate_and_write() override;

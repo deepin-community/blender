@@ -7,10 +7,11 @@
  * \ingroup balembic
  */
 
-#include "abc_reader_mesh.h"
 #include "abc_reader_object.h"
 
-struct Curve;
+#include <Alembic/AbcGeom/ICurves.h>
+
+struct Curves;
 
 #define ABC_CURVE_RESOLUTION_U_PROPNAME "blender:resolution"
 
@@ -25,26 +26,20 @@ class AbcCurveReader final : public AbcObjectReader {
   bool valid() const override;
   bool accepts_object_type(const Alembic::AbcCoreAbstract::ObjectHeader &alembic_header,
                            const Object *const ob,
-                           const char **err_str) const override;
+                           const char **r_err_str) const override;
 
   void readObjectData(Main *bmain, const Alembic::Abc::ISampleSelector &sample_sel) override;
-  /**
-   * \note Alembic only stores data about control points, but the Mesh
-   * passed from the cache modifier contains the #DispList, which has more data
-   * than the control points, so to avoid corrupting the #DispList we modify the
-   * object directly and create a new Mesh from that. Also we might need to
-   * create new or delete existing NURBS in the curve.
-   */
-  struct Mesh *read_mesh(struct Mesh *existing_mesh,
-                         const Alembic::Abc::ISampleSelector &sample_sel,
-                         int read_flag,
-                         const char *velocity_name,
-                         float velocity_scale,
-                         const char **err_str) override;
 
-  void read_curve_sample(Curve *cu,
-                         const Alembic::AbcGeom::ICurvesSchema &schema,
-                         const Alembic::Abc::ISampleSelector &sample_selector);
+  void read_geometry(bke::GeometrySet &geometry_set,
+                     const Alembic::Abc::ISampleSelector &sample_sel,
+                     int read_flag,
+                     const char *velocity_name,
+                     float velocity_scale,
+                     const char **r_err_str) override;
+
+  void read_curves_sample(Curves *curves_id,
+                          const Alembic::AbcGeom::ICurvesSchema &schema,
+                          const Alembic::Abc::ISampleSelector &sample_selector);
 };
 
 }  // namespace blender::io::alembic
