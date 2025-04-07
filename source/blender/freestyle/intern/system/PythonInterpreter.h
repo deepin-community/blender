@@ -14,14 +14,14 @@
 #include "Interpreter.h"
 
 #include "BKE_context.hh"
-#include "BKE_global.h"
+#include "BKE_global.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
 #include "BKE_text.h"
 
-#include "BPY_extern_run.h"
+#include "BPY_extern_run.hh"
 
-#include "bpy_capi_utils.h"
+#include "bpy_capi_utils.hh"
 
 namespace Freestyle {
 

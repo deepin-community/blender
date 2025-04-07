@@ -262,6 +262,8 @@ def cmake_get_src(f: str) -> None:
                             pass
                         elif new_file.endswith(".glsl"):
                             pass
+                        elif new_file.endswith(".natvis"):
+                            pass
                         else:
                             raise Exception("unknown file type - not c or h %s -> %s" % (f, new_file))
 
@@ -369,7 +371,7 @@ def main() -> None:
             if cf not in global_c:
                 print("missing_c: ", cf)
 
-            # Check if automake builds a corresponding .o file.
+            # Check if `automake` builds a corresponding `.o` file.
             '''
             if cf in global_c:
                 out1 = os.path.splitext(cf)[0] + ".o"

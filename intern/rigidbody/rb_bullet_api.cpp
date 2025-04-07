@@ -712,7 +712,7 @@ rbCollisionShape *RB_shape_new_cylinder(float radius, float height)
 /* Setup (Convex Hull) ------------ */
 
 rbCollisionShape *RB_shape_new_convex_hull(
-    float *verts, int stride, int count, float margin, bool *can_embed)
+    const float *verts, int stride, int count, float margin, bool *can_embed)
 {
   btConvexHullComputer hull_computer = btConvexHullComputer();
 
@@ -800,7 +800,7 @@ rbCollisionShape *RB_shape_new_trimesh(rbMeshData *mesh)
 }
 
 void RB_shape_trimesh_update(rbCollisionShape *shape,
-                             float *vertices,
+                             const float *vertices,
                              int num_verts,
                              int vert_stride,
                              const float min[3],
@@ -940,8 +940,8 @@ static void make_constraint_transforms(btTransform &transform1,
                                        btTransform &transform2,
                                        btRigidBody *body1,
                                        btRigidBody *body2,
-                                       float pivot[3],
-                                       float orn[4])
+                                       const float pivot[3],
+                                       const float orn[4])
 {
   btTransform pivot_transform = btTransform();
   pivot_transform.setIdentity();
@@ -952,7 +952,7 @@ static void make_constraint_transforms(btTransform &transform1,
   transform2 = body2->getWorldTransform().inverse() * pivot_transform;
 }
 
-rbConstraint *RB_constraint_new_point(float pivot[3], rbRigidBody *rb1, rbRigidBody *rb2)
+rbConstraint *RB_constraint_new_point(const float pivot[3], rbRigidBody *rb1, rbRigidBody *rb2)
 {
   btRigidBody *body1 = rb1->body;
   btRigidBody *body2 = rb2->body;
@@ -1120,6 +1120,13 @@ rbConstraint *RB_constraint_new_motor(float pivot[3],
 void RB_constraint_delete(rbConstraint *con)
 {
   btTypedConstraint *constraint = reinterpret_cast<btTypedConstraint *>(con);
+
+  /* If the constraint has disabled collisions between the bodies, those bodies
+   * will have a pointer back to the constraint. We need to remove the constraint
+   * from each body to avoid dereferencing the deleted constraint later (#91369) */
+  constraint->getRigidBodyA().removeConstraintRef(constraint);
+  constraint->getRigidBodyB().removeConstraintRef(constraint);
+
   delete constraint;
 }
 

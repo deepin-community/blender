@@ -15,6 +15,7 @@
 
 #include "BLI_compiler_attrs.h"
 #include "BLI_utildefines.h"
+#include "BLI_vector.hh"
 
 #include "DNA_listBase.h"
 
@@ -30,7 +31,7 @@ struct wmKeyConfig;
 struct wmOperatorType;
 
 /* -------------------------------------------------------------------- */
-/* Enum Typedef's */
+/* Enum Typedef's. */
 
 /**
  * #wmGizmo.state
@@ -84,21 +85,22 @@ enum eWM_GizmoFlag {
 
   /** Don't use tool-tips for this gizmo (can be distracting). */
   WM_GIZMO_NO_TOOLTIP = (1 << 12),
+  /** Push an undo step after each use of the gizmo. */
+  WM_GIZMO_NEEDS_UNDO = (1 << 13),
 };
-
-ENUM_OPERATORS(eWM_GizmoFlag, WM_GIZMO_NO_TOOLTIP);
+ENUM_OPERATORS(eWM_GizmoFlag, WM_GIZMO_NEEDS_UNDO);
 
 /**
  * #wmGizmoGroupType.flag
  * Flags that influence the behavior of all gizmos in the group.
  */
 enum eWM_GizmoFlagGroupTypeFlag {
-  /** Mark gizmo-group as being 3D */
+  /** Mark gizmo-group as being 3D. */
   WM_GIZMOGROUPTYPE_3D = (1 << 0),
   /** Scale gizmos as 3D object that respects zoom (otherwise zoom independent draw size).
    * NOTE: currently only for 3D views, 2D support needs adding. */
   WM_GIZMOGROUPTYPE_SCALE = (1 << 1),
-  /** Gizmos can be depth culled with scene objects (covered by other geometry - TODO) */
+  /** Gizmos can be depth culled with scene objects (covered by other geometry - TODO). */
   WM_GIZMOGROUPTYPE_DEPTH_3D = (1 << 2),
   /** Gizmos can be selected. */
   WM_GIZMOGROUPTYPE_SELECT = (1 << 3),
@@ -180,7 +182,7 @@ enum eWM_GizmoFlagMapTypeUpdateFlag {
 ENUM_OPERATORS(eWM_GizmoFlagMapTypeUpdateFlag, WM_GIZMOMAPTYPE_KEYMAP_INIT)
 
 /* -------------------------------------------------------------------- */
-/* wmGizmo */
+/* #wmGizmo. */
 
 /**
  * \brief Gizmo tweak flag.
@@ -189,24 +191,24 @@ ENUM_OPERATORS(eWM_GizmoFlagMapTypeUpdateFlag, WM_GIZMOMAPTYPE_KEYMAP_INIT)
  * \note Gizmos are responsible for handling this #wmGizmo.modal callback.
  */
 enum eWM_GizmoFlagTweak {
-  /* Drag with extra precision (Shift). */
+  /** Drag with extra precision (Shift). */
   WM_GIZMO_TWEAK_PRECISE = (1 << 0),
-  /* Drag with snap enabled (Ctrl). */
+  /** Drag with snap enabled (Control). */
   WM_GIZMO_TWEAK_SNAP = (1 << 1),
 };
 
 #include "wm_gizmo_fn.hh"
 
 struct wmGizmoOpElem {
-  wmOperatorType *type;
+  wmOperatorType *type = nullptr;
   /** Operator properties if gizmo spawns and controls an operator,
    * or owner pointer if gizmo spawns and controls a property. */
-  PointerRNA ptr;
+  PointerRNA ptr = {};
 
-  bool is_redo;
+  bool is_redo = false;
 };
 
-/* gizmos are set per region by registering them on gizmo-maps */
+/** Gizmos are set per region by registering them on gizmo-maps. */
 struct wmGizmo {
   wmGizmo *next, *prev;
 
@@ -220,7 +222,7 @@ struct wmGizmo {
   /** Pointer back to group this gizmo is in (just for quick access). */
   wmGizmoGroup *parent_gzgroup;
 
-  /** Optional keymap to use for this gizmo (overrides #wmGizmoGroupType.keymap) */
+  /** Optional keymap to use for this gizmo (overrides #wmGizmoGroupType.keymap). */
   wmKeyMap *keymap;
 
   void *py_instance;
@@ -230,7 +232,7 @@ struct wmGizmo {
 
   /** Flags that influence the behavior or how the gizmos are drawn. */
   eWM_GizmoFlag flag;
-  /** State flags (active, highlighted, selected) */
+  /** State flags (active, highlighted, selected). */
   eWM_GizmoFlagState state;
 
   /** Optional ID for highlighting different parts of this gizmo.
@@ -275,8 +277,7 @@ struct wmGizmo {
 
   /** Operator to spawn when activating the gizmo (overrides property editing),
    * an array of items (aligned with #wmGizmo.highlight_part). */
-  wmGizmoOpElem *op_data;
-  int op_data_len;
+  blender::Vector<wmGizmoOpElem, 4> op_data;
 
   IDProperty *properties;
 
@@ -288,7 +289,7 @@ struct wmGizmo {
     float f;
   } temp;
 
-  /* over alloc target_properties after 'wmGizmoType.struct_size' */
+  /* Over alloc target_properties after #wmGizmoType::struct_size. */
 };
 
 /** Similar to #PropertyElemRNA, but has an identifier. */
@@ -315,10 +316,10 @@ struct wmGizmoPropertyType {
   int data_type;
   int array_length;
 
-  /* index within 'wmGizmoType' */
+  /** Index within #wmGizmoType. */
   int index_in_type;
 
-  /** over alloc. */
+  /** Over allocate. */
   char idname[0];
 };
 
@@ -336,7 +337,7 @@ struct wmGizmoMapType_Params {
 
 struct wmGizmoType {
 
-  const char *idname; /* MAX_NAME */
+  const char *idname; /* #MAX_NAME. */
 
   /** Set to 'sizeof(wmGizmo)' or larger for instances of this type,
    * use so we can cast to other types without the hassle of a custom-data pointer. */
@@ -403,7 +404,7 @@ struct wmGizmoType {
 };
 
 /* -------------------------------------------------------------------- */
-/* wmGizmoGroup */
+/* #wmGizmoGroup. */
 
 /** Factory class for a gizmo-group type, gets called every time a new area is spawned. */
 struct wmGizmoGroupTypeRef {
@@ -411,12 +412,13 @@ struct wmGizmoGroupTypeRef {
   wmGizmoGroupType *type;
 };
 
-/* factory class for a gizmo-group type, gets called every time a new area is spawned */
+/** Factory class for a gizmo-group type, gets called every time a new area is spawned. */
 struct wmGizmoGroupType {
-  const char *idname; /* MAX_NAME */
+  const char *idname; /* #MAX_NAME. */
   /** Gizmo-group name - displayed in UI (keymap editor). */
   const char *name;
-  char owner_id[64]; /* MAX_NAME */
+  /** Optional, see: #wmOwnerID. */
+  char owner_id[128];
 
   /** Poll if gizmo-map should be visible. */
   wmGizmoGroupFnPoll poll;
@@ -477,8 +479,6 @@ struct wmGizmoGroup {
 
   /** Python stores the class instance here. */
   void *py_instance;
-  /** Errors and warnings storage. */
-  ReportList *reports;
 
   /** Has the same result as hiding all gizmos individually. */
   union {
@@ -499,7 +499,7 @@ struct wmGizmoGroup {
 };
 
 /* -------------------------------------------------------------------- */
-/* wmGizmoMap */
+/* #wmGizmoMap. */
 
 /**
  * Pass a value of this enum to #WM_gizmomap_draw to tell it what to draw.

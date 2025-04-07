@@ -28,23 +28,23 @@ using namespace Freestyle;
 #include "DNA_material_types.h"
 #include "DNA_text_types.h"
 
-#include "BKE_callbacks.h"
+#include "BKE_callbacks.hh"
 #include "BKE_context.hh"
 #include "BKE_freestyle.h"
-#include "BKE_global.h"
+#include "BKE_global.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_linestyle.h"
-#include "BKE_scene.h"
+#include "BKE_scene.hh"
 #include "BKE_text.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "BLI_blenlib.h"
 #include "BLI_math_color_blend.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_rotation.h"
 
-#include "BPY_extern.h"
+#include "BPY_extern.hh"
 
 #include "DEG_depsgraph_query.hh"
 

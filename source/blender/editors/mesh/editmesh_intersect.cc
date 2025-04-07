@@ -16,12 +16,13 @@
 #include "BLI_math_vector.h"
 #include "BLI_memarena.h"
 #include "BLI_stack.h"
+#include "BLI_vector.hh"
 
 #include "BKE_context.hh"
 #include "BKE_editmesh.hh"
-#include "BKE_editmesh_bvh.h"
+#include "BKE_editmesh_bvh.hh"
 #include "BKE_layer.hh"
-#include "BKE_report.h"
+#include "BKE_report.hh"
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
@@ -33,8 +34,6 @@
 
 #include "ED_mesh.hh"
 #include "ED_screen.hh"
-
-#include "intern/bmesh_private.hh"
 
 #include "mesh_intern.hh" /* own include */
 
@@ -200,7 +199,6 @@ static int edbm_intersect_exec(bContext *C, wmOperator *op)
       int nshapes = use_self ? 1 : 2;
       has_isect = BM_mesh_boolean_knife(em->bm,
                                         em->looptris,
-                                        em->tottri,
                                         test_fn,
                                         nullptr,
                                         nshapes,
@@ -212,7 +210,6 @@ static int edbm_intersect_exec(bContext *C, wmOperator *op)
     else {
       has_isect = BM_mesh_intersect(em->bm,
                                     em->looptris,
-                                    em->tottri,
                                     test_fn,
                                     nullptr,
                                     use_self,
@@ -365,21 +362,12 @@ static int edbm_intersect_boolean_exec(bContext *C, wmOperator *op)
     }
 
     if (use_exact) {
-      has_isect = BM_mesh_boolean(em->bm,
-                                  em->looptris,
-                                  em->tottri,
-                                  test_fn,
-                                  nullptr,
-                                  2,
-                                  use_self,
-                                  true,
-                                  false,
-                                  boolean_operation);
+      has_isect = BM_mesh_boolean(
+          em->bm, em->looptris, test_fn, nullptr, 2, use_self, true, false, boolean_operation);
     }
     else {
       has_isect = BM_mesh_intersect(em->bm,
                                     em->looptris,
-                                    em->tottri,
                                     test_fn,
                                     nullptr,
                                     false,
@@ -499,9 +487,6 @@ static void bm_face_split_by_edges(BMesh *bm,
   BMLoop *l_first;
   BMVert *v;
 
-  BMFace **face_arr;
-  int face_arr_len;
-
   /* likely this will stay very small
    * all verts pushed into this stack _must_ have their previous edges set! */
   BLI_SMALLSTACK_DECLARE(vert_stack, BMVert *);
@@ -547,25 +532,15 @@ static void bm_face_split_by_edges(BMesh *bm,
     }
   }
 
-  BM_face_split_edgenet(bm,
-                        f,
-                        static_cast<BMEdge **>(edge_net_temp_buf->data),
-                        edge_net_temp_buf->count,
-                        &face_arr,
-                        &face_arr_len);
+  Vector<BMFace *> face_arr;
+  BM_face_split_edgenet(
+      bm, f, static_cast<BMEdge **>(edge_net_temp_buf->data), edge_net_temp_buf->count, &face_arr);
 
   BLI_buffer_clear(edge_net_temp_buf);
 
-  if (face_arr_len) {
-    int i;
-    for (i = 0; i < face_arr_len; i++) {
-      BM_face_select_set(bm, face_arr[i], true);
-      BM_elem_flag_disable(face_arr[i], hflag);
-    }
-  }
-
-  if (face_arr) {
-    MEM_freeN(face_arr);
+  for (BMFace *face : face_arr) {
+    BM_face_select_set(bm, face, true);
+    BM_elem_flag_disable(face, hflag);
   }
 }
 
@@ -665,7 +640,7 @@ static void bm_face_split_by_edges_island_connect(
     }
   }
 
-  BM_face_split_edgenet(bm, f, edge_arr, edge_arr_len, nullptr, nullptr);
+  BM_face_split_edgenet(bm, f, edge_arr, edge_arr_len, nullptr);
 
   for (int i = e_link_len; i < edge_arr_len; i++) {
     BM_edge_select_set(bm, edge_arr[i], true);
@@ -979,8 +954,7 @@ static int edbm_face_split_by_edges_exec(bContext *C, wmOperator * /*op*/)
       BM_mesh_elem_index_ensure(bm, BM_FACE);
 
       {
-        BMBVHTree *bmbvh = BKE_bmbvh_new(
-            bm, em->looptris, em->tottri, BMBVH_RESPECT_SELECT, nullptr, false);
+        BMBVHTree *bmbvh = BKE_bmbvh_new(bm, em->looptris, BMBVH_RESPECT_SELECT, nullptr, false);
 
         BM_ITER_MESH (e, &iter, bm, BM_EDGES_OF_MESH) {
           BM_elem_index_set(e, -1); /* set_dirty */

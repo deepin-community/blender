@@ -40,6 +40,7 @@ set(SRC
 	src/devices/DefaultSynchronizer.cpp
 	src/devices/DeviceManager.cpp
 	src/devices/NULLDevice.cpp
+	src/devices/OpenCloseDevice.cpp
 	src/devices/ReadDevice.cpp
 	src/devices/SoftwareDevice.cpp
 	src/devices/ThreadedDevice.cpp
@@ -150,6 +151,7 @@ set(PUBLIC_HDR
 	include/devices/IHandle.h
 	include/devices/ISynchronizer.h
 	include/devices/NULLDevice.h
+	include/devices/OpenCloseDevice.h
 	include/devices/ReadDevice.h
 	include/devices/SoftwareDevice.h
 	include/devices/ThreadedDevice.h
@@ -336,8 +338,10 @@ endif()
 # compiler options
 
 if(AUDASPACE_STANDALONE)
+	set(CMAKE_CXX_STANDARD 17)
+	set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 	if(CMAKE_COMPILER_IS_GNUCXX OR "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-		add_definitions(-std=c++11)
 		list(APPEND CMAKE_C_COMPILER_FLAGS "-fvisibility=hidden")
 		list(APPEND CMAKE_CXX_COMPILER_FLAGS "-fvisibility=hidden")
 	endif()

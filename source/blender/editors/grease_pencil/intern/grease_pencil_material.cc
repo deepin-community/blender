@@ -15,7 +15,6 @@
 #include "BKE_material.h"
 
 #include "BLI_vector.hh"
-#include "BLI_vector_set.hh"
 
 #include "DEG_depsgraph.hh"
 
@@ -42,7 +41,7 @@ static int grease_pencil_material_reveal_exec(bContext *C, wmOperator * /*op*/)
     if (Material *ma = BKE_gpencil_material(object, i + 1)) {
       MaterialGPencilStyle &gp_style = *ma->gp_style;
       gp_style.flag &= ~GP_MATERIAL_HIDE;
-      DEG_id_tag_update(&ma->id, ID_RECALC_COPY_ON_WRITE);
+      DEG_id_tag_update(&ma->id, ID_RECALC_SYNC_TO_EVAL);
       changed = true;
     }
   }
@@ -94,7 +93,7 @@ static int grease_pencil_material_hide_exec(bContext *C, wmOperator *op)
     if (Material *ma = BKE_object_material_get(object, i + 1)) {
       MaterialGPencilStyle &gp_style = *ma->gp_style;
       gp_style.flag |= GP_MATERIAL_HIDE;
-      DEG_id_tag_update(&ma->id, ID_RECALC_COPY_ON_WRITE);
+      DEG_id_tag_update(&ma->id, ID_RECALC_SYNC_TO_EVAL);
       changed = true;
     }
   }
@@ -141,7 +140,7 @@ static int grease_pencil_material_lock_all_exec(bContext *C, wmOperator * /*op*/
     if (Material *ma = BKE_object_material_get(object, i + 1)) {
       MaterialGPencilStyle &gp_style = *ma->gp_style;
       gp_style.flag |= GP_MATERIAL_LOCKED;
-      DEG_id_tag_update(&ma->id, ID_RECALC_COPY_ON_WRITE);
+      DEG_id_tag_update(&ma->id, ID_RECALC_SYNC_TO_EVAL);
       changed = true;
     }
   }
@@ -185,7 +184,7 @@ static int grease_pencil_material_unlock_all_exec(bContext *C, wmOperator * /*op
     if (Material *ma = BKE_object_material_get(object, i + 1)) {
       MaterialGPencilStyle &gp_style = *ma->gp_style;
       gp_style.flag &= ~GP_MATERIAL_LOCKED;
-      DEG_id_tag_update(&ma->id, ID_RECALC_COPY_ON_WRITE);
+      DEG_id_tag_update(&ma->id, ID_RECALC_SYNC_TO_EVAL);
       changed = true;
     }
   }
@@ -229,7 +228,7 @@ static int grease_pencil_material_lock_unused_exec(bContext *C, wmOperator * /*o
       if (Material *ma = BKE_object_material_get(object, material_index + 1)) {
         MaterialGPencilStyle &gp_style = *ma->gp_style;
         gp_style.flag |= GP_MATERIAL_HIDE | GP_MATERIAL_LOCKED;
-        DEG_id_tag_update(&ma->id, ID_RECALC_COPY_ON_WRITE);
+        DEG_id_tag_update(&ma->id, ID_RECALC_SYNC_TO_EVAL);
         changed = true;
       }
     }
@@ -272,14 +271,14 @@ static int grease_pencil_material_lock_unselected_exec(bContext *C, wmOperator *
   GreasePencil &grease_pencil = *static_cast<GreasePencil *>(object->data);
 
   bool changed = false;
-  const Array<MutableDrawingInfo> drawings = retrieve_editable_drawings(*scene, grease_pencil);
+  const Vector<MutableDrawingInfo> drawings = retrieve_editable_drawings(*scene, grease_pencil);
 
   Set<int> materials_used;
 
   for (const MutableDrawingInfo &info : drawings) {
     IndexMaskMemory memory;
     const IndexMask strokes = ed::greasepencil::retrieve_editable_and_selected_strokes(
-        *object, info.drawing, memory);
+        *object, info.drawing, info.layer_index, memory);
     if (strokes.is_empty()) {
       return OPERATOR_CANCELLED;
     }
@@ -304,7 +303,7 @@ static int grease_pencil_material_lock_unselected_exec(bContext *C, wmOperator *
       if (Material *ma = BKE_object_material_get(object, i + 1)) {
         MaterialGPencilStyle &gp_style = *ma->gp_style;
         gp_style.flag |= GP_MATERIAL_LOCKED;
-        DEG_id_tag_update(&ma->id, ID_RECALC_COPY_ON_WRITE);
+        DEG_id_tag_update(&ma->id, ID_RECALC_SYNC_TO_EVAL);
         changed = true;
       }
     }
@@ -369,7 +368,7 @@ static int grease_pencil_material_copy_to_object_exec(bContext *C, wmOperator *o
       BKE_object_material_ensure(bmain, ob, ma_src);
     }
 
-    DEG_id_tag_update(&ob->id, ID_RECALC_COPY_ON_WRITE);
+    DEG_id_tag_update(&ob->id, ID_RECALC_SYNC_TO_EVAL);
   }
   CTX_DATA_END;
 
@@ -402,6 +401,104 @@ static void GREASE_PENCIL_OT_material_copy_to_object(wmOperatorType *ot)
   RNA_def_property_flag(prop, PROP_HIDDEN | PROP_SKIP_SAVE);
 }
 
+static int material_isolate_exec(bContext *C, wmOperator *op)
+{
+  Object *ob = CTX_data_active_object(C);
+  GreasePencil &grease_pencil = *static_cast<GreasePencil *>(ob->data);
+  Material *active_ma = BKE_gpencil_material(ob, ob->actcol);
+  MaterialGPencilStyle *active_material = BKE_gpencil_material_settings(ob, ob->actcol);
+  MaterialGPencilStyle *gp_style;
+
+  int flags = GP_MATERIAL_LOCKED;
+  bool isolate = false;
+
+  if (RNA_boolean_get(op->ptr, "affect_visibility")) {
+    flags |= GP_MATERIAL_HIDE;
+  }
+
+  if (active_material == nullptr) {
+    return OPERATOR_CANCELLED;
+  }
+
+  /* Test whether to isolate or clear all flags */
+  Material *ma = nullptr;
+  short *totcol = BKE_object_material_len_p(ob);
+  for (short i = 0; i < *totcol; i++) {
+    ma = BKE_gpencil_material(ob, i + 1);
+    /* Skip if this is the active one */
+    if (ELEM(ma, nullptr, active_ma)) {
+      continue;
+    }
+
+    /* If the flags aren't set, that means that the color is
+     * not alone, so we have some colors to isolate still
+     */
+    gp_style = ma->gp_style;
+    if ((gp_style->flag & flags) == 0) {
+      isolate = true;
+      break;
+    }
+  }
+
+  /* Set/Clear flags as appropriate */
+  if (isolate) {
+    /* Set flags on all "other" colors */
+    for (short i = 0; i < *totcol; i++) {
+      ma = BKE_gpencil_material(ob, i + 1);
+      if (ma == nullptr) {
+        continue;
+      }
+      gp_style = ma->gp_style;
+      if (gp_style == active_material) {
+        continue;
+      }
+      gp_style->flag |= flags;
+      DEG_id_tag_update(&ma->id, ID_RECALC_SYNC_TO_EVAL);
+    }
+  }
+  else {
+    /* Clear flags - Restore everything else */
+    for (short i = 0; i < *totcol; i++) {
+      ma = BKE_gpencil_material(ob, i + 1);
+      if (ma == nullptr) {
+        continue;
+      }
+      gp_style = ma->gp_style;
+      gp_style->flag &= ~flags;
+      DEG_id_tag_update(&ma->id, ID_RECALC_SYNC_TO_EVAL);
+    }
+  }
+
+  DEG_id_tag_update(&grease_pencil.id, ID_RECALC_GEOMETRY);
+  WM_event_add_notifier(C, NC_GPENCIL | ND_DATA | NA_EDITED, nullptr);
+
+  return OPERATOR_FINISHED;
+}
+
+static void GREASE_PENCIL_OT_material_isolate(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Isolate Material";
+  ot->idname = "GREASE_PENCIL_OT_material_isolate";
+  ot->description =
+      "Toggle whether the active material is the only one that is editable and/or visible";
+
+  /* callbacks */
+  ot->exec = material_isolate_exec;
+  ot->poll = active_grease_pencil_material_poll;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+  /* properties */
+  RNA_def_boolean(ot->srna,
+                  "affect_visibility",
+                  false,
+                  "Affect Visibility",
+                  "In addition to toggling "
+                  "the editability, also affect the visibility");
+}
+
 /** \} */
 
 }  // namespace blender::ed::greasepencil
@@ -416,4 +513,5 @@ void ED_operatortypes_grease_pencil_material()
   WM_operatortype_append(GREASE_PENCIL_OT_material_lock_unused);
   WM_operatortype_append(GREASE_PENCIL_OT_material_lock_unselected);
   WM_operatortype_append(GREASE_PENCIL_OT_material_copy_to_object);
+  WM_operatortype_append(GREASE_PENCIL_OT_material_isolate);
 }

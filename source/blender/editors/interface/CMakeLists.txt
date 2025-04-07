@@ -4,6 +4,7 @@
 
 set(INC
   .
+  ../asset
   ../include
   ../../asset_system
   ../../blenkernel
@@ -20,7 +21,7 @@ set(INC
   ../../windowmanager
   ../../../../intern/ghost
   ../../bmesh
-  # RNA_prototypes.h
+  # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
 
@@ -28,12 +29,13 @@ set(INC_SYS
 )
 
 set(SRC
+  eyedroppers/eyedropper_bone.cc
   eyedroppers/eyedropper_color.cc
   eyedroppers/eyedropper_colorband.cc
   eyedroppers/eyedropper_datablock.cc
   eyedroppers/eyedropper_depth.cc
   eyedroppers/eyedropper_driver.cc
-  eyedroppers/eyedropper_gpencil_color.cc
+  eyedroppers/eyedropper_grease_pencil_color.cc
   eyedroppers/interface_eyedropper.cc
   interface.cc
   interface_align.cc
@@ -53,27 +55,29 @@ set(SRC
   interface_ops.cc
   interface_panel.cc
   interface_query.cc
-  interface_region_color_picker.cc
-  interface_region_hud.cc
-  interface_region_menu_pie.cc
-  interface_region_menu_popup.cc
-  interface_region_popover.cc
-  interface_region_popup.cc
-  interface_region_search.cc
-  interface_region_tooltip.cc
-  interface_regions.cc
+  regions/interface_region_color_picker.cc
+  regions/interface_region_hud.cc
+  regions/interface_region_menu_pie.cc
+  regions/interface_region_menu_popup.cc
+  regions/interface_region_popover.cc
+  regions/interface_region_popup.cc
+  regions/interface_region_search.cc
+  regions/interface_region_tooltip.cc
+  regions/interface_regions.cc
   interface_string_search.cc
   interface_style.cc
-  interface_template_asset_view.cc
-  interface_template_attribute_search.cc
-  interface_template_bone_collection_tree.cc
-  interface_template_light_linking.cc
-  interface_template_list.cc
-  interface_template_node_inputs.cc
-  interface_template_node_tree_interface.cc
-  interface_template_search_menu.cc
-  interface_template_search_operator.cc
-  interface_templates.cc
+  templates/interface_template_asset_shelf_popover.cc
+  templates/interface_template_asset_view.cc
+  templates/interface_template_attribute_search.cc
+  templates/interface_template_bone_collection_tree.cc
+  templates/interface_template_grease_pencil_layer_tree.cc
+  templates/interface_template_light_linking.cc
+  templates/interface_template_list.cc
+  templates/interface_template_node_inputs.cc
+  templates/interface_template_node_tree_interface.cc
+  templates/interface_template_search_menu.cc
+  templates/interface_template_search_operator.cc
+  templates/interface_templates.cc
   interface_undo.cc
   interface_utils.cc
   interface_widgets.cc
@@ -91,7 +95,7 @@ set(SRC
 
   eyedroppers/eyedropper_intern.hh
   interface_intern.hh
-  interface_regions_intern.hh
+  regions/interface_regions_intern.hh
   view2d_intern.hh
 )
 
@@ -102,6 +106,7 @@ set(LIB
   PRIVATE bf::depsgraph
   PRIVATE bf::dna
   bf_editor_datafiles
+  bf_editor_id_management
   PRIVATE bf::extern::fmtlib
   PRIVATE bf::intern::guardedalloc
   PRIVATE bf::animrig
@@ -124,14 +129,24 @@ if(WITH_INPUT_IME)
 endif()
 
 if(WITH_EXPERIMENTAL_FEATURES)
-  add_definitions(-DWITH_GREASE_PENCIL_V3)
-  list(APPEND SRC
-    interface_template_grease_pencil_layer_tree.cc
-  )
+  add_definitions(-DWITH_ANIM_BAKLAVA)
 endif()
-
 
 blender_add_lib(bf_editor_interface "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 
-# RNA_prototypes.h
+# RNA_prototypes.hh
 add_dependencies(bf_editor_interface bf_rna)
+
+if(WITH_GTESTS)
+  set(TEST_INC
+  )
+  set(TEST_SRC
+    interface_ops_test.cc
+  )
+
+  set(TEST_LIB
+    PRIVATE bf::intern::clog
+  )
+
+  blender_add_test_suite_lib(interface "${TEST_SRC}" "${INC};${TEST_INC}" "${INC_SYS}" "${LIB};${TEST_LIB}")
+endif()

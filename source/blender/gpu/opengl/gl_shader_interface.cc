@@ -15,7 +15,7 @@
 
 #include "gl_shader_interface.hh"
 
-#include "GPU_capabilities.h"
+#include "GPU_capabilities.hh"
 
 using namespace blender::gpu::shader;
 namespace blender::gpu {
@@ -394,9 +394,7 @@ GLShaderInterface::GLShaderInterface(GLuint program, const shader::ShaderCreateI
   ubo_len_ = 0;
   ssbo_len_ = 0;
 
-  Vector<ShaderCreateInfo::Resource> all_resources;
-  all_resources.extend(info.pass_resources_);
-  all_resources.extend(info.batch_resources_);
+  Vector<ShaderCreateInfo::Resource> all_resources = info.resources_get_all_();
 
   for (ShaderCreateInfo::Resource &res : all_resources) {
     switch (res.bind_type) {
@@ -529,9 +527,18 @@ GLShaderInterface::GLShaderInterface(GLuint program, const shader::ShaderCreateI
     }
   }
 
+  for (const ShaderCreateInfo::Resource &res : info.geometry_resources_) {
+    if (res.bind_type == ShaderCreateInfo::Resource::BindType::STORAGE_BUFFER) {
+      ssbo_attr_mask_ |= (1 << res.slot);
+    }
+    else {
+      BLI_assert_msg(0, "Resource type is not supported for Geometry frequency");
+    }
+  }
+
   /* Constants */
   int constant_id = 0;
-  for (const ShaderCreateInfo::SpecializationConstant &constant : info.specialization_constants_) {
+  for (const SpecializationConstant &constant : info.specialization_constants_) {
     copy_input_name(input, constant.name, name_buffer_, name_buffer_offset);
     input->location = constant_id++;
     input++;

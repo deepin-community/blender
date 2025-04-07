@@ -33,7 +33,7 @@
 #include "BKE_mesh.hh"
 #include "BKE_mesh_wrapper.hh"
 #include "BKE_object.hh"
-#include "BKE_report.h"
+#include "BKE_report.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
@@ -49,7 +49,7 @@
 #include "ED_transform.hh"
 #include "ED_view3d.hh"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
@@ -69,8 +69,32 @@
 /* use bmesh operator flags for a few operators */
 #define BMO_ELE_TAG 1
 
+using blender::float3;
 using blender::Span;
 using blender::Vector;
+
+/* -------------------------------------------------------------------- */
+/** \name Generic Poll Functions
+ * \{ */
+
+static bool edbm_vert_or_edge_select_mode_poll(bContext *C)
+{
+  Object *obedit = CTX_data_edit_object(C);
+  if (obedit && obedit->type == OB_MESH) {
+    const BMEditMesh *em = BKE_editmesh_from_object(obedit);
+    if (em) {
+      if (em->selectmode & (SCE_SELECT_VERTEX | SCE_SELECT_EDGE)) {
+        return true;
+      }
+    }
+  }
+
+  CTX_wm_operator_poll_msg_set(C, "An edit-mesh with vertex or edge selection mode is required");
+
+  return false;
+}
+
+/** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Select Mirror
@@ -1076,19 +1100,19 @@ bool EDBM_unified_findnearest_from_raycast(ViewContext *vc,
       float imat3[3][3];
 
       ED_view3d_viewcontext_init_object(vc, obedit);
-      copy_m3_m4(imat3, obedit->object_to_world);
+      copy_m3_m4(imat3, obedit->object_to_world().ptr());
       invert_m3(imat3);
 
-      const float(*coords)[3] = nullptr;
+      Span<float3> vert_positions;
       {
-        Object *obedit_eval = DEG_get_evaluated_object(vc->depsgraph, obedit);
-        Mesh *me_eval = BKE_object_get_editmesh_eval_cage(obedit_eval);
-        if (BKE_mesh_wrapper_vert_len(me_eval) == bm->totvert) {
-          coords = BKE_mesh_wrapper_vert_coords(me_eval);
+        const Object *obedit_eval = DEG_get_evaluated_object(vc->depsgraph, obedit);
+        const Mesh *mesh_eval = BKE_object_get_editmesh_eval_cage(obedit_eval);
+        if (BKE_mesh_wrapper_vert_len(mesh_eval) == bm->totvert) {
+          vert_positions = BKE_mesh_wrapper_vert_coords(mesh_eval);
         }
       }
 
-      if (coords != nullptr) {
+      if (!vert_positions.is_empty()) {
         BM_mesh_elem_index_ensure(bm, BM_VERT);
       }
 
@@ -1101,8 +1125,10 @@ bool EDBM_unified_findnearest_from_raycast(ViewContext *vc,
               for (uint j = 0; j < 2; j++) {
                 BMVert *v = *((&e->v1) + j);
                 float point[3];
-                mul_v3_m4v3(
-                    point, obedit->object_to_world, coords ? coords[BM_elem_index_get(v)] : v->co);
+                mul_v3_m4v3(point,
+                            obedit->object_to_world().ptr(),
+                            !vert_positions.is_empty() ? vert_positions[BM_elem_index_get(v)] :
+                                                         v->co);
                 const float dist_sq_test = dist_squared_to_ray_v3_normalized(
                     ray_origin, ray_direction, point);
                 if (dist_sq_test < dist_sq_best_vert) {
@@ -1124,14 +1150,15 @@ bool EDBM_unified_findnearest_from_raycast(ViewContext *vc,
               const float dist_sq_test = dist_squared_ray_to_seg_v3(
                   ray_origin, ray_direction, e->v1->co, e->v2->co, point, &depth);
 #else
-              if (coords) {
-                mid_v3_v3v3(
-                    point, coords[BM_elem_index_get(e->v1)], coords[BM_elem_index_get(e->v2)]);
+              if (!vert_positions.is_empty()) {
+                mid_v3_v3v3(point,
+                            vert_positions[BM_elem_index_get(e->v1)],
+                            vert_positions[BM_elem_index_get(e->v2)]);
               }
               else {
                 mid_v3_v3v3(point, e->v1->co, e->v2->co);
               }
-              mul_m4_v3(obedit->object_to_world, point);
+              mul_m4_v3(obedit->object_to_world().ptr(), point);
               const float dist_sq_test = dist_squared_to_ray_v3_normalized(
                   ray_origin, ray_direction, point);
               if (dist_sq_test < dist_sq_best_edge) {
@@ -1156,8 +1183,9 @@ bool EDBM_unified_findnearest_from_raycast(ViewContext *vc,
         BM_ITER_MESH (v, &viter, bm, BM_VERTS_OF_MESH) {
           if (BM_elem_flag_test(v, BM_ELEM_HIDDEN) == false) {
             float point[3];
-            mul_v3_m4v3(
-                point, obedit->object_to_world, coords ? coords[BM_elem_index_get(v)] : v->co);
+            mul_v3_m4v3(point,
+                        obedit->object_to_world().ptr(),
+                        !vert_positions.is_empty() ? vert_positions[BM_elem_index_get(v)] : v->co);
             const float dist_sq_test = dist_squared_to_ray_v3_normalized(
                 ray_origin, ray_direction, point);
             if (dist_sq_test < dist_sq_best_vert) {
@@ -1180,14 +1208,15 @@ bool EDBM_unified_findnearest_from_raycast(ViewContext *vc,
         BM_ITER_MESH (e, &eiter, bm, BM_EDGES_OF_MESH) {
           if (BM_elem_flag_test(e, BM_ELEM_HIDDEN) == false) {
             float point[3];
-            if (coords) {
-              mid_v3_v3v3(
-                  point, coords[BM_elem_index_get(e->v1)], coords[BM_elem_index_get(e->v2)]);
+            if (!vert_positions.is_empty()) {
+              mid_v3_v3v3(point,
+                          vert_positions[BM_elem_index_get(e->v1)],
+                          vert_positions[BM_elem_index_get(e->v2)]);
             }
             else {
               mid_v3_v3v3(point, e->v1->co, e->v2->co);
             }
-            mul_m4_v3(obedit->object_to_world, point);
+            mul_m4_v3(obedit->object_to_world().ptr(), point);
             const float dist_sq_test = dist_squared_to_ray_v3_normalized(
                 ray_origin, ray_direction, point);
             if (dist_sq_test < dist_sq_best_edge) {
@@ -1210,13 +1239,13 @@ bool EDBM_unified_findnearest_from_raycast(ViewContext *vc,
         BM_ITER_MESH (f, &fiter, bm, BM_FACES_OF_MESH) {
           if (BM_elem_flag_test(f, BM_ELEM_HIDDEN) == false) {
             float point[3];
-            if (coords) {
-              BM_face_calc_center_median_vcos(bm, f, point, coords);
+            if (!vert_positions.is_empty()) {
+              BM_face_calc_center_median_vcos(bm, f, point, vert_positions);
             }
             else {
               BM_face_calc_center_median(f, point);
             }
-            mul_m4_v3(obedit->object_to_world, point);
+            mul_m4_v3(obedit->object_to_world().ptr(), point);
             const float dist_sq_test = dist_squared_to_ray_v3_normalized(
                 ray_origin, ray_direction, point);
             if (dist_sq_test < dist_sq_best_face) {
@@ -1399,18 +1428,16 @@ static int edbm_select_mode_invoke(bContext *C, wmOperator *op, const wmEvent *e
 
 static std::string edbm_select_mode_get_description(bContext * /*C*/,
                                                     wmOperatorType * /*ot*/,
-                                                    PointerRNA *values)
+                                                    PointerRNA *ptr)
 {
-  const int type = RNA_enum_get(values, "type");
+  const int type = RNA_enum_get(ptr, "type");
 
   /* Because the special behavior for shift and ctrl click depend on user input, they may be
    * incorrect if the operator is used from a script or from a special button. So only return the
    * specialized descriptions if only the "type" is set, which conveys that the operator is meant
    * to be used with the logic in the `invoke` method. */
-  if (RNA_struct_property_is_set(values, "type") &&
-      !RNA_struct_property_is_set(values, "use_extend") &&
-      !RNA_struct_property_is_set(values, "use_expand") &&
-      !RNA_struct_property_is_set(values, "action"))
+  if (RNA_struct_property_is_set(ptr, "type") && !RNA_struct_property_is_set(ptr, "use_extend") &&
+      !RNA_struct_property_is_set(ptr, "use_expand") && !RNA_struct_property_is_set(ptr, "action"))
   {
     switch (type) {
       case SCE_SELECT_VERTEX:
@@ -2212,7 +2239,7 @@ bool EDBM_select_pick(bContext *C, const int mval[2], const SelectPick_Params *p
      * switch UV layers, vgroups for eg. */
     BKE_view_layer_synced_ensure(vc.scene, vc.view_layer);
     if (BKE_view_layer_active_base_get(vc.view_layer) != basact) {
-      ED_object_base_activate(C, basact);
+      blender::ed::object::base_activate(C, basact);
     }
 
     DEG_id_tag_update(static_cast<ID *>(vc.obedit->data), ID_RECALC_SELECT);
@@ -2537,11 +2564,11 @@ bool EDBM_selectmode_toggle_multi(bContext *C,
       em_iter->selectmode = ts->selectmode;
       EDBM_selectmode_set(em_iter);
       DEG_id_tag_update(static_cast<ID *>(ob_iter->data),
-                        ID_RECALC_COPY_ON_WRITE | ID_RECALC_SELECT);
+                        ID_RECALC_SYNC_TO_EVAL | ID_RECALC_SELECT);
       WM_event_add_notifier(C, NC_GEOM | ND_SELECT, ob_iter->data);
     }
     WM_main_add_notifier(NC_SCENE | ND_TOOLSETTINGS, nullptr);
-    DEG_id_tag_update(&scene->id, ID_RECALC_COPY_ON_WRITE);
+    DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
   }
 
   return ret;
@@ -2581,7 +2608,7 @@ bool EDBM_selectmode_set_multi(bContext *C, const short selectmode)
       em_iter->selectmode = ts->selectmode;
       EDBM_selectmode_set(em_iter);
       DEG_id_tag_update(static_cast<ID *>(ob_iter->data),
-                        ID_RECALC_COPY_ON_WRITE | ID_RECALC_SELECT);
+                        ID_RECALC_SYNC_TO_EVAL | ID_RECALC_SELECT);
       WM_event_add_notifier(C, NC_GEOM | ND_SELECT, ob_iter->data);
       changed = true;
     }
@@ -2589,8 +2616,44 @@ bool EDBM_selectmode_set_multi(bContext *C, const short selectmode)
 
   if (changed) {
     WM_main_add_notifier(NC_SCENE | ND_TOOLSETTINGS, nullptr);
-    DEG_id_tag_update(&scene->id, ID_RECALC_COPY_ON_WRITE);
+    DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
   }
+  return changed;
+}
+
+/**
+ * Ensure all edit-meshes have the same select-mode.
+ *
+ * While this is almost always the case as the UI syncs the values when set,
+ * it's not guaranteed because objects can be shared across scenes and each
+ * scene has it's own select-mode which is applied to the object when entering edit-mode.
+ *
+ * This function should only be used when the an operation would cause errors
+ * when applied in the wrong selection mode.
+ *
+ * \return True when a change was made.
+ */
+static bool edbm_selectmode_sync_multi_ex(Span<Object *> objects)
+{
+  if (objects.size() <= 1) {
+    return false;
+  }
+
+  bool changed = false;
+  BMEditMesh *em_active = BKE_editmesh_from_object(objects[0]);
+  for (Object *obedit : objects) {
+    BMEditMesh *em = BKE_editmesh_from_object(obedit);
+    if (em_active->selectmode == em->selectmode) {
+      continue;
+    }
+    em->selectmode = em_active->selectmode;
+    EDBM_selectmode_set(em);
+    changed = true;
+
+    DEG_id_tag_update(static_cast<ID *>(obedit->data), ID_RECALC_SYNC_TO_EVAL | ID_RECALC_SELECT);
+    WM_main_add_notifier(NC_GEOM | ND_SELECT, obedit->data);
+  }
+
   return changed;
 }
 
@@ -4527,6 +4590,8 @@ static int edbm_select_non_manifold_exec(bContext *C, wmOperator *op)
   const Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
       scene, view_layer, CTX_wm_view3d(C));
 
+  edbm_selectmode_sync_multi_ex(objects);
+
   for (Object *obedit : objects) {
     BMEditMesh *em = BKE_editmesh_from_object(obedit);
     BMVert *v;
@@ -4537,15 +4602,7 @@ static int edbm_select_non_manifold_exec(bContext *C, wmOperator *op)
       EDBM_flag_disable_all(em, BM_ELEM_SELECT);
     }
 
-    /* Selects isolated verts, and edges that do not have 2 neighboring
-     * faces
-     */
-
-    if (em->selectmode == SCE_SELECT_FACE) {
-      BKE_report(op->reports, RPT_ERROR, "Does not work in face selection mode");
-      return OPERATOR_CANCELLED;
-    }
-
+    /* Selects isolated verts, and edges that do not have 2 neighboring faces. */
     if (use_verts) {
       BM_ITER_MESH (v, &iter, em->bm, BM_VERTS_OF_MESH) {
         if (!BM_elem_flag_test(v, BM_ELEM_HIDDEN)) {
@@ -4590,7 +4647,7 @@ void MESH_OT_select_non_manifold(wmOperatorType *ot)
 
   /* api callbacks */
   ot->exec = edbm_select_non_manifold_exec;
-  ot->poll = ED_operator_editmesh;
+  ot->poll = edbm_vert_or_edge_select_mode_poll;
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
@@ -4869,7 +4926,7 @@ static int edbm_select_axis_exec(bContext *C, wmOperator *op)
 
   {
     float vertex_world[3];
-    mul_v3_m4v3(vertex_world, obedit->object_to_world, v_act->co);
+    mul_v3_m4v3(vertex_world, obedit->object_to_world().ptr(), v_act->co);
     value = dot_v3v3(axis_vector, vertex_world);
   }
 
@@ -4897,7 +4954,7 @@ static int edbm_select_axis_exec(bContext *C, wmOperator *op)
     BM_ITER_MESH (v, &iter, bm, BM_VERTS_OF_MESH) {
       if (!BM_elem_flag_test(v, BM_ELEM_HIDDEN | BM_ELEM_SELECT)) {
         float v_iter_world[3];
-        mul_v3_m4v3(v_iter_world, obedit_iter->object_to_world, v->co);
+        mul_v3_m4v3(v_iter_world, obedit_iter->object_to_world().ptr(), v->co);
         const float value_iter = dot_v3v3(axis_vector, v_iter_world);
         switch (sign) {
           case SELECT_AXIS_ALIGN:
@@ -5273,7 +5330,8 @@ static bool edbm_select_by_attribute_poll(bContext *C)
   }
   Object *obedit = CTX_data_edit_object(C);
   const Mesh *mesh = static_cast<const Mesh *>(obedit->data);
-  const CustomDataLayer *layer = BKE_id_attributes_active_get(&const_cast<ID &>(mesh->id));
+  AttributeOwner owner = AttributeOwner::from_id(&const_cast<ID &>(mesh->id));
+  const CustomDataLayer *layer = BKE_attributes_active_get(owner);
   if (!layer) {
     CTX_wm_operator_poll_msg_set(C, "There must be an active attribute");
     return false;
@@ -5282,7 +5340,7 @@ static bool edbm_select_by_attribute_poll(bContext *C)
     CTX_wm_operator_poll_msg_set(C, "The active attribute must have a boolean type");
     return false;
   }
-  if (BKE_id_attribute_domain(&mesh->id, layer) == bke::AttrDomain::Corner) {
+  if (BKE_attribute_domain(owner, layer) == bke::AttrDomain::Corner) {
     CTX_wm_operator_poll_msg_set(
         C, "The active attribute must be on the vertex, edge, or face domain");
     return false;
@@ -5316,19 +5374,19 @@ static int edbm_select_by_attribute_exec(bContext *C, wmOperator * /*op*/)
     Mesh *mesh = static_cast<Mesh *>(obedit->data);
     BMEditMesh *em = BKE_editmesh_from_object(obedit);
     BMesh *bm = em->bm;
-
-    const CustomDataLayer *layer = BKE_id_attributes_active_get(&mesh->id);
+    AttributeOwner owner = AttributeOwner::from_id(&mesh->id);
+    const CustomDataLayer *layer = BKE_attributes_active_get(owner);
     if (!layer) {
       continue;
     }
     if (layer->type != CD_PROP_BOOL) {
       continue;
     }
-    if (BKE_id_attribute_domain(&mesh->id, layer) == bke::AttrDomain::Corner) {
+    if (BKE_attribute_domain(owner, layer) == bke::AttrDomain::Corner) {
       continue;
     }
     const std::optional<BMIterType> iter_type = domain_to_iter_type(
-        BKE_id_attribute_domain(&mesh->id, layer));
+        BKE_attribute_domain(owner, layer));
     if (!iter_type) {
       continue;
     }

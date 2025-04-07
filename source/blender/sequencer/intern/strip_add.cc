@@ -20,17 +20,15 @@
 #include "DNA_sound_types.h"
 
 #include "BLI_listbase.h"
-#include "BLI_path_util.h"
+#include "BLI_path_utils.hh"
 #include "BLI_string.h"
-#include "BLI_string_utf8.h"
 
-#include "BKE_context.hh"
-#include "BKE_image.h"
+#include "BKE_image.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
 #include "BKE_mask.h"
 #include "BKE_movieclip.h"
-#include "BKE_scene.h"
+#include "BKE_scene.hh"
 #include "BKE_sound.h"
 
 #include "DEG_depsgraph_query.hh"
@@ -45,7 +43,6 @@
 #include "SEQ_effects.hh"
 #include "SEQ_relations.hh"
 #include "SEQ_render.hh"
-#include "SEQ_select.hh"
 #include "SEQ_sequencer.hh"
 #include "SEQ_time.hh"
 #include "SEQ_transform.hh"
@@ -55,7 +52,6 @@
 #include "proxy.hh"
 #include "sequencer.hh"
 #include "strip_time.hh"
-#include "utils.hh"
 
 void SEQ_add_load_data_init(SeqLoadData *load_data,
                             const char *name,
@@ -78,7 +74,7 @@ static void seq_add_generic_update(Scene *scene, Sequence *seq)
 {
   SEQ_sequence_base_unique_name_recursive(scene, &scene->ed->seqbase, seq);
   SEQ_relations_invalidate_cache_composite(scene, seq);
-  SEQ_sequence_lookup_tag(scene, SEQ_LOOKUP_TAG_INVALID);
+  SEQ_sequence_lookup_invalidate(scene);
   seq_time_effect_range_set(scene, seq);
   SEQ_time_update_meta_strip_range(scene, seq_sequence_lookup_meta_by_seq(scene, seq));
 }
@@ -171,10 +167,10 @@ Sequence *SEQ_add_effect_strip(Scene *scene, ListBase *seqbase, SeqLoadData *loa
   sh.init(seq);
   seq->seq1 = load_data->effect.seq1;
   seq->seq2 = load_data->effect.seq2;
-  seq->seq3 = load_data->effect.seq3;
 
   if (SEQ_effect_get_num_inputs(seq->type) == 1) {
     seq->blend_mode = seq->seq1->blend_mode;
+    seq->blend_opacity = seq->seq1->blend_opacity;
   }
 
   if (!load_data->effect.seq1) {
@@ -284,7 +280,7 @@ Sequence *SEQ_add_image_strip(Main *bmain, Scene *scene, ListBase *seqbase, SeqL
 
 #ifdef WITH_AUDASPACE
 
-static void seq_add_sound_av_sync(Main *bmain, Scene *scene, Sequence *seq, SeqLoadData *load_data)
+void SEQ_add_sound_av_sync(Main *bmain, Scene *scene, Sequence *seq, SeqLoadData *load_data)
 {
   SoundStreamInfo sound_stream;
   if (!BKE_sound_stream_info_get(bmain, load_data->path, 0, &sound_stream)) {
@@ -333,7 +329,7 @@ Sequence *SEQ_add_sound_strip(Main *bmain, Scene *scene, ListBase *seqbase, SeqL
   BLI_path_split_dir_file(
       load_data->path, strip->dirpath, sizeof(strip->dirpath), se->filename, sizeof(se->filename));
 
-  if (seq != nullptr && seq->sound != nullptr) {
+  if (seq->sound != nullptr) {
     if (load_data->flags & SEQ_LOAD_SOUND_MONO) {
       seq->sound->flags |= SOUND_FLAGS_MONO;
     }
@@ -343,9 +339,10 @@ Sequence *SEQ_add_sound_strip(Main *bmain, Scene *scene, ListBase *seqbase, SeqL
         seq->sound->flags |= SOUND_FLAGS_CACHING;
       }
     }
-  }
 
-  seq_add_sound_av_sync(bmain, scene, seq, load_data);
+    /* Turn on Display Waveform by default. */
+    seq->flag |= SEQ_AUDIO_DRAW_WAVEFORM;
+  }
 
   /* Set Last active directory. */
   BLI_strncpy(scene->ed->act_sounddir, strip->dirpath, FILE_MAXDIR);
@@ -356,6 +353,14 @@ Sequence *SEQ_add_sound_strip(Main *bmain, Scene *scene, ListBase *seqbase, SeqL
 }
 
 #else   // WITH_AUDASPACE
+
+void SEQ_add_sound_av_sync(Main * /*bmain*/,
+                           Scene * /*scene*/,
+                           Sequence * /*seq*/,
+                           SeqLoadData * /*load_data*/)
+{
+}
+
 Sequence *SEQ_add_sound_strip(Main * /*bmain*/,
                               Scene * /*scene*/,
                               ListBase * /*seqbase*/,
@@ -385,9 +390,9 @@ Sequence *SEQ_add_meta_strip(Scene *scene, ListBase *seqbase, SeqLoadData *load_
 
 Sequence *SEQ_add_movie_strip(Main *bmain, Scene *scene, ListBase *seqbase, SeqLoadData *load_data)
 {
-  char path[sizeof(load_data->path)];
-  STRNCPY(path, load_data->path);
-  BLI_path_abs(path, BKE_main_blendfile_path(bmain));
+  char filepath[sizeof(load_data->path)];
+  STRNCPY(filepath, load_data->path);
+  BLI_path_abs(filepath, BKE_main_blendfile_path(bmain));
 
   char colorspace[64] = "\0"; /* MAX_COLORSPACE_NAME */
   bool is_multiview_loaded = false;
@@ -403,14 +408,14 @@ Sequence *SEQ_add_movie_strip(Main *bmain, Scene *scene, ListBase *seqbase, SeqL
     const char *ext = nullptr;
     size_t j = 0;
 
-    BKE_scene_multiview_view_prefix_get(scene, path, prefix, &ext);
+    BKE_scene_multiview_view_prefix_get(scene, filepath, prefix, &ext);
 
     if (prefix[0] != '\0') {
       for (i = 0; i < totfiles; i++) {
-        char filepath[FILE_MAX];
+        char filepath_view[FILE_MAX];
 
-        seq_multiview_name(scene, i, prefix, ext, filepath, sizeof(filepath));
-        anim_arr[j] = openanim(filepath, IB_rect, 0, colorspace);
+        seq_multiview_name(scene, i, prefix, ext, filepath_view, sizeof(filepath_view));
+        anim_arr[j] = openanim(filepath_view, IB_rect, 0, colorspace);
 
         if (anim_arr[j]) {
           seq_anim_add_suffix(scene, anim_arr[j], i);
@@ -422,7 +427,7 @@ Sequence *SEQ_add_movie_strip(Main *bmain, Scene *scene, ListBase *seqbase, SeqL
   }
 
   if (is_multiview_loaded == false) {
-    anim_arr[0] = openanim(path, IB_rect, 0, colorspace);
+    anim_arr[0] = openanim(filepath, IB_rect, 0, colorspace);
   }
 
   if (anim_arr[0] == nullptr && !load_data->allow_invalid_file) {
@@ -694,8 +699,8 @@ void SEQ_add_reload_new_file(Main *bmain, Scene *scene, Sequence *seq, const boo
 void SEQ_add_movie_reload_if_needed(
     Main *bmain, Scene *scene, Sequence *seq, bool *r_was_reloaded, bool *r_can_produce_frames)
 {
-  BLI_assert(seq->type == SEQ_TYPE_MOVIE ||
-             !"This function is only implemented for movie strips.");
+  BLI_assert_msg(seq->type == SEQ_TYPE_MOVIE,
+                 "This function is only implemented for movie strips.");
 
   bool must_reload = false;
 

@@ -78,20 +78,22 @@ class BakeOptions:
 def bake_action(
         obj,
         *,
-        action, frames,
-        bake_options: BakeOptions
+        action,
+        frames,
+        bake_options,
 ):
     """
     :arg obj: Object to bake.
     :type obj: :class:`bpy.types.Object`
     :arg action: An action to bake the data into, or None for a new action
        to be created.
-    :type action: :class:`bpy.types.Action` or None
+    :type action: :class:`bpy.types.Action` | None
     :arg frames: Frames to bake.
-    :type frames: iterable of int
-
-    :return: an action or None
-    :rtype: :class:`bpy.types.Action`
+    :type frames: int
+    :arg bake_options: Options for baking.
+    :type bake_options: :class:`anim_utils.BakeOptions`
+    :return: Action or None.
+    :rtype: :class:`bpy.types.Action` | None
     """
     if not (bake_options.do_pose or bake_options.do_object):
         return None
@@ -108,16 +110,18 @@ def bake_action_objects(
         object_action_pairs,
         *,
         frames,
-        bake_options: BakeOptions
+        bake_options,
 ):
     """
     A version of :func:`bake_action_objects_iter` that takes frames and returns the output.
 
     :arg frames: Frames to bake.
     :type frames: iterable of int
+    :arg bake_options: Options for baking.
+    :type bake_options: :class:`anim_utils.BakeOptions`
 
-    :return: A sequence of Action or None types (aligned with `object_action_pairs`)
-    :rtype: sequence of :class:`bpy.types.Action`
+    :return: A sequence of Action or None types (aligned with ``object_action_pairs``)
+    :rtype: Sequence[:class:`bpy.types.Action`]
     """
     if not (bake_options.do_pose or bake_options.do_object):
         return []
@@ -131,7 +135,7 @@ def bake_action_objects(
 
 def bake_action_objects_iter(
         object_action_pairs,
-        bake_options: BakeOptions
+        bake_options,
 ):
     """
     An coroutine that bakes actions for multiple objects.
@@ -139,6 +143,8 @@ def bake_action_objects_iter(
     :arg object_action_pairs: Sequence of object action tuples,
        action is the destination for the baked data. When None a new action will be created.
     :type object_action_pairs: Sequence of (:class:`bpy.types.Object`, :class:`bpy.types.Action`)
+    :arg bake_options: Options for baking.
+    :type bake_options: :class:`anim_utils.BakeOptions`
     """
     scene = bpy.context.scene
     frame_back = scene.frame_current
@@ -165,7 +171,7 @@ def bake_action_iter(
         obj,
         *,
         action,
-        bake_options: BakeOptions
+        bake_options,
 ):
     """
     An coroutine that bakes action for a single object.
@@ -174,9 +180,9 @@ def bake_action_iter(
     :type obj: :class:`bpy.types.Object`
     :arg action: An action to bake the data into, or None for a new action
        to be created.
-    :type action: :class:`bpy.types.Action` or None
+    :type action: :class:`bpy.types.Action` | None
     :arg bake_options: Boolean options of what to include into the action bake.
-    :type bake_options: :class: `anim_utils.BakeOptions`
+    :type bake_options: :class:`anim_utils.BakeOptions`
 
     :return: an action or None
     :rtype: :class:`bpy.types.Action`
@@ -233,7 +239,7 @@ def bake_action_iter(
             return {}
 
         # Be careful about which properties to actually consider for baking, as
-        # keeping references to complex Blender datastructures around for too long
+        # keeping references to complex Blender data-structures around for too long
         # can cause crashes. See #117988.
         clean_props = {
             key: rna_idprop_value_to_python(value)
@@ -243,14 +249,25 @@ def bake_action_iter(
         return clean_props
 
     def bake_custom_properties(obj, *, custom_props, frame, group_name=""):
+        import idprop
         if frame is None or not custom_props:
             return
         for key, value in custom_props.items():
+            if key in obj.bl_rna.properties and not obj.bl_rna.properties[key].is_animatable:
+                continue
+            if isinstance(obj[key], idprop.types.IDPropertyGroup):
+                continue
             obj[key] = value
+            if key in obj.bl_rna.properties:
+                rna_path = key
+            else:
+                rna_path = "[\"{:s}\"]".format(bpy.utils.escape_identifier(key))
             try:
-                obj.keyframe_insert(f'["{bpy.utils.escape_identifier(key)}"]', frame=frame, group=group_name)
+                obj.keyframe_insert(rna_path, frame=frame, group=group_name)
             except TypeError:
-                # Non animatable properties (datablocks, etc) cannot be keyed.
+                # The is_animatable check above is per property. A property in isolation
+                # may be considered animatable, but it could be owned by a data-block that
+                # itself cannot be animated.
                 continue
 
     def pose_frame_info(obj):
@@ -356,6 +373,9 @@ def bake_action_iter(
             atd.use_tweak_mode = False
 
         atd.action = action
+        if bpy.context.preferences.experimental.use_animation_baklava and action.is_action_layered:
+            slot = action.slots.new(for_id=obj)
+            atd.action_slot = slot
 
     # Baking the action only makes sense in Replace mode, so force it (#69105)
     if not atd.use_tweak_mode:

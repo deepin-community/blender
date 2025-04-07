@@ -177,8 +177,8 @@ template<typename T> class Span {
   }
 
   /**
-   * Returns a new Span with n elements removed from the beginning. This invokes undefined
-   * behavior when n is negative.
+   * Returns a new Span with n elements removed from the end. This invokes undefined behavior when
+   * n is negative.
    */
   constexpr Span drop_back(int64_t n) const
   {
@@ -328,18 +328,6 @@ template<typename T> class Span {
     BLI_assert(n >= 0);
     BLI_assert(n < size_);
     return data_[size_ - 1 - n];
-  }
-
-  /**
-   * Returns the element at the given index. If the index is out of range, return the fallback
-   * value.
-   */
-  constexpr T get(int64_t index, const T &fallback) const
-  {
-    if (index < size_ && index >= 0) {
-      return data_[index];
-    }
-    return fallback;
   }
 
   /**

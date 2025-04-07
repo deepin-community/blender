@@ -12,7 +12,7 @@
 #include "BLI_kdopbvh.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector.h"
-#include "BLI_path_util.h"
+#include "BLI_path_utils.hh"
 #include "BLI_utildefines.h"
 
 #include "RNA_define.hh"
@@ -31,10 +31,10 @@
 #ifdef RNA_RUNTIME
 
 #  include "BKE_editmesh.hh"
-#  include "BKE_global.h"
-#  include "BKE_image.h"
-#  include "BKE_scene.h"
-#  include "BKE_writeavi.h"
+#  include "BKE_global.hh"
+#  include "BKE_image.hh"
+#  include "BKE_scene.hh"
+#  include "BKE_writemovie.hh"
 
 #  include "DEG_depsgraph_query.hh"
 
@@ -43,7 +43,7 @@
 #  include "ED_uvedit.hh"
 
 #  ifdef WITH_PYTHON
-#    include "BPY_extern.h"
+#    include "BPY_extern.hh"
 #  endif
 
 static void rna_Scene_frame_set(Scene *scene, Main *bmain, int frame, float subframe)
@@ -157,7 +157,7 @@ static void rna_Scene_ray_cast(Scene *scene,
                                                      r_location,
                                                      r_normal,
                                                      r_index,
-                                                     r_ob,
+                                                     (const Object **)(r_ob),
                                                      (float(*)[4])r_obmat);
 
   ED_transform_snap_object_context_destroy(sctx);

@@ -26,7 +26,7 @@ vec3 compute_chromatic_distortion_scale(float distance_squared)
  * coordinates but outputs non-centered image coordinates. */
 vec2 compute_distorted_uv(vec2 uv, float uv_scale)
 {
-  return (uv * uv_scale + 0.5) * vec2(texture_size(input_tx)) - 0.5;
+  return (uv * uv_scale + 0.5) * vec2(texture_size(input_tx));
 }
 
 /* Compute the number of integration steps that should be used to approximate the distorted pixel
@@ -98,8 +98,9 @@ vec3 integrate_distortion(int start, int end, float distance_squared, vec2 uv, i
   vec3 accumulated_color = vec3(0.0);
   float distortion_amount = chromatic_distortion[end] - chromatic_distortion[start];
   for (int i = 0; i < steps; i++) {
-    /* The increment will be in the [0, 1) range across iterations. */
-    float increment = (i + get_jitter(i)) / steps;
+    /* The increment will be in the [0, 1) range across iterations. Include the start channel in
+     * the jitter seed to make sure each channel gets a different jitter. */
+    float increment = (i + get_jitter(start * steps + i)) / steps;
     float distortion = chromatic_distortion[start] + increment * distortion_amount;
     float distortion_scale = compute_distortion_scale(distortion, distance_squared);
 

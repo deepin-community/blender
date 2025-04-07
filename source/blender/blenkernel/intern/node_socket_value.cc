@@ -54,10 +54,52 @@ template<typename T> static std::optional<eNodeSocketDatatype> static_type_to_so
   if constexpr (is_single_or_field_or_grid_v<T, math::Quaternion>) {
     return SOCK_ROTATION;
   }
+  if constexpr (is_same_any_v<T, float4x4, fn::Field<float4x4>>) {
+    return SOCK_MATRIX;
+  }
   if constexpr (is_same_any_v<T, std::string>) {
     return SOCK_STRING;
   }
   return std::nullopt;
+}
+
+/**
+ * Check if a socket type stores the static C++ type.
+ */
+template<typename T>
+static bool static_type_is_base_socket_type(const eNodeSocketDatatype socket_type)
+{
+  switch (socket_type) {
+    case SOCK_INT:
+      return std::is_same_v<T, int>;
+    case SOCK_FLOAT:
+      return std::is_same_v<T, float>;
+    case SOCK_BOOLEAN:
+      return std::is_same_v<T, bool>;
+    case SOCK_VECTOR:
+      return std::is_same_v<T, float3>;
+    case SOCK_RGBA:
+      return std::is_same_v<T, ColorGeometry4f>;
+    case SOCK_ROTATION:
+      return std::is_same_v<T, math::Quaternion>;
+    case SOCK_MATRIX:
+      return std::is_same_v<T, float4x4>;
+    case SOCK_STRING:
+      return std::is_same_v<T, std::string>;
+    case SOCK_MENU:
+      return std::is_same_v<T, int>;
+    case SOCK_CUSTOM:
+    case SOCK_SHADER:
+    case SOCK_OBJECT:
+    case SOCK_IMAGE:
+    case SOCK_GEOMETRY:
+    case SOCK_COLLECTION:
+    case SOCK_TEXTURE:
+    case SOCK_MATERIAL:
+      return false;
+  }
+  BLI_assert_unreachable();
+  return false;
 }
 
 template<typename T> T SocketValueVariant::extract()
@@ -83,13 +125,14 @@ template<typename T> T SocketValueVariant::extract()
     }
   }
   else if constexpr (fn::is_field_v<T>) {
-    BLI_assert(socket_type_ == static_type_to_socket_type<typename T::base_type>());
+    BLI_assert(static_type_is_base_socket_type<typename T::base_type>(socket_type_));
     return T(this->extract<fn::GField>());
   }
 #ifdef WITH_OPENVDB
   else if constexpr (std::is_same_v<T, GVolumeGrid>) {
     switch (kind_) {
       case Kind::Grid: {
+        BLI_assert(value_);
         return std::move(value_.get<GVolumeGrid>());
       }
       case Kind::Single:
@@ -105,12 +148,12 @@ template<typename T> T SocketValueVariant::extract()
     }
   }
   else if constexpr (is_VolumeGrid_v<T>) {
-    BLI_assert(socket_type_ == static_type_to_socket_type<typename T::base_type>());
+    BLI_assert(static_type_is_base_socket_type<typename T::base_type>(socket_type_));
     return this->extract<GVolumeGrid>().typed<typename T::base_type>();
   }
 #endif
   else {
-    BLI_assert(socket_type_ == static_type_to_socket_type<T>());
+    BLI_assert(static_type_is_base_socket_type<T>(socket_type_));
     if (kind_ == Kind::Single) {
       return std::move(value_.get<T>());
     }
@@ -149,6 +192,7 @@ template<typename T> void SocketValueVariant::store_impl(T value)
   }
 #ifdef WITH_OPENVDB
   else if constexpr (std::is_same_v<T, GVolumeGrid>) {
+    BLI_assert(value);
     const VolumeGridType volume_grid_type = value->grid_type();
     const std::optional<eNodeSocketDatatype> new_socket_type = grid_type_to_socket_type(
         volume_grid_type);
@@ -158,6 +202,7 @@ template<typename T> void SocketValueVariant::store_impl(T value)
     value_.emplace<GVolumeGrid>(std::move(value));
   }
   else if constexpr (is_VolumeGrid_v<T>) {
+    BLI_assert(value);
     this->store_impl<GVolumeGrid>(std::move(value));
   }
 #endif
@@ -195,6 +240,10 @@ void SocketValueVariant::store_single(const eNodeSocketDatatype socket_type, con
       value_.emplace<math::Quaternion>(*static_cast<const math::Quaternion *>(value));
       break;
     }
+    case SOCK_MATRIX: {
+      value_.emplace<float4x4>(*static_cast<const float4x4 *>(value));
+      break;
+    }
     case SOCK_RGBA: {
       value_.emplace<ColorGeometry4f>(*static_cast<const ColorGeometry4f *>(value));
       break;
@@ -220,6 +269,11 @@ bool SocketValueVariant::is_context_dependent_field() const
     return false;
   }
   return field.node().depends_on_input();
+}
+
+bool SocketValueVariant::is_volume_grid() const
+{
+  return kind_ == Kind::Grid;
 }
 
 void SocketValueVariant::convert_to_single()
@@ -281,10 +335,14 @@ void *SocketValueVariant::allocate_single(const eNodeSocketDatatype socket_type)
       return value_.allocate<bool>();
     case SOCK_ROTATION:
       return value_.allocate<math::Quaternion>();
+    case SOCK_MATRIX:
+      return value_.allocate<float4x4>();
     case SOCK_RGBA:
       return value_.allocate<ColorGeometry4f>();
     case SOCK_STRING:
       return value_.allocate<std::string>();
+    case SOCK_MENU:
+      return value_.allocate<int>();
     default: {
       BLI_assert_unreachable();
       return nullptr;
@@ -343,6 +401,9 @@ INSTANTIATE_SINGLE_AND_FIELD_AND_GRID(blender::math::Quaternion)
 
 INSTANTIATE(std::string)
 INSTANTIATE(fn::GField)
+
+INSTANTIATE(float4x4)
+INSTANTIATE(fn::Field<float4x4>)
 
 #ifdef WITH_OPENVDB
 INSTANTIATE(GVolumeGrid)

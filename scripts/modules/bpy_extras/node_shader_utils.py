@@ -704,8 +704,8 @@ class ShaderImageTextureWrapper():
 
             tree.links.new(node_image.outputs["Alpha" if self.use_alpha else "Color"], self.socket_dst)
             if self.use_alpha:
-                self.owner_shader.material.blend_method = 'BLEND'
-                self.owner_shader.material.show_transparent_back = False
+                self.owner_shader.material.surface_render_method = 'DITHERED'
+                self.owner_shader.material.use_transparency_overlap = False
 
             self._node_image = node_image
         return self._node_image

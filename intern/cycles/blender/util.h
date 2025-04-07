@@ -17,22 +17,8 @@
 #include "util/types.h"
 #include "util/vector.h"
 
+#include "BKE_image.hh"
 #include "BKE_mesh.hh"
-
-/* Hacks to hook into Blender API
- * todo: clean this up ... */
-
-extern "C" {
-void BKE_image_user_frame_calc(void *ima, void *iuser, int cfra);
-void BKE_image_user_file_path_ex(void *bmain,
-                                 void *iuser,
-                                 void *ima,
-                                 char *filepath,
-                                 bool resolve_udim,
-                                 bool resolve_multiview);
-unsigned char *BKE_image_get_pixels_for_frame(void *image, int frame, int tile);
-float *BKE_image_get_float_pixels_for_frame(void *image, int frame, int tile);
-}
 
 CCL_NAMESPACE_BEGIN
 
@@ -64,13 +50,20 @@ BlenderAttributeType blender_attribute_name_split_type(ustring name, string *r_r
 void python_thread_state_save(void **python_thread_state);
 void python_thread_state_restore(void **python_thread_state);
 
+static bool mesh_use_corner_normals(BL::Mesh &mesh, Mesh::SubdivisionType subdivision_type)
+{
+  return mesh && (subdivision_type == Mesh::SUBDIVISION_NONE) &&
+         (static_cast<const ::Mesh *>(mesh.ptr.data)->normals_domain(true) ==
+          blender::bke::MeshNormalDomain::Corner);
+}
+
 static inline BL::Mesh object_to_mesh(BL::BlendData & /*data*/,
                                       BObjectInfo &b_ob_info,
                                       BL::Depsgraph & /*depsgraph*/,
                                       bool /*calc_undeformed*/,
                                       Mesh::SubdivisionType subdivision_type)
 {
-  /* TODO: make this work with copy-on-write, modifiers are already evaluated. */
+  /* TODO: make this work with copy-on-evaluation, modifiers are already evaluated. */
 #if 0
   bool subsurf_mod_show_render = false;
   bool subsurf_mod_show_viewport = false;
@@ -88,27 +81,33 @@ static inline BL::Mesh object_to_mesh(BL::BlendData & /*data*/,
 
   BL::Mesh mesh = (b_ob_info.object_data.is_a(&RNA_Mesh)) ? BL::Mesh(b_ob_info.object_data) :
                                                             BL::Mesh(PointerRNA_NULL);
-  const bool split_faces = (mesh) && (subdivision_type == Mesh::SUBDIVISION_NONE) &&
-                           (static_cast<const ::Mesh *>(mesh.ptr.data)->normals_domain(true) ==
-                            blender::bke::MeshNormalDomain::Corner);
+
+  bool use_corner_normals = false;
 
   if (b_ob_info.is_real_object_data()) {
     if (mesh) {
-      /* Make a copy to split faces if we use auto-smooth, otherwise not needed.
-       * Also in edit mode do we need to make a copy, to ensure data layers like
-       * UV are not empty. */
-      if (mesh.is_editmode() || split_faces) {
+      if (mesh.is_editmode()) {
+        /* Flush edit-mesh to mesh, including all data layers. */
         BL::Depsgraph depsgraph(PointerRNA_NULL);
         mesh = b_ob_info.real_object.to_mesh(false, depsgraph);
+        use_corner_normals = mesh_use_corner_normals(mesh, subdivision_type);
+      }
+      else if (mesh_use_corner_normals(mesh, subdivision_type)) {
+        /* Make a copy to split faces. */
+        BL::Depsgraph depsgraph(PointerRNA_NULL);
+        mesh = b_ob_info.real_object.to_mesh(false, depsgraph);
+        use_corner_normals = true;
       }
     }
     else {
       BL::Depsgraph depsgraph(PointerRNA_NULL);
       mesh = b_ob_info.real_object.to_mesh(false, depsgraph);
+      use_corner_normals = mesh_use_corner_normals(mesh, subdivision_type);
     }
   }
   else {
     /* TODO: what to do about non-mesh geometry instances? */
+    use_corner_normals = mesh_use_corner_normals(mesh, subdivision_type);
   }
 
 #if 0
@@ -121,7 +120,7 @@ static inline BL::Mesh object_to_mesh(BL::BlendData & /*data*/,
 #endif
 
   if (mesh) {
-    if (split_faces) {
+    if (use_corner_normals) {
       mesh.split_faces();
     }
 
@@ -304,26 +303,50 @@ static inline string image_user_file_path(BL::BlendData &data,
 {
   char filepath[1024];
   iuser.tile(0);
-  BKE_image_user_frame_calc(ima.ptr.data, iuser.ptr.data, cfra);
-  BKE_image_user_file_path_ex(data.ptr.data, iuser.ptr.data, ima.ptr.data, filepath, false, true);
+  BKE_image_user_frame_calc(
+      static_cast<Image *>(ima.ptr.data), static_cast<ImageUser *>(iuser.ptr.data), cfra);
+  BKE_image_user_file_path_ex(static_cast<Main *>(data.ptr.data),
+                              static_cast<ImageUser *>(iuser.ptr.data),
+                              static_cast<Image *>(ima.ptr.data),
+                              filepath,
+                              false,
+                              true);
 
   return string(filepath);
 }
 
 static inline int image_user_frame_number(BL::ImageUser &iuser, BL::Image &ima, int cfra)
 {
-  BKE_image_user_frame_calc(ima.ptr.data, iuser.ptr.data, cfra);
+  BKE_image_user_frame_calc(
+      static_cast<Image *>(ima.ptr.data), static_cast<ImageUser *>(iuser.ptr.data), cfra);
   return iuser.frame_current();
 }
 
 static inline unsigned char *image_get_pixels_for_frame(BL::Image &image, int frame, int tile)
 {
-  return BKE_image_get_pixels_for_frame(image.ptr.data, frame, tile);
+  return BKE_image_get_pixels_for_frame(static_cast<Image *>(image.ptr.data), frame, tile);
 }
 
 static inline float *image_get_float_pixels_for_frame(BL::Image &image, int frame, int tile)
 {
-  return BKE_image_get_float_pixels_for_frame(image.ptr.data, frame, tile);
+  return BKE_image_get_float_pixels_for_frame(static_cast<Image *>(image.ptr.data), frame, tile);
+}
+
+static inline bool image_is_builtin(BL::Image &ima, BL::RenderEngine &engine)
+{
+  const BL::Image::source_enum image_source = ima.source();
+  if (image_source == BL::Image::source_TILED) {
+    /* If any tile is marked as generated, then treat the entire Image as built-in. */
+    for (BL::UDIMTile &tile : ima.tiles) {
+      if (tile.is_generated_tile()) {
+        return true;
+      }
+    }
+  }
+
+  return ima.packed_file() || image_source == BL::Image::source_GENERATED ||
+         image_source == BL::Image::source_MOVIE ||
+         (engine.is_preview() && image_source != BL::Image::source_SEQUENCE);
 }
 
 static inline void render_add_metadata(BL::RenderResult &b_rr, string name, string value)

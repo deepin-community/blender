@@ -33,11 +33,14 @@
 #include "BLI_compute_context.hh"
 #include "BLI_enumerable_thread_specific.hh"
 #include "BLI_generic_pointer.hh"
+#include "BLI_linear_allocator_chunked_list.hh"
 #include "BLI_multi_value_map.hh"
 
 #include "BKE_geometry_set.hh"
+#include "BKE_node.hh"
 #include "BKE_node_tree_zones.hh"
 #include "BKE_viewer_path.hh"
+#include "BKE_volume_grid.hh"
 
 #include "FN_field.hh"
 
@@ -49,15 +52,26 @@ namespace blender::nodes::geo_eval_log {
 
 using fn::GField;
 
+/** These values are also written to .blend files, so don't change them lightly. */
 enum class NodeWarningType {
-  Error,
-  Warning,
-  Info,
+  Error = 0,
+  Warning = 1,
+  Info = 2,
 };
+
+int node_warning_type_icon(NodeWarningType type);
+int node_warning_type_severity(NodeWarningType type);
 
 struct NodeWarning {
   NodeWarningType type;
   std::string message;
+
+  uint64_t hash() const
+  {
+    return get_default_hash(this->type, this->message);
+  }
+
+  BLI_STRUCT_EQUALITY_OPERATORS_2(NodeWarning, type, message)
 };
 
 enum class NamedAttributeUsage {
@@ -121,6 +135,7 @@ struct GeometryAttributeInfo {
  */
 class GeometryInfoLog : public ValueLog {
  public:
+  std::string name;
   Vector<GeometryAttributeInfo> attributes;
   Vector<bke::GeometryComponent::Type> component_types;
 
@@ -141,8 +156,15 @@ class GeometryInfoLog : public ValueLog {
     int instances_num;
   };
   struct EditDataInfo {
-    bool has_deformed_positions;
-    bool has_deform_matrices;
+    bool has_deformed_positions = false;
+    bool has_deform_matrices = false;
+    int gizmo_transforms_num = 0;
+  };
+  struct VolumeInfo {
+    int grids_num;
+  };
+  struct GridInfo {
+    bool is_empty;
   };
 
   std::optional<MeshInfo> mesh_info;
@@ -151,8 +173,11 @@ class GeometryInfoLog : public ValueLog {
   std::optional<GreasePencilInfo> grease_pencil_info;
   std::optional<InstancesInfo> instances_info;
   std::optional<EditDataInfo> edit_data_info;
+  std::optional<VolumeInfo> volume_info;
+  std::optional<GridInfo> grid_info;
 
   GeometryInfoLog(const bke::GeometrySet &geometry_set);
+  GeometryInfoLog(const bke::GVolumeGrid &grid);
 };
 
 /**
@@ -174,8 +199,10 @@ using TimePoint = Clock::time_point;
 class GeoTreeLogger {
  public:
   std::optional<ComputeContextHash> parent_hash;
-  std::optional<int32_t> group_node_id;
+  std::optional<int32_t> parent_node_id;
   Vector<ComputeContextHash> children_hashes;
+  /** The time spend in the compute context that this logger corresponds to. */
+  std::chrono::nanoseconds execution_time{};
 
   LinearAllocator<> *allocator = nullptr;
 
@@ -206,14 +233,19 @@ class GeoTreeLogger {
     int32_t node_id;
     StringRefNull message;
   };
+  struct EvaluatedGizmoNode {
+    int32_t node_id;
+  };
 
-  Vector<WarningWithNode> node_warnings;
-  Vector<SocketValueLog> input_socket_values;
-  Vector<SocketValueLog> output_socket_values;
-  Vector<NodeExecutionTime> node_execution_times;
-  Vector<ViewerNodeLogWithNode, 0> viewer_node_logs;
-  Vector<AttributeUsageWithNode, 0> used_named_attributes;
-  Vector<DebugMessage, 0> debug_messages;
+  linear_allocator::ChunkedList<WarningWithNode> node_warnings;
+  linear_allocator::ChunkedList<SocketValueLog, 16> input_socket_values;
+  linear_allocator::ChunkedList<SocketValueLog, 16> output_socket_values;
+  linear_allocator::ChunkedList<NodeExecutionTime, 16> node_execution_times;
+  linear_allocator::ChunkedList<ViewerNodeLogWithNode> viewer_node_logs;
+  linear_allocator::ChunkedList<AttributeUsageWithNode> used_named_attributes;
+  linear_allocator::ChunkedList<DebugMessage> debug_messages;
+  /** Keeps track of which gizmo nodes have been tracked by this evaluation. */
+  linear_allocator::ChunkedList<EvaluatedGizmoNode> evaluated_gizmo_nodes;
 
   GeoTreeLogger();
   ~GeoTreeLogger();
@@ -233,12 +265,9 @@ class GeoTreeLogger {
 class GeoNodeLog {
  public:
   /** Warnings generated for that node. */
-  Vector<NodeWarning> warnings;
-  /**
-   * Time spent in this node. For node groups this is the sum of the run times of the nodes
-   * inside.
-   */
-  std::chrono::nanoseconds run_time{0};
+  VectorSet<NodeWarning> warnings;
+  /** Time spent in this node. */
+  std::chrono::nanoseconds execution_time{0};
   /** Maps from socket indices to their values. */
   Map<int, ValueLog *> input_values_;
   Map<int, ValueLog *> output_values_;
@@ -266,33 +295,53 @@ class GeoTreeLog {
   Vector<GeoTreeLogger *> tree_loggers_;
   VectorSet<ComputeContextHash> children_hashes_;
   bool reduced_node_warnings_ = false;
-  bool reduced_node_run_times_ = false;
+  bool reduced_execution_times_ = false;
   bool reduced_socket_values_ = false;
   bool reduced_viewer_node_logs_ = false;
   bool reduced_existing_attributes_ = false;
   bool reduced_used_named_attributes_ = false;
   bool reduced_debug_messages_ = false;
+  bool reduced_evaluated_gizmo_nodes_ = false;
 
  public:
   Map<int32_t, GeoNodeLog> nodes;
   Map<int32_t, ViewerNodeLog *, 0> viewer_node_logs;
-  Vector<NodeWarning> all_warnings;
-  std::chrono::nanoseconds run_time_sum{0};
+  VectorSet<NodeWarning> all_warnings;
+  std::chrono::nanoseconds execution_time{0};
   Vector<const GeometryAttributeInfo *> existing_attributes;
   Map<StringRefNull, NamedAttributeUsage> used_named_attributes;
+  Set<int> evaluated_gizmo_nodes;
 
   GeoTreeLog(GeoModifierLog *modifier_log, Vector<GeoTreeLogger *> tree_loggers);
   ~GeoTreeLog();
 
-  void ensure_node_warnings();
-  void ensure_node_run_time();
+  void ensure_node_warnings(const bNodeTree *tree);
+  void ensure_execution_times();
   void ensure_socket_values();
   void ensure_viewer_node_logs();
   void ensure_existing_attributes();
   void ensure_used_named_attributes();
   void ensure_debug_messages();
+  void ensure_evaluated_gizmo_nodes();
 
   ValueLog *find_socket_value_log(const bNodeSocket &query_socket);
+  [[nodiscard]] bool try_convert_primitive_socket_value(const GenericValueLog &value_log,
+                                                        const CPPType &dst_type,
+                                                        void *dst);
+
+  template<typename T>
+  std::optional<T> find_primitive_socket_value(const bNodeSocket &query_socket)
+  {
+    if (auto *value_log = dynamic_cast<GenericValueLog *>(
+            this->find_socket_value_log(query_socket)))
+    {
+      T value;
+      if (this->try_convert_primitive_socket_value(*value_log, CPPType::get<T>(), &value)) {
+        return value;
+      }
+    }
+    return std::nullopt;
+  }
 };
 
 /**
@@ -339,6 +388,9 @@ class GeoModifierLog {
    */
   static Map<const bke::bNodeTreeZone *, ComputeContextHash>
   get_context_hash_by_zone_for_node_editor(const SpaceNode &snode, StringRefNull modifier_name);
+  static Map<const bke::bNodeTreeZone *, ComputeContextHash>
+  get_context_hash_by_zone_for_node_editor(const SpaceNode &snode,
+                                           ComputeContextBuilder &compute_context_builder);
 
   static Map<const bke::bNodeTreeZone *, GeoTreeLog *> get_tree_log_by_zone_for_node_editor(
       const SpaceNode &snode);

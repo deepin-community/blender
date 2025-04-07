@@ -19,6 +19,13 @@
 CCL_NAMESPACE_BEGIN
 
 class Device;
+class GPUDevice;
+class CUDADevice;
+class OptiXDevice;
+class HIPDevice;
+class HIPRTDevice;
+class MetalDevice;
+class OneapiDevice;
 
 enum MemoryType {
   MEM_READ_ONLY,
@@ -233,6 +240,7 @@ class device_memory {
   size_t data_depth;
   MemoryType type;
   const char *name;
+  std::string name_storage;
 
   /* Pointers. */
   Device *device;
@@ -255,7 +263,9 @@ class device_memory {
   friend class CUDADevice;
   friend class OptiXDevice;
   friend class HIPDevice;
+  friend class HIPRTDevice;
   friend class MetalDevice;
+  friend class OneapiDevice;
 
   /* Only create through subclasses. */
   device_memory(Device *device, const char *name, MemoryType type);

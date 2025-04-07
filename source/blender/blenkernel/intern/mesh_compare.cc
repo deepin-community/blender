@@ -132,6 +132,9 @@ static void sort_indices(MutableSpan<int> indices, const Span<T> values, const i
       const float4 value2_quat = float4(value2);
       return value1_quat[component_i] < value2_quat[component_i];
     }
+    if constexpr (std::is_same_v<T, float4x4>) {
+      return value1.base_ptr()[component_i] < value2.base_ptr()[component_i];
+    }
     if constexpr (std::is_same_v<T, int2>) {
       for (int i = 0; i < 2; i++) {
         if (value1[i] != value2[i]) {
@@ -247,6 +250,10 @@ static bool values_different(const T value1,
     const float4 value1_f = float4(value1);
     const float4 value2_f = float4(value2);
     return compare_threshold_relative(value1_f[component_i], value2_f[component_i], threshold);
+  }
+  if constexpr (std::is_same_v<T, float4x4>) {
+    return compare_threshold_relative(
+        value1.base_ptr()[component_i], value2.base_ptr()[component_i], threshold);
   }
   BLI_assert_unreachable();
 }
@@ -488,10 +495,10 @@ static bool sort_faces_based_on_corners(const IndexMapping &corners,
  * test files to compare these layers. For now it has been decided to
  * skip them.
  */
-static bool ignored_attribute(const AttributeIDRef &id)
+static bool ignored_attribute(const StringRef id)
 {
-  return id.is_anonymous() || id.name().startswith(".vs.") || id.name().startswith(".es.") ||
-         id.name().startswith(".pn.");
+  return attribute_name_is_anonymous(id) || id.startswith(".vs.") || id.startswith(".es.") ||
+         id.startswith(".pn.");
 }
 
 /**
@@ -503,8 +510,8 @@ static bool ignored_attribute(const AttributeIDRef &id)
 static std::optional<MeshMismatch> verify_attributes_compatible(
     const AttributeAccessor &mesh1_attributes, const AttributeAccessor &mesh2_attributes)
 {
-  Set<AttributeIDRef> mesh1_attribute_ids = mesh1_attributes.all_ids();
-  Set<AttributeIDRef> mesh2_attribute_ids = mesh2_attributes.all_ids();
+  Set<StringRefNull> mesh1_attribute_ids = mesh1_attributes.all_ids();
+  Set<StringRefNull> mesh2_attribute_ids = mesh2_attributes.all_ids();
   mesh1_attribute_ids.remove_if(ignored_attribute);
   mesh2_attribute_ids.remove_if(ignored_attribute);
 
@@ -512,9 +519,13 @@ static std::optional<MeshMismatch> verify_attributes_compatible(
     /* Disabled for now due to tests not being up to date. */
     // return MeshMismatch::Attributes;
   }
-  for (const AttributeIDRef &id : mesh1_attribute_ids) {
+  for (const StringRef id : mesh1_attribute_ids) {
     GAttributeReader reader1 = mesh1_attributes.lookup(id);
     GAttributeReader reader2 = mesh2_attributes.lookup(id);
+    if (!reader1 || !reader2) {
+      /* Necessary because of previous disabled return. */
+      continue;
+    }
     if (reader1.domain != reader2.domain || reader1.varray.type() != reader2.varray.type()) {
       return MeshMismatch::AttributeTypes;
     }
@@ -537,13 +548,13 @@ static std::optional<MeshMismatch> sort_domain_using_attributes(
 {
 
   /* We only need the ids from one mesh, since we know they have the same attributes. */
-  Set<AttributeIDRef> attribute_ids = mesh1_attributes.all_ids();
+  Set<StringRefNull> attribute_ids = mesh1_attributes.all_ids();
   for (const StringRef name : excluded_attributes) {
-    attribute_ids.remove(name);
+    attribute_ids.remove_as(name);
   }
   attribute_ids.remove_if(ignored_attribute);
 
-  for (const AttributeIDRef &id : attribute_ids) {
+  for (const StringRef id : attribute_ids) {
     if (!mesh2_attributes.contains(id)) {
       /* Only needed right now since some test meshes don't have the same attributes. */
       return MeshMismatch::Attributes;
@@ -574,6 +585,9 @@ static std::optional<MeshMismatch> sort_domain_using_attributes(
       }
       else if constexpr (is_same_any_v<T, math::Quaternion, ColorGeometry4f>) {
         num_loops = 4;
+      }
+      else if constexpr (is_same_any_v<T, float4x4>) {
+        num_loops = 16;
       }
       for (const int component_i : IndexRange(num_loops)) {
         sort_per_set_based_on_attributes(

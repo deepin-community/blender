@@ -12,7 +12,7 @@ set(INC
   ../../makesrna
   ../../windowmanager
 
-  # RNA_prototypes.h
+  # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
 
@@ -40,8 +40,8 @@ set(SRC
   tracking_ops_utils.cc
   tracking_select.cc
 
-  clip_intern.h
-  tracking_ops_intern.h
+  clip_intern.hh
+  tracking_ops_intern.hh
 )
 
 set(LIB
@@ -53,8 +53,7 @@ set(LIB
   PRIVATE bf::intern::guardedalloc
 )
 
-
 blender_add_lib(bf_editor_space_clip "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 
-# RNA_prototypes.h
+# RNA_prototypes.hh
 add_dependencies(bf_editor_space_clip bf_rna)

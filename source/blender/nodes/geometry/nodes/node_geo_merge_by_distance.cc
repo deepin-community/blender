@@ -42,11 +42,10 @@ static void node_init(bNodeTree * /*tree*/, bNode *node)
   node->storage = data;
 }
 
-static PointCloud *pointcloud_merge_by_distance(
-    const PointCloud &src_points,
-    const float merge_distance,
-    const Field<bool> &selection_field,
-    const AnonymousAttributePropagationInfo &propagation_info)
+static PointCloud *pointcloud_merge_by_distance(const PointCloud &src_points,
+                                                const float merge_distance,
+                                                const Field<bool> &selection_field,
+                                                const AttributeFilter &attribute_filter)
 {
   const bke::PointCloudFieldContext context{src_points};
   FieldEvaluator evaluator{context, src_points.totpoint};
@@ -59,7 +58,7 @@ static PointCloud *pointcloud_merge_by_distance(
   }
 
   return geometry::point_merge_by_distance(
-      src_points, merge_distance, selection, propagation_info);
+      src_points, merge_distance, selection, attribute_filter);
 }
 
 static std::optional<Mesh *> mesh_merge_by_distance_connected(const Mesh &mesh,
@@ -105,7 +104,7 @@ static void node_geo_exec(GeoNodeExecParams params)
   geometry_set.modify_geometry_sets([&](GeometrySet &geometry_set) {
     if (const PointCloud *pointcloud = geometry_set.get_pointcloud()) {
       PointCloud *result = pointcloud_merge_by_distance(
-          *pointcloud, merge_distance, selection, params.get_output_propagation_info("Geometry"));
+          *pointcloud, merge_distance, selection, params.get_attribute_filter("Geometry"));
       if (result) {
         geometry_set.replace_pointcloud(result);
       }
@@ -158,18 +157,18 @@ static void node_rna(StructRNA *srna)
 
 static void node_register()
 {
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
 
   geo_node_type_base(&ntype, GEO_NODE_MERGE_BY_DISTANCE, "Merge by Distance", NODE_CLASS_GEOMETRY);
   ntype.initfunc = node_init;
-  node_type_storage(&ntype,
-                    "NodeGeometryMergeByDistance",
-                    node_free_standard_storage,
-                    node_copy_standard_storage);
+  blender::bke::node_type_storage(&ntype,
+                                  "NodeGeometryMergeByDistance",
+                                  node_free_standard_storage,
+                                  node_copy_standard_storage);
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
-  nodeRegisterType(&ntype);
+  blender::bke::node_register_type(&ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

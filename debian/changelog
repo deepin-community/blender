@@ -1,3 +1,80 @@
+blender (4.3.2+dfsg-2) unstable; urgency=medium
+
+  * debian/patches/: patchset updated
+    - 0006-fix_FTBFS_py313.patch added
+    - 0007-fix_FTBFS_on_riscv64.patch added (Closes: #1089574)
+
+ -- Matteo F. Vescovi <mfv@debian.org>  Sun, 02 Feb 2025 16:00:31 +0100
+
+blender (4.3.2+dfsg-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Matteo F. Vescovi <mfv@debian.org>  Sun, 05 Jan 2025 18:20:34 +0100
+
+blender (4.3.0+dfsg-1) unstable; urgency=medium
+
+  * New upstream release (Closes: #1081061)
+    - debian/control: missing b-deps added
+
+ -- Matteo F. Vescovi <mfv@debian.org>  Tue, 03 Dec 2024 20:28:05 +0100
+
+blender (4.2.3+dfsg-3) unstable; urgency=medium
+
+  [ Pino Toscano ]
+  * blender supports only 64bit since 2.90; thus simplify the packaging a bit:
+    - add the architecture-is-64-bit build dependency to avoid building on
+      32bit architectures
+    - stop using openvdb on i386
+    - drop hurd-i386 exclusions from libjemalloc-dev and libopencolorio-dev
+    - stop adding -g1 to the CXXFLAGS on mipsel
+    - stop forcing linking with atomic on armel m68k mipsel powerpc sh4
+    - stop enabling CUDA on armhf i386
+  * Drop removal of empty dirs in /usr/share/blender, as there are none
+  * Drop $(INSTDIR) variable in d/rules, as it is no more used now
+  * Drop dh_missing override, as it does the same as debhelper in compat 13
+
+ -- Matteo F. Vescovi <mfv@debian.org>  Mon, 28 Oct 2024 20:21:07 +0100
+
+blender (4.2.3+dfsg-2) unstable; urgency=medium
+
+  [ Pino Toscano ]
+  * Restrict the architectures for few Cycles renderers:
+    - enable the NVIDIA CUDA & OptiX support only on architectures supported
+      by the NVIDIA hardware: amd64 arm64 armhf i386 ppc64el
+    - enable the AMD HIP support only on amd64
+    - drop patch 0005-fix_FTBFS_s390x-riscv64.patch, no more needed now
+  * Drop unused/redundant cmake options:
+    - -DCMAKE_INSTALL_PREFIX & -DCMAKE_VERBOSE_MAKEFILE: already managed by
+      the cmake dh buildsystem
+    - -DFREETYPE_INCLUDE_DIRS: FreeType is automatically detected
+    - -DWITH_CPU_SSE, -DWITH_GAMEENGINE, -DWITH_PLAYER, -DWITH_SYSTEM_GLEW,
+      and -DWITH_SYSTEM_OPENJPEG: no more available, with apparently no
+      replacements
+
+ -- Matteo F. Vescovi <mfv@debian.org>  Fri, 25 Oct 2024 20:43:50 +0200
+
+blender (4.2.3+dfsg-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Matteo F. Vescovi <mfv@debian.org>  Thu, 24 Oct 2024 21:04:23 +0200
+
+blender (4.2.2+dfsg-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Matteo F. Vescovi <mfv@debian.org>  Sat, 28 Sep 2024 15:14:54 +0200
+
+blender (4.2.1+dfsg-1) unstable; urgency=medium
+
+  * New upstream release
+  * debian/patches/: patchset updated against v4.2.x
+    - 0006-fix_FTBFS_ffmpeg7.patch added (Closes: #1072402)
+  * debian/copyright: superfluous file patterns dropped
+
+ -- Matteo F. Vescovi <mfv@debian.org>  Sun, 08 Sep 2024 16:07:13 +0200
+
 blender (4.1.1+dfsg-3) unstable; urgency=medium
 
   * Upload to unstable

@@ -152,7 +152,7 @@ typedef struct Panel {
   /** Runtime for drawing. */
   struct uiLayout *layout;
 
-  /** Defined as UI_MAX_NAME_STR. */
+  /** Defined as #BKE_ST_MAXNAME. */
   char panelname[64];
   /** Panel name is identifier for restoring location. */
   char *drawname;
@@ -275,7 +275,7 @@ typedef struct uiListDyn {
   void *customdata;
 
   /* Filtering data. */
-  /** This bitfield is effectively exposed in Python, and scripts are explicitly allowed to assign
+  /** This bit-field is effectively exposed in Python, and scripts are explicitly allowed to assign
    * any own meaning to the lower 16 ones.
    * #items_len length. */
   int *items_filter_flags;
@@ -331,11 +331,21 @@ typedef struct TransformOrientation {
 typedef struct uiPreview {
   struct uiPreview *next, *prev;
 
-  /** Defined as #UI_MAX_NAME_STR. */
+  /** Defined as #BKE_ST_MAXNAME. */
   char preview_id[64];
   short height;
-  char _pad1[6];
+
+  /* Unset on file read. */
+  short tag; /* #uiPreviewTag */
+
+  /** #ID.session_uid of the ID this preview is made for. Unset on file read. */
+  unsigned int id_session_uid;
 } uiPreview;
+
+typedef enum uiPreviewTag {
+  /** Preview needs re-rendering, handled in #ED_preview_draw(). */
+  UI_PREVIEW_TAG_DIRTY = (1 << 0),
+} uiPreviewTag;
 
 typedef struct ScrGlobalAreaData {
   /**
@@ -456,6 +466,9 @@ typedef struct ARegion_Runtime {
 
   /** Maps #uiBlock::name to uiBlock for faster lookups. */
   struct GHash *block_name_map;
+
+  /* Dummy panel used in popups so they can support layout panels. */
+  Panel *popup_block_panel;
 } ARegion_Runtime;
 
 typedef struct ARegion {
@@ -796,7 +809,7 @@ typedef struct AssetShelfSettings {
 
   AssetLibraryReference asset_library_reference;
 
-  ListBase enabled_catalog_paths; /* #LinkData */
+  ListBase enabled_catalog_paths; /* #AssetCatalogPathLink */
   /** If not set (null or empty string), all assets will be displayed ("All" catalog behavior). */
   const char *active_catalog_path;
 
@@ -830,8 +843,10 @@ typedef struct AssetShelf {
 
   AssetShelfSettings settings;
 
+  /** Only for the permanent asset shelf regions, not asset shelves in temporary popups. */
   short preferred_row_count;
-  char _pad[6];
+  short instance_flag;
+  char _pad[4];
 } AssetShelf;
 
 /**
@@ -852,6 +867,8 @@ typedef struct RegionAssetShelf {
   AssetShelf *active_shelf; /* Non-owning. */
 #ifdef __cplusplus
   static RegionAssetShelf *get_from_asset_shelf_region(const ARegion &region);
+  /** Creates the asset shelf region data if necessary, and returns it. */
+  static RegionAssetShelf *ensure_from_asset_shelf_region(ARegion &region);
 #endif
 } RegionAssetShelf;
 
@@ -860,6 +877,17 @@ typedef enum AssetShelfSettings_DisplayFlag {
   ASSETSHELF_SHOW_NAMES = (1 << 0),
 } AssetShelfSettings_DisplayFlag;
 ENUM_OPERATORS(AssetShelfSettings_DisplayFlag, ASSETSHELF_SHOW_NAMES);
+
+/* #AssetShelfSettings.instance_flag */
+typedef enum AssetShelf_InstanceFlag {
+  /**
+   * Remember the last known region visibility state or this shelf, so it can be restored if the
+   * shelf is reactivated. Practically this makes the shelf visibility be remembered per mode.
+   * Continuously updated for the visible region.
+   */
+  ASSETSHELF_REGION_IS_HIDDEN = (1 << 0),
+} AssetShelf_InstanceFlag;
+ENUM_OPERATORS(AssetShelf_InstanceFlag, ASSETSHELF_REGION_IS_HIDDEN);
 
 typedef struct FileHandler {
   DNA_DEFINE_CXX_METHODS(FileHandler)

@@ -53,6 +53,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--use-linux-libraries", action="store_true")
     parser.add_argument("--architecture", type=str,
                         choices=("x86_64", "amd64", "arm64",))
+    parser.add_argument("--prune-destructive", action="store_true",
+                        help="Destructive! Detect and remove stale files from older checkouts")
     return parser.parse_args()
 
 
@@ -106,6 +108,8 @@ def get_effective_architecture(args: argparse.Namespace) -> str:
     # Normalize the architecture name.
     if architecture in {"x86_64", "amd64"}:
         architecture = "x64"
+    if architecture == "aarch64":
+        architecture = "arm64"
 
     assert (architecture in {"x64", "arm64"})
 
@@ -133,6 +137,33 @@ def ensure_git_lfs(args: argparse.Namespace) -> None:
     # Use `--skip-repo` to avoid creating git hooks.
     # This is called from the `blender.git` checkout, so we don't need to install hooks there.
     call((args.git_command, "lfs", "install", "--skip-repo"), exit_on_error=True)
+
+
+def prune_stale_files() -> None:
+    """
+    Ensure files from previous Git configurations do not exist anymore
+    """
+    print_stage("Removing stale files")
+
+    blender_git_root = get_blender_git_root()
+    found_stale_files = False
+
+    for relative_dir_to_remove in (
+        Path("scripts") / "addons",
+        Path("scripts") / "addons_contrib",
+    ):
+        dir_to_remove = blender_git_root / relative_dir_to_remove
+        if not dir_to_remove.exists():
+            continue
+        if not dir_to_remove.is_dir():
+            print(f"'{relative_dir_to_remove}' exists but is not a directory")
+            continue
+        print(f"Removing '{relative_dir_to_remove}'")
+        make_utils.remove_directory(dir_to_remove)
+        found_stale_files = True
+
+    if not found_stale_files:
+        print("Checkout looks pristine")
 
 
 def initialize_precompiled_libraries(args: argparse.Namespace) -> str:
@@ -393,7 +424,7 @@ def floating_checkout_add_origin_if_needed(
         upstream_url = make_utils.git_get_remote_url(args.git_command, "upstream")
 
         call((args.git_command, "remote", "rename", "upstream", "origin"))
-        make_utils.git_set_config(args.git_command, f"remote.origin.url", origin_external_url)
+        make_utils.git_set_config(args.git_command, "remote.origin.url", origin_external_url)
 
         call((args.git_command, "remote", "add", "upstream", upstream_url))
     finally:
@@ -576,27 +607,6 @@ def submodules_lib_update(args: argparse.Namespace, branch: Optional[str]) -> st
     return msg
 
 
-def scripts_submodules_update(args: argparse.Namespace, branch: Optional[str]) -> str:
-    """Update working trees of addons and addons_contrib within the scripts/ directory"""
-    msg = ""
-
-    msg += external_scripts_update(args, "blender-addons", "addons", branch)
-    msg += external_scripts_update(args, "blender-addons-contrib", "addons_contrib", branch)
-
-    return msg
-
-
-def submodules_code_update(args: argparse.Namespace, branch: Optional[str]) -> str:
-    """Update submodules or other externally tracked source trees"""
-    print_stage("Updating Submodules")
-
-    msg = ""
-
-    msg += scripts_submodules_update(args, branch)
-
-    return msg
-
-
 if __name__ == "__main__":
     args = parse_arguments()
     blender_skip_msg = ""
@@ -614,6 +624,9 @@ if __name__ == "__main__":
     # Submodules and precompiled libraries require Git LFS.
     ensure_git_lfs(args)
 
+    if args.prune_destructive:
+        prune_stale_files()
+
     if not args.no_blender:
         blender_skip_msg = git_update_skip(args)
         if not blender_skip_msg:
@@ -626,9 +639,6 @@ if __name__ == "__main__":
         if args.use_tests:
             libraries_skip_msg += initialize_tests_data_files(args)
         libraries_skip_msg += submodules_lib_update(args, branch)
-
-    if not args.no_submodules:
-        submodules_skip_msg += submodules_code_update(args, branch)
 
     # Report any skipped repositories at the end, so it's not as easy to miss.
     skip_msg = blender_skip_msg + libraries_skip_msg + submodules_skip_msg

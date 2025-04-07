@@ -17,10 +17,19 @@
 #include "internal/topology/mesh_topology.h"
 #include "opensubdiv_topology_refiner_capi.hh"
 
+// Those settings don't really belong to OpenSubdiv's topology refiner, but
+// we are keeping track of them on our side of topology refiner. This is to
+// make it possible to ensure we are not trying to abuse same OpenSubdiv's
+// topology refiner with different subdivision levels or with different
+// adaptive settings.
+struct OpenSubdiv_TopologyRefinerSettings {
+  bool is_adaptive;
+  int level;
+};
+
 struct OpenSubdiv_Converter;
 
-namespace blender {
-namespace opensubdiv {
+namespace blender::opensubdiv {
 
 class TopologyRefinerImpl {
  public:
@@ -31,6 +40,11 @@ class TopologyRefinerImpl {
 
   TopologyRefinerImpl();
   ~TopologyRefinerImpl();
+
+  const OpenSubdiv::Far::TopologyLevel &base_level() const
+  {
+    return topology_refiner->GetLevel(0);
+  }
 
   // Check whether this topology refiner defines same topology as the given
   // converter.
@@ -61,9 +75,6 @@ class TopologyRefinerImpl {
   MEM_CXX_CLASS_ALLOC_FUNCS("TopologyRefinerImpl");
 };
 
-}  // namespace opensubdiv
-}  // namespace blender
-
-struct OpenSubdiv_TopologyRefinerImpl : public blender::opensubdiv::TopologyRefinerImpl {};
+}  // namespace blender::opensubdiv
 
 #endif  // OPENSUBDIV_TOPOLOGY_REFINER_IMPL_H_

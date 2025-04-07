@@ -190,12 +190,14 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
                              ccl_global const int *path_index_array,
                              const int work_size)
 {
+#  ifdef __VOLUME__
   const int global_index = ccl_gpu_global_id_x();
 
   if (ccl_gpu_kernel_within_bounds(global_index, work_size)) {
     const int state = (path_index_array) ? path_index_array[global_index] : global_index;
     ccl_gpu_kernel_call(integrator_intersect_volume_stack(NULL, state));
   }
+#  endif
 }
 ccl_gpu_kernel_postfix
 
@@ -503,7 +505,10 @@ ccl_gpu_kernel_threads(GPU_PARALLEL_SORT_BLOCK_SIZE)
   int metal_local_id = ccl_gpu_thread_idx_x;
   int metal_local_size = ccl_gpu_block_dim_x;
   int metal_grid_id = ccl_gpu_block_idx_x;
-  ccl_gpu_shared int *threadgroup_array = local_mem.get_pointer();
+  /* There is no difference here between different access decorations, as we are requesting
+   * a raw pointer immediately, so the simplest decoration option is used (no decoration). */
+  ccl_gpu_shared int *threadgroup_array =
+      local_mem.get_multi_ptr<sycl::access::decorated::no>().get();
 #  endif
 
   gpu_parallel_sort_bucket_pass(num_states,
@@ -561,7 +566,10 @@ ccl_gpu_kernel_threads(GPU_PARALLEL_SORT_BLOCK_SIZE)
   int metal_local_id = ccl_gpu_thread_idx_x;
   int metal_local_size = ccl_gpu_block_dim_x;
   int metal_grid_id = ccl_gpu_block_idx_x;
-  ccl_gpu_shared int *threadgroup_array = local_mem.get_pointer();
+  /* There is no difference here between different access decorations, as we are requesting
+   * a raw pointer immediately, so the simplest decoration option is used (no decoration). */
+  ccl_gpu_shared int *threadgroup_array =
+      local_mem.get_multi_ptr<sycl::access::decorated::no>().get();
 #  endif
 
   gpu_parallel_sort_write_pass(num_states,

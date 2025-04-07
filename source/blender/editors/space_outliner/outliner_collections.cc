@@ -15,13 +15,12 @@
 #include "DNA_collection_types.h"
 #include "DNA_object_types.h"
 
-#include "BKE_collection.h"
+#include "BKE_collection.hh"
 #include "BKE_context.hh"
-#include "BKE_idtype.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
-#include "BKE_report.h"
+#include "BKE_report.hh"
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_build.hh"
@@ -178,7 +177,7 @@ static bool collection_edit_in_active_scene_poll(bContext *C)
     return false;
   }
   Scene *scene = CTX_data_scene(C);
-  if (ID_IS_LINKED(scene) || ID_IS_OVERRIDE_LIBRARY(scene)) {
+  if (!ID_IS_EDITABLE(scene) || ID_IS_OVERRIDE_LIBRARY(scene)) {
     return false;
   }
   return true;
@@ -250,20 +249,20 @@ static int collection_new_exec(bContext *C, wmOperator *op)
     }
   }
 
-  if (data.collection == nullptr || ID_IS_LINKED(data.collection) ||
+  if (data.collection == nullptr || !ID_IS_EDITABLE(data.collection) ||
       ID_IS_OVERRIDE_LIBRARY(data.collection))
   {
     data.collection = scene->master_collection;
   }
 
-  if (ID_IS_LINKED(scene) || ID_IS_OVERRIDE_LIBRARY(scene)) {
+  if (!ID_IS_EDITABLE(scene) || ID_IS_OVERRIDE_LIBRARY(scene)) {
     BKE_report(op->reports, RPT_ERROR, "Can't add a new collection to linked/override scene");
     return OPERATOR_CANCELLED;
   }
 
   BKE_collection_add(bmain, data.collection, nullptr);
 
-  DEG_id_tag_update(&data.collection->id, ID_RECALC_COPY_ON_WRITE);
+  DEG_id_tag_update(&data.collection->id, ID_RECALC_SYNC_TO_EVAL);
   DEG_relations_tag_update(bmain);
 
   outliner_cleanup_tree(space_outliner);
@@ -307,6 +306,9 @@ struct CollectionEditData {
   /* Whether the processed operation should be allowed on hierarchy roots of liboverride
    * collections, or not. */
   bool is_liboverride_hierarchy_root_allowed;
+  /* When true, do not skip the hierarchy of children when a parent collection is selected. This is
+   * useful for deleting selected child collections, see: #126860. */
+  bool is_recursive = false;
 };
 
 static TreeTraversalAction collection_collect_data_to_edit(TreeElement *te, void *customdata)
@@ -340,7 +342,7 @@ static TreeTraversalAction collection_collect_data_to_edit(TreeElement *te, void
   /* Delete, duplicate and link don't edit children, those will come along
    * with the parents. */
   BLI_gset_add(data->collections_to_edit, collection);
-  return TRAVERSE_SKIP_CHILDS;
+  return data->is_recursive ? TRAVERSE_CONTINUE : TRAVERSE_SKIP_CHILDS;
 }
 
 void outliner_collection_delete(
@@ -353,6 +355,7 @@ void outliner_collection_delete(
   data.space_outliner = space_outliner;
   data.is_liboverride_allowed = false;
   data.is_liboverride_hierarchy_root_allowed = do_hierarchy;
+  data.is_recursive = !do_hierarchy;
 
   data.collections_to_edit = BLI_gset_ptr_new(__func__);
 
@@ -376,24 +379,24 @@ void outliner_collection_delete(
       /* We cannot allow deleting collections that are indirectly linked,
        * or that are used by (linked to...) other linked scene/collection. */
       bool skip = false;
-      if (ID_IS_LINKED(collection)) {
-        if (collection->id.tag & LIB_TAG_INDIRECT) {
+      if (!ID_IS_EDITABLE(collection)) {
+        if (collection->id.tag & ID_TAG_INDIRECT) {
           skip = true;
         }
         else {
           LISTBASE_FOREACH (CollectionParent *, cparent, &collection->runtime.parents) {
             Collection *parent = cparent->collection;
-            if (ID_IS_LINKED(parent) || ID_IS_OVERRIDE_LIBRARY(parent)) {
+            if (!ID_IS_EDITABLE(parent) || ID_IS_OVERRIDE_LIBRARY(parent)) {
               skip = true;
               break;
             }
             if (parent->flag & COLLECTION_IS_MASTER) {
-              BLI_assert(parent->id.flag & LIB_EMBEDDED_DATA);
+              BLI_assert(parent->id.flag & ID_FLAG_EMBEDDED_DATA);
 
               ID *scene_owner = BKE_id_owner_get(&parent->id);
               BLI_assert(scene_owner != nullptr);
               BLI_assert(GS(scene_owner->name) == ID_SCE);
-              if (ID_IS_LINKED(scene_owner) || ID_IS_OVERRIDE_LIBRARY(scene_owner)) {
+              if (!ID_IS_EDITABLE(scene_owner) || ID_IS_OVERRIDE_LIBRARY(scene_owner)) {
                 skip = true;
                 break;
               }
@@ -429,7 +432,7 @@ static int collection_hierarchy_delete_exec(bContext *C, wmOperator *op)
 
   outliner_collection_delete(C, bmain, scene, op->reports, true);
 
-  DEG_id_tag_update(&scene->id, ID_RECALC_COPY_ON_WRITE);
+  DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
   DEG_relations_tag_update(bmain);
 
   WM_main_add_notifier(NC_SCENE | ND_LAYER, nullptr);
@@ -626,25 +629,26 @@ static int collection_duplicate_exec(bContext *C, wmOperator *op)
 
   Collection *collection = outliner_collection_from_tree_element(te);
   Collection *parent = (te->parent) ? outliner_collection_from_tree_element(te->parent) : nullptr;
+  CollectionChild *child = BKE_collection_child_find(parent, collection);
 
   /* We are allowed to duplicated linked collections (they will become local IDs then),
    * but we should not allow its parent to be a linked ID, ever.
    * This can happen when a whole scene is linked e.g. */
-  if (parent != nullptr && (ID_IS_LINKED(parent) || ID_IS_OVERRIDE_LIBRARY(parent))) {
+  if (parent != nullptr && (!ID_IS_EDITABLE(parent) || ID_IS_OVERRIDE_LIBRARY(parent))) {
     Scene *scene = CTX_data_scene(C);
-    parent = (ID_IS_LINKED(scene) || ID_IS_OVERRIDE_LIBRARY(scene)) ? nullptr :
-                                                                      scene->master_collection;
+    parent = (!ID_IS_EDITABLE(scene) || ID_IS_OVERRIDE_LIBRARY(scene)) ? nullptr :
+                                                                         scene->master_collection;
   }
   else if (parent != nullptr && (parent->flag & COLLECTION_IS_MASTER) != 0) {
-    BLI_assert(parent->id.flag & LIB_EMBEDDED_DATA);
+    BLI_assert(parent->id.flag & ID_FLAG_EMBEDDED_DATA);
 
     Scene *scene_owner = reinterpret_cast<Scene *>(BKE_id_owner_get(&parent->id));
     BLI_assert(scene_owner != nullptr);
     BLI_assert(GS(scene_owner->id.name) == ID_SCE);
 
-    if (ID_IS_LINKED(scene_owner) || ID_IS_OVERRIDE_LIBRARY(scene_owner)) {
+    if (!ID_IS_EDITABLE(scene_owner) || ID_IS_OVERRIDE_LIBRARY(scene_owner)) {
       scene_owner = CTX_data_scene(C);
-      parent = (ID_IS_LINKED(scene_owner) || ID_IS_OVERRIDE_LIBRARY(scene_owner)) ?
+      parent = (!ID_IS_EDITABLE(scene_owner) || ID_IS_OVERRIDE_LIBRARY(scene_owner)) ?
                    nullptr :
                    scene_owner->master_collection;
     }
@@ -664,7 +668,8 @@ static int collection_duplicate_exec(bContext *C, wmOperator *op)
 
   const eDupli_ID_Flags dupli_flags = (eDupli_ID_Flags)(USER_DUP_OBJECT |
                                                         (linked ? 0 : U.dupflag));
-  BKE_collection_duplicate(bmain, parent, collection, dupli_flags, LIB_ID_DUPLICATE_IS_ROOT_ID);
+  BKE_collection_duplicate(
+      bmain, parent, child, collection, dupli_flags, LIB_ID_DUPLICATE_IS_ROOT_ID);
 
   DEG_relations_tag_update(bmain);
   WM_main_add_notifier(NC_SCENE | ND_LAYER, CTX_data_scene(C));
@@ -725,9 +730,9 @@ static int collection_link_exec(bContext *C, wmOperator *op)
   data.is_liboverride_allowed = false; /* No linking of non-root collections. */
   data.is_liboverride_hierarchy_root_allowed = true;
 
-  if ((ID_IS_LINKED(active_collection) || ID_IS_OVERRIDE_LIBRARY(active_collection)) ||
+  if ((!ID_IS_EDITABLE(active_collection) || ID_IS_OVERRIDE_LIBRARY(active_collection)) ||
       ((active_collection->flag & COLLECTION_IS_MASTER) &&
-       (ID_IS_LINKED(scene) || ID_IS_OVERRIDE_LIBRARY(scene))))
+       (!ID_IS_EDITABLE(scene) || ID_IS_OVERRIDE_LIBRARY(scene))))
   {
     BKE_report(
         op->reports, RPT_ERROR, "Cannot add a collection to a linked/override collection/scene");
@@ -755,7 +760,7 @@ static int collection_link_exec(bContext *C, wmOperator *op)
 
   BLI_gset_free(data.collections_to_edit, nullptr);
 
-  DEG_id_tag_update(&active_collection->id, ID_RECALC_COPY_ON_WRITE);
+  DEG_id_tag_update(&active_collection->id, ID_RECALC_SYNC_TO_EVAL);
   DEG_relations_tag_update(bmain);
 
   WM_main_add_notifier(NC_SCENE | ND_LAYER, nullptr);
@@ -793,7 +798,7 @@ static int collection_instance_exec(bContext *C, wmOperator * /*op*/)
   CollectionEditData data{};
   data.scene = scene;
   data.space_outliner = space_outliner;
-  data.is_liboverride_allowed = false; /* No instancing of non-root collections. */
+  data.is_liboverride_allowed = true;
   data.is_liboverride_hierarchy_root_allowed = true;
 
   data.collections_to_edit = BLI_gset_ptr_new(__func__);
@@ -824,7 +829,7 @@ static int collection_instance_exec(bContext *C, wmOperator * /*op*/)
   GSET_ITER (collections_to_edit_iter, data.collections_to_edit) {
     Collection *collection = static_cast<Collection *>(
         BLI_gsetIterator_getKey(&collections_to_edit_iter));
-    Object *ob = ED_object_add_type(
+    Object *ob = object::add_type(
         C, OB_EMPTY, collection->id.name + 2, scene->cursor.location, nullptr, false, 0);
     ob->instance_collection = collection;
     ob->transflag |= OB_DUPLICOLLECTION;

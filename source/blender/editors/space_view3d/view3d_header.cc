@@ -14,10 +14,7 @@
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_math_base.h"
 #include "BLI_utildefines.h"
-
-#include "BLT_translation.h"
 
 #include "BKE_context.hh"
 #include "BKE_editmesh.hh"
@@ -27,18 +24,15 @@
 #include "DEG_depsgraph.hh"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
 
-#include "ED_mesh.hh"
-#include "ED_undo.hh"
-
 #include "UI_interface.hh"
 #include "UI_resources.hh"
 
-#include "view3d_intern.h"
+#include "view3d_intern.hh"
 
 /* -------------------------------------------------------------------- */
 /** \name Toggle Matcap Flip Operator
@@ -56,7 +50,7 @@ static int toggle_matcap_flip_exec(bContext *C, wmOperator * /*op*/)
   else {
     Scene *scene = CTX_data_scene(C);
     scene->display.shading.flag ^= V3D_SHADING_MATCAP_FLIP_X;
-    DEG_id_tag_update(&scene->id, ID_RECALC_COPY_ON_WRITE);
+    DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
     WM_event_add_notifier(C, NC_SCENE | ND_RENDER_OPTIONS, scene);
   }
 
@@ -156,14 +150,12 @@ void uiTemplateHeader3D_mode(uiLayout *layout, bContext *C)
   BKE_view_layer_synced_ensure(scene, view_layer);
   Object *ob = BKE_view_layer_active_object_get(view_layer);
   Object *obedit = CTX_data_edit_object(C);
-  bGPdata *gpd = CTX_data_gpencil_data(C);
 
-  bool is_paint = (ob && !(gpd && (gpd->flag & GP_DATA_STROKE_EDITMODE)) &&
-                   ELEM(ob->mode,
-                        OB_MODE_SCULPT,
-                        OB_MODE_VERTEX_PAINT,
-                        OB_MODE_WEIGHT_PAINT,
-                        OB_MODE_TEXTURE_PAINT));
+  bool is_paint = (ob && ELEM(ob->mode,
+                              OB_MODE_SCULPT,
+                              OB_MODE_VERTEX_PAINT,
+                              OB_MODE_WEIGHT_PAINT,
+                              OB_MODE_TEXTURE_PAINT));
 
   uiTemplateEditModeSelection(layout, C);
   if ((obedit == nullptr) && is_paint) {

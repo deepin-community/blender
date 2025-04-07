@@ -45,29 +45,33 @@ static void node_declare(NodeDeclarationBuilder &b)
           "curves data-block");
 }
 
-class ControlPointNeighborFieldInput final : public bke::CurvesFieldInput {
+class ControlPointNeighborFieldInput final : public bke::GeometryFieldInput {
  private:
   const Field<int> index_;
   const Field<int> offset_;
 
  public:
   ControlPointNeighborFieldInput(Field<int> index, Field<int> offset)
-      : CurvesFieldInput(CPPType::get<int>(), "Offset Point in Curve"),
+      : GeometryFieldInput(CPPType::get<int>(), "Offset Point in Curve"),
         index_(std::move(index)),
         offset_(std::move(offset))
   {
     category_ = Category::Generated;
   }
 
-  GVArray get_varray_for_context(const bke::CurvesGeometry &curves,
-                                 const AttrDomain domain,
+  GVArray get_varray_for_context(const bke::GeometryFieldContext &context,
                                  const IndexMask &mask) const final
   {
+    const bke::CurvesGeometry *curves_ptr = context.curves_or_strokes();
+    if (!curves_ptr) {
+      return {};
+    }
+    const bke::CurvesGeometry &curves = *curves_ptr;
+
     const OffsetIndices points_by_curve = curves.points_by_curve();
     const VArray<bool> cyclic = curves.cyclic();
     const Array<int> parent_curves = curves.point_to_curve_map();
 
-    const bke::CurvesFieldContext context{curves, domain};
     fn::FieldEvaluator evaluator{context, &mask};
     evaluator.add(index_);
     evaluator.add(offset_);
@@ -80,7 +84,7 @@ class ControlPointNeighborFieldInput final : public bke::CurvesFieldInput {
       const int i_point = std::clamp(indices[i_selection], 0, curves.points_num() - 1);
       const int i_curve = parent_curves[i_point];
       const IndexRange curve_points = points_by_curve[i_curve];
-      const int offset_point = i_point + offsets[i_point];
+      const int offset_point = i_point + offsets[i_selection];
 
       if (cyclic[i_curve]) {
         output[i_selection] = apply_offset_in_cyclic_range(
@@ -100,29 +104,33 @@ class ControlPointNeighborFieldInput final : public bke::CurvesFieldInput {
   }
 };
 
-class OffsetValidFieldInput final : public bke::CurvesFieldInput {
+class OffsetValidFieldInput final : public bke::GeometryFieldInput {
  private:
   const Field<int> index_;
   const Field<int> offset_;
 
  public:
   OffsetValidFieldInput(Field<int> index, Field<int> offset)
-      : CurvesFieldInput(CPPType::get<bool>(), "Offset Valid"),
+      : GeometryFieldInput(CPPType::get<bool>(), "Offset Valid"),
         index_(std::move(index)),
         offset_(std::move(offset))
   {
     category_ = Category::Generated;
   }
 
-  GVArray get_varray_for_context(const bke::CurvesGeometry &curves,
-                                 const AttrDomain domain,
+  GVArray get_varray_for_context(const bke::GeometryFieldContext &context,
                                  const IndexMask &mask) const final
   {
+    const bke::CurvesGeometry *curves_ptr = context.curves_or_strokes();
+    if (!curves_ptr) {
+      return {};
+    }
+    const bke::CurvesGeometry &curves = *curves_ptr;
+
     const VArray<bool> cyclic = curves.cyclic();
     const OffsetIndices points_by_curve = curves.points_by_curve();
     const Array<int> parent_curves = curves.point_to_curve_map();
 
-    const bke::CurvesFieldContext context{curves, domain};
     fn::FieldEvaluator evaluator{context, &mask};
     evaluator.add(index_);
     evaluator.add(offset_);
@@ -173,12 +181,12 @@ static void node_geo_exec(GeoNodeExecParams params)
 
 static void node_register()
 {
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
   geo_node_type_base(
       &ntype, GEO_NODE_OFFSET_POINT_IN_CURVE, "Offset Point in Curve", NODE_CLASS_INPUT);
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  nodeRegisterType(&ntype);
+  blender::bke::node_register_type(&ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

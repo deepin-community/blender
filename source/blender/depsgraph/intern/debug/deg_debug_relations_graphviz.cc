@@ -94,7 +94,7 @@ static const int deg_debug_node_type_color_map[][2] = {
     {NodeType::CACHE, 9},
     {NodeType::POINT_CACHE, 10},
     {NodeType::LAYER_COLLECTIONS, 11},
-    {NodeType::COPY_ON_WRITE, 12},
+    {NodeType::COPY_ON_EVAL, 12},
     {-1, 0},
 };
 #endif
@@ -290,8 +290,10 @@ static void deg_debug_graphviz_relation_arrowhead(const Relation *rel, dot::Dire
   {
     OperationNode *op_from = (OperationNode *)rel->from;
     OperationNode *op_to = (OperationNode *)rel->to;
-    if (op_from->owner->type == NodeType::COPY_ON_WRITE &&
-        !op_to->owner->need_tag_cow_before_update())
+    if (op_from->owner->type == NodeType::COPY_ON_EVAL &&
+        /* The #ID::recalc flag depends on run-time state which is not valid at this point in time.
+         * Pass in all flags although there may be a better way to represent this. */
+        !op_to->owner->need_tag_cow_before_update(ID_RECALC_ALL))
     {
       shape = shape_no_cow;
     }
@@ -403,7 +405,7 @@ static void deg_debug_graphviz_node(DotExportContext &ctx,
     case NodeType::LAYER_COLLECTIONS:
     case NodeType::PARTICLE_SYSTEM:
     case NodeType::PARTICLE_SETTINGS:
-    case NodeType::COPY_ON_WRITE:
+    case NodeType::COPY_ON_EVAL:
     case NodeType::OBJECT_FROM_LAYER:
     case NodeType::HIERARCHY:
     case NodeType::BATCH_CACHE:
@@ -457,7 +459,7 @@ static void deg_debug_graphviz_node_relations(DotExportContext &ctx, const Node 
     deg_debug_graphviz_relation_arrowhead(rel, edge);
     edge.attributes.set("penwidth", penwidth);
 
-    /* NOTE: edge from node to own cluster is not possible and gives graphviz
+    /* NOTE: edge from node to our own cluster is not possible and gives graphviz
      * warning, avoid this here by just linking directly to the invisible
      * placeholder node. */
     dot::Cluster *tail_cluster = ctx.clusters_map.lookup_default(tail, nullptr);
@@ -500,13 +502,9 @@ static void deg_debug_graphviz_graph_relations(DotExportContext &ctx, const Deps
 
 }  // namespace blender::deg
 
-void DEG_debug_relations_graphviz(const Depsgraph *graph, FILE *fp, const char *label)
+std::string DEG_debug_graph_to_dot(const Depsgraph &graph, const blender::StringRef label)
 {
-  if (!graph) {
-    return;
-  }
-
-  const deg::Depsgraph *deg_graph = reinterpret_cast<const deg::Depsgraph *>(graph);
+  const deg::Depsgraph &deg_graph = reinterpret_cast<const deg::Depsgraph &>(graph);
 
   dot::DirectedGraph digraph;
   deg::DotExportContext ctx{false, digraph};
@@ -520,11 +518,10 @@ void DEG_debug_relations_graphviz(const Depsgraph *graph, FILE *fp, const char *
   digraph.attributes.set("splines", "ortho");
   digraph.attributes.set("overlap", "scalexy");
 
-  deg::deg_debug_graphviz_graph_nodes(ctx, deg_graph);
-  deg::deg_debug_graphviz_graph_relations(ctx, deg_graph);
+  deg::deg_debug_graphviz_graph_nodes(ctx, &deg_graph);
+  deg::deg_debug_graphviz_graph_relations(ctx, &deg_graph);
 
   deg::deg_debug_graphviz_legend(ctx);
 
-  std::string dot_string = digraph.to_dot_string();
-  fprintf(fp, "%s", dot_string.c_str());
+  return digraph.to_dot_string();
 }

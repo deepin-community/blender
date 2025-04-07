@@ -15,7 +15,7 @@
 
 #include "BLI_utildefines.h" /* for BLI_assert */
 
-#include "BKE_ccg.h"
+#include "BKE_ccg.hh"
 #include "BKE_subsurf.hh"
 #include "CCGSubSurf.h"
 #include "CCGSubSurf_intern.h"
@@ -1516,7 +1516,7 @@ void ccgFaceIterator_next(CCGFaceIterator *fi)
   ccg_ehashIterator_next((EHashIterator *)fi);
 }
 
-/*** Extern API final vert/edge/face interface ***/
+/*** External API final vert/edge/face interface. ***/
 
 int ccgSubSurf_getNumFinalVerts(const CCGSubSurf *ss)
 {

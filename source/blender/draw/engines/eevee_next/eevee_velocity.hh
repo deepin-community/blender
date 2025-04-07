@@ -34,7 +34,7 @@ class VelocityModule {
   };
   struct VelocityGeometryData {
     /** VertBuf not yet ready to be copied to the #VelocityGeometryBuf. */
-    GPUVertBuf *pos_buf = nullptr;
+    gpu::VertBuf *pos_buf = nullptr;
     /* Offset in the #VelocityGeometryBuf to the start of the data. In vertex. */
     int ofs = 0;
     /* Length of the vertex buffer. In vertex. */
@@ -112,10 +112,14 @@ class VelocityModule {
                         ModifierData *modifier_data = nullptr,
                         ParticleSystem *particle_sys = nullptr);
 
-  /* Moves next frame data to previous frame data. Nullify next frame data. */
+  /**
+   * In Render, moves the next frame data to previous frame data. Nullify next frame data.
+   * In Viewport, the current frame data will be used as previous frame data in the next frame.
+   */
   void step_swap();
 
   void begin_sync();
+  /** This is the end of the current frame sync. Not the step_sync. */
   void end_sync();
 
   void bind_resources(DRWShadingGroup *grp);

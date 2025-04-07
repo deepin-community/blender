@@ -12,8 +12,8 @@
 
 #include "GHOST_C-api.h"
 
-#include "GPU_context.h"
-#include "GPU_init_exit.h"
+#include "GPU_context.hh"
+#include "GPU_init_exit.hh"
 #include "gpu_shader_create_info_private.hh"
 
 #include "BLI_string_ref.hh"
@@ -46,6 +46,7 @@ void ShaderBuilder::init_system()
 {
   CLG_init();
   ghost_system_ = GHOST_CreateSystemBackground();
+  GPU_backend_ghost_system_set(ghost_system_);
 }
 
 bool ShaderBuilder::init_context()

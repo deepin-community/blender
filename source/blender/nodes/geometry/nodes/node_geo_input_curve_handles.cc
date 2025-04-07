@@ -20,21 +20,27 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Vector>("Right").field_source_reference_all();
 }
 
-class HandlePositionFieldInput final : public bke::CurvesFieldInput {
+class HandlePositionFieldInput final : public bke::GeometryFieldInput {
   Field<bool> relative_;
   bool left_;
 
  public:
   HandlePositionFieldInput(Field<bool> relative, bool left)
-      : bke::CurvesFieldInput(CPPType::get<float3>(), "Handle"), relative_(relative), left_(left)
+      : bke::GeometryFieldInput(CPPType::get<float3>(), "Handle"), relative_(relative), left_(left)
   {
   }
 
-  GVArray get_varray_for_context(const bke::CurvesGeometry &curves,
-                                 const AttrDomain domain,
+  GVArray get_varray_for_context(const bke::GeometryFieldContext &context,
                                  const IndexMask &mask) const final
   {
-    const bke::CurvesFieldContext field_context{curves, AttrDomain::Point};
+    const bke::CurvesGeometry *curves_ptr = context.curves_or_strokes();
+    if (!curves_ptr) {
+      return {};
+    }
+    const bke::CurvesGeometry &curves = *curves_ptr;
+    const bke::AttrDomain domain = context.domain();
+
+    const bke::GeometryFieldContext field_context{context, AttrDomain::Point};
     fn::FieldEvaluator evaluator(field_context, &mask);
     evaluator.add(relative_);
     evaluator.evaluate();
@@ -72,17 +78,17 @@ class HandlePositionFieldInput final : public bke::CurvesFieldInput {
         VArray<float3>::ForContainer(std::move(output)), AttrDomain::Point, domain);
   }
 
-  void for_each_field_input_recursive(FunctionRef<void(const FieldInput &)> fn) const override
+  void for_each_field_input_recursive(FunctionRef<void(const FieldInput &)> fn) const final
   {
     relative_.node().for_each_field_input_recursive(fn);
   }
 
-  uint64_t hash() const override
+  uint64_t hash() const final
   {
     return get_default_hash(relative_, left_);
   }
 
-  bool is_equal_to(const fn::FieldNode &other) const override
+  bool is_equal_to(const fn::FieldNode &other) const final
   {
     if (const HandlePositionFieldInput *other_handle =
             dynamic_cast<const HandlePositionFieldInput *>(&other))
@@ -92,7 +98,8 @@ class HandlePositionFieldInput final : public bke::CurvesFieldInput {
     return false;
   }
 
-  std::optional<AttrDomain> preferred_domain(const CurvesGeometry & /*curves*/) const
+  std::optional<AttrDomain> preferred_domain(
+      const bke::GeometryComponent & /*component*/) const final
   {
     return AttrDomain::Point;
   }
@@ -110,13 +117,13 @@ static void node_geo_exec(GeoNodeExecParams params)
 
 static void node_register()
 {
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
   geo_node_type_base(
       &ntype, GEO_NODE_INPUT_CURVE_HANDLES, "Curve Handle Positions", NODE_CLASS_INPUT);
-  blender::bke::node_type_size_preset(&ntype, blender::bke::eNodeSizePreset::MIDDLE);
+  blender::bke::node_type_size_preset(&ntype, blender::bke::eNodeSizePreset::Middle);
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  nodeRegisterType(&ntype);
+  blender::bke::node_register_type(&ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

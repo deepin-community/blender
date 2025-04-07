@@ -14,7 +14,7 @@ set(INC
   ../../sequencer
   ../../windowmanager
 
-  # RNA_prototypes.h
+  # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
 
@@ -39,6 +39,7 @@ set(SRC
   sequencer_retiming_draw.cc
   sequencer_scopes.cc
   sequencer_select.cc
+  sequencer_strips_batch.cc
   sequencer_thumbnails.cc
   sequencer_timeline_draw.cc
   sequencer_view.cc
@@ -47,6 +48,7 @@ set(SRC
   sequencer_intern.hh
   sequencer_quads_batch.hh
   sequencer_scopes.hh
+  sequencer_strips_batch.hh
 )
 
 set(LIB
@@ -74,18 +76,8 @@ if(WITH_AUDASPACE)
   add_definitions(-DWITH_AUDASPACE)
 endif()
 
-if(WITH_TBB)
-  add_definitions(-DWITH_TBB)
-  list(APPEND INC_SYS
-    ${TBB_INCLUDE_DIRS}
-  )
-  list(APPEND LIB
-    ${TBB_LIBRARIES}
-  )
-endif()
-
 
 blender_add_lib(bf_editor_space_sequencer "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 
-# RNA_prototypes.h dna_type_offsets.h
+# RNA_prototypes.hh dna_type_offsets.h
 add_dependencies(bf_editor_space_sequencer bf_rna)

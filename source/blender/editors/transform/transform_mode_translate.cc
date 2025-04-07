@@ -18,19 +18,16 @@
 #include "BLI_string.h"
 #include "BLI_task.h"
 
-#include "BKE_context.hh"
-#include "BKE_image.h"
-#include "BKE_report.h"
+#include "BKE_image.hh"
+#include "BKE_report.hh"
 #include "BKE_unit.hh"
 
 #include "ED_node.hh"
 #include "ED_screen.hh"
 
-#include "WM_api.hh"
-
 #include "UI_interface.hh"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "transform.hh"
 #include "transform_convert.hh"
@@ -59,6 +56,8 @@ struct TranslateCustomData {
   struct {
     enum eTranslateRotateMode rotate_mode;
   } prev;
+
+  float3 snap_target_grid;
 };
 
 /** \} */
@@ -142,9 +141,9 @@ static void transdata_elem_translate(const TransInfo *t,
 
   if (t->options & CTX_GPENCIL_STROKES) {
     /* Grease pencil multi-frame falloff. */
-    bGPDstroke *gps = (bGPDstroke *)td->extra;
-    if (gps != nullptr) {
-      mul_v3_fl(tvec, td->factor * gps->runtime.multi_frame_falloff);
+    float *gp_falloff = static_cast<float *>(td->extra);
+    if (gp_falloff != nullptr) {
+      mul_v3_fl(tvec, td->factor * *gp_falloff);
     }
     else {
       mul_v3_fl(tvec, td->factor);
@@ -205,7 +204,7 @@ static void headerTranslation(TransInfo *t, const float vec[3], char str[UI_MAX_
   char dist_str[NUM_STR_REP_LEN];
   float dist;
 
-  UnitSettings *unit = nullptr;
+  const UnitSettings *unit = nullptr;
   if (!(t->flag & T_2D_EDIT)) {
     unit = &t->scene->unit;
   }
@@ -346,99 +345,6 @@ static void headerTranslation(TransInfo *t, const float vec[3], char str[UI_MAX_
 /** \name Transform (Translation) Snapping
  * \{ */
 
-static void translate_snap_target_grid_ensure(TransInfo *t)
-{
-  /* Only need to calculate once. */
-  if ((t->tsnap.status & SNAP_TARGET_GRID_FOUND) == 0) {
-    if (t->data_type == &TransConvertType_Cursor3D) {
-      /* Use a fallback when transforming the cursor.
-       * In this case the center is _not_ derived from the cursor which is being transformed. */
-      copy_v3_v3(t->tsnap.snap_target_grid, TRANS_DATA_CONTAINER_FIRST_SINGLE(t)->data->iloc);
-    }
-    else if (t->around == V3D_AROUND_CURSOR) {
-      /* Use a fallback for cursor selection,
-       * this isn't useful as a global center for absolute grid snapping
-       * since its not based on the position of the selection. */
-      tranform_snap_target_median_calc(t, t->tsnap.snap_target_grid);
-    }
-    else {
-      copy_v3_v3(t->tsnap.snap_target_grid, t->center_global);
-    }
-    t->tsnap.status |= SNAP_TARGET_GRID_FOUND;
-  }
-}
-
-static void translate_snap_grid_apply(TransInfo *t,
-                                      const int max_index,
-                                      const float grid_dist[3],
-                                      const float loc[3],
-                                      float r_out[3])
-{
-  BLI_assert(max_index <= 2);
-  translate_snap_target_grid_ensure(t);
-  const float *center_global = t->tsnap.snap_target_grid;
-  const float *asp = t->aspect;
-
-  float in[3];
-  if (t->con.mode & CON_APPLY) {
-    /* We need to clear the previous Snap to Grid result,
-     * otherwise #t->con.applyVec will have no effect. */
-    t->tsnap.target_type = SCE_SNAP_TO_NONE;
-    t->con.applyVec(t, nullptr, nullptr, loc, in);
-  }
-  else {
-    copy_v3_v3(in, loc);
-  }
-
-  for (int i = 0; i <= max_index; i++) {
-    const float iter_fac = grid_dist[i] * asp[i];
-    r_out[i] = iter_fac * roundf((in[i] + center_global[i]) / iter_fac) - center_global[i];
-  }
-
-  if ((t->con.mode & CON_APPLY) &&
-      (t->spacemtx[0][0] != 1.0f || t->spacemtx[1][1] != 1.0f || t->spacemtx[2][2] != 1.0f))
-  {
-    /* The space matrix is not identity, we need to constrain the result again. */
-    t->con.applyVec(t, nullptr, nullptr, r_out, r_out);
-  }
-}
-
-static bool translate_snap_grid(TransInfo *t, float *val)
-{
-  if (!transform_snap_is_active(t)) {
-    return false;
-  }
-
-  if (!(t->tsnap.mode & SCE_SNAP_TO_GRID) || validSnap(t)) {
-    /* Don't do grid snapping if there is a valid snap point. */
-    return false;
-  }
-
-  /* Don't do grid snapping if not in 3D viewport or UV editor */
-  if (!ELEM(t->spacetype, SPACE_VIEW3D, SPACE_IMAGE)) {
-    return false;
-  }
-
-  if (t->mode != TFM_TRANSLATION) {
-    return false;
-  }
-
-  float grid_dist[3];
-  copy_v3_v3(grid_dist, t->snap_spatial);
-  if (t->modifiers & MOD_PRECISION) {
-    mul_v3_fl(grid_dist, t->snap_spatial_precision);
-  }
-
-  /* Early bailing out if no need to snap */
-  if (is_zero_v3(grid_dist)) {
-    return false;
-  }
-
-  translate_snap_grid_apply(t, t->idx_max, grid_dist, val, val);
-  t->tsnap.target_type = SCE_SNAP_TO_GRID;
-  return true;
-}
-
 static void ApplySnapTranslation(TransInfo *t, float vec[3])
 {
   float point[3];
@@ -454,7 +360,12 @@ static void ApplySnapTranslation(TransInfo *t, float vec[3])
     }
   }
   else if (t->spacetype == SPACE_SEQ) {
-    transform_snap_sequencer_apply_translate(t, vec);
+    if (t->region->regiontype == RGN_TYPE_PREVIEW) {
+      transform_snap_sequencer_image_apply_translate(t, vec);
+    }
+    else {
+      transform_snap_sequencer_apply_seqslide(t, vec);
+    }
   }
   else {
     if (t->spacetype == SPACE_VIEW3D) {
@@ -462,13 +373,56 @@ static void ApplySnapTranslation(TransInfo *t, float vec[3])
         if (ED_view3d_project_float_global(t->region, point, point, V3D_PROJ_TEST_NOP) !=
             V3D_PROJ_RET_OK)
         {
-          zero_v3(point); /* no good answer here... */
+          zero_v3(point); /* No good answer here... */
         }
       }
     }
 
     sub_v3_v3v3(vec, point, t->tsnap.snap_source);
   }
+}
+static void translate_snap_increment_init(const TransInfo *t)
+{
+  if (!(t->tsnap.flag & SCE_SNAP_ABS_GRID)) {
+    return;
+  }
+
+  TranslateCustomData *custom_data = static_cast<TranslateCustomData *>(t->custom.mode.data);
+  if (t->data_type == &TransConvertType_Cursor3D) {
+    /* Use a fallback when transforming the cursor.
+     * In this case the center is _not_ derived from the cursor which is being transformed. */
+    custom_data->snap_target_grid = TRANS_DATA_CONTAINER_FIRST_SINGLE(t)->data->iloc;
+  }
+  else if (t->around == V3D_AROUND_CURSOR) {
+    /* Use a fallback for cursor selection,
+     * this isn't useful as a global center for absolute grid snapping
+     * since its not based on the position of the selection. */
+    tranform_snap_target_median_calc(t, custom_data->snap_target_grid);
+  }
+  else {
+    custom_data->snap_target_grid = t->center_global;
+  }
+}
+
+static bool translate_snap_increment(const TransInfo *t, float *r_val)
+{
+  if (!transform_snap_increment_ex(t, (t->con.mode & CON_APPLY) != 0, r_val)) {
+    return false;
+  }
+
+  if (t->tsnap.flag & SCE_SNAP_ABS_GRID) {
+    TranslateCustomData *custom_data = static_cast<TranslateCustomData *>(t->custom.mode.data);
+
+    float3 absolute_grid_snap_offset = custom_data->snap_target_grid;
+    transform_snap_increment_ex(t, (t->con.mode & CON_APPLY) != 0, absolute_grid_snap_offset);
+    absolute_grid_snap_offset -= custom_data->snap_target_grid;
+    add_v3_v3(r_val, absolute_grid_snap_offset);
+
+    if (t->con.mode & CON_APPLY) {
+      t->con.applyVec(t, nullptr, nullptr, r_val, r_val);
+    }
+  }
+  return true;
 }
 
 /** \} */
@@ -509,7 +463,7 @@ static void applyTranslationValue(TransInfo *t, const float vec[3])
     if (rotate_mode != TRANSLATE_ROTATE_OFF) {
       snap_source_local = t->tsnap.snap_source;
       if (tc->use_local_mat) {
-        /* The pivot has to be in local-space (see #49494) */
+        /* The pivot has to be in local-space (see #49494). */
         snap_source_local = math::transform_point(float4x4(tc->imat), snap_source_local);
       }
     }
@@ -618,7 +572,6 @@ static void applyTranslation(TransInfo *t)
     }
 
     transform_snap_mixed_apply(t, global_dir);
-    translate_snap_grid(t, global_dir);
 
     if (t->con.mode & CON_APPLY) {
       float in[3];
@@ -628,9 +581,7 @@ static void applyTranslation(TransInfo *t)
 
     float incr_dir[3];
     copy_v3_v3(incr_dir, global_dir);
-    if (!(transform_snap_is_active(t) && validSnap(t)) &&
-        transform_snap_increment_ex(t, (t->con.mode & CON_APPLY) != 0, incr_dir))
-    {
+    if (!(transform_snap_is_active(t) && validSnap(t)) && translate_snap_increment(t, incr_dir)) {
 
       /* Test for mixed snap with grid. */
       float snap_dist_sq = FLT_MAX;
@@ -645,7 +596,7 @@ static void applyTranslation(TransInfo *t)
 
   applyTranslationValue(t, global_dir);
 
-  /* evil hack - redo translation if clipping needed */
+  /* Evil hack - redo translation if clipping needed. */
   if (t->flag & T_CLIP_UV && clip_uv_transform_translation(t, global_dir)) {
     applyTranslationValue(t, global_dir);
 
@@ -673,7 +624,7 @@ static void applyTranslationMatrix(TransInfo *t, float mat_xform[4][4])
 static void initTranslation(TransInfo *t, wmOperator * /*op*/)
 {
   if (t->spacetype == SPACE_ACTION) {
-    /* this space uses time translate */
+    /* This space uses time translate. */
     BKE_report(t->reports,
                RPT_ERROR,
                "Use 'Time_Translate' transform mode instead of 'Translation' mode "
@@ -714,6 +665,8 @@ static void initTranslation(TransInfo *t, wmOperator * /*op*/)
   custom_data->prev.rotate_mode = TRANSLATE_ROTATE_OFF;
   t->custom.mode.data = custom_data;
   t->custom.mode.use_free = true;
+
+  translate_snap_increment_init(t);
 }
 
 /** \} */

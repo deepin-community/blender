@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * Adapted from Embree with with modifications. */
+ * Adapted from Embree with modifications. */
 
 #pragma once
 
@@ -382,10 +382,14 @@ ccl_device bool curve_intersect_recursive(const float3 ray_P,
 #  endif
 
       /* Subtract the inner interval from the current hit interval. */
+      const float eps = 0.001f;
       float2 tp0 = make_float2(tp.x, min(tp.y, tc_inner.x));
       float2 tp1 = make_float2(max(tp.x, tc_inner.y), tp.y);
-      bool valid0 = valid && (tp0.x <= tp0.y);
-      bool valid1 = valid && (tp1.x <= tp1.y);
+      /* The X component should be less than the Y component for a valid intersection,
+       * but due to precision issues, the X component can sometimes be greater than
+       * Y by a small amount, leading to missing intersections. */
+      bool valid0 = valid && ((tp0.x - tp0.y) < eps);
+      bool valid1 = valid && ((tp1.x - tp1.y) < eps);
       if (!(valid0 || valid1)) {
         continue;
       }
@@ -650,7 +654,7 @@ ccl_device_forceinline bool curve_intersect(KernelGlobals kg,
     curve[3] = kernel_data_fetch(curve_keys, kb);
   }
   else {
-    motion_curve_keys(kg, object, prim, time, ka, k0, k1, kb, curve);
+    motion_curve_keys(kg, object, time, ka, k0, k1, kb, curve);
   }
 
   if (type & PRIMITIVE_CURVE_RIBBON) {
@@ -682,7 +686,6 @@ ccl_device_inline void curve_shader_setup(KernelGlobals kg,
                                           float3 P,
                                           float3 D,
                                           float t,
-                                          const int isect_object,
                                           const int isect_prim)
 {
   if (!(sd->object_flag & SD_OBJECT_TRANSFORM_APPLIED)) {
@@ -709,7 +712,7 @@ ccl_device_inline void curve_shader_setup(KernelGlobals kg,
     P_curve[3] = kernel_data_fetch(curve_keys, kb);
   }
   else {
-    motion_curve_keys(kg, sd->object, sd->prim, sd->time, ka, k0, k1, kb, P_curve);
+    motion_curve_keys(kg, sd->object, sd->time, ka, k0, k1, kb, P_curve);
   }
 
   P = P + D * t;

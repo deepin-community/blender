@@ -10,9 +10,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "DNA_mesh_types.h"
-#include "DNA_meshdata_types.h"
 #include "DNA_object_types.h"
-#include "DNA_scene_types.h"
 
 #include "BLI_map.hh"
 #include "BLI_math_geom.h"
@@ -23,19 +21,17 @@
 #include "BLI_ordered_edge.hh"
 #include "BLI_string.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "BKE_attribute.hh"
 #include "BKE_bvhutils.hh"
 #include "BKE_mesh.hh"
-#include "BKE_mesh_runtime.hh"
 #include "BKE_mesh_wrapper.hh"
 #include "BKE_modifier.hh"
 
 #include "ED_armature.hh"
 #include "ED_mesh.hh"
-
-#include "DEG_depsgraph.hh"
+#include "ED_object_vgroup.hh"
 
 #include "eigen_capi.h"
 
@@ -639,8 +635,8 @@ void heat_bone_weighting(Object *ob,
                          bDeformGroup **dgroupflip,
                          float (*root)[3],
                          float (*tip)[3],
-                         const int *selected,
-                         const char **error_str)
+                         const bool *selected,
+                         const char **r_error_str)
 {
   using namespace blender;
   LaplacianSystem *sys;
@@ -657,7 +653,7 @@ void heat_bone_weighting(Object *ob,
   bool use_vert_sel = (mesh->editflag & ME_EDIT_PAINT_VERT_SEL) != 0;
   bool use_face_sel = (mesh->editflag & ME_EDIT_PAINT_FACE_SEL) != 0;
 
-  *error_str = nullptr;
+  *r_error_str = nullptr;
 
   /* bone heat needs triangulated faces */
   tris_num = poly_to_tri_count(mesh->faces_num, mesh->corners_num);
@@ -726,7 +722,7 @@ void heat_bone_weighting(Object *ob,
 
   /* compute weights per bone */
   for (j = 0; j < numbones; j++) {
-    if (!selected[j]) {
+    if (selected[j] == false) {
       continue;
     }
 
@@ -741,9 +737,9 @@ void heat_bone_weighting(Object *ob,
           continue;
         }
 
-        ED_vgroup_vert_remove(ob, dgrouplist[j], a);
+        blender::ed::object::vgroup_vert_remove(ob, dgrouplist[j], a);
         if (vertsflipped && dgroupflip[j] && vertsflipped[a] >= 0) {
-          ED_vgroup_vert_remove(ob, dgroupflip[j], vertsflipped[a]);
+          blender::ed::object::vgroup_vert_remove(ob, dgroupflip[j], vertsflipped[a]);
         }
       }
     }
@@ -769,16 +765,16 @@ void heat_bone_weighting(Object *ob,
 
         if (bbone) {
           if (solution > 0.0f) {
-            ED_vgroup_vert_add(ob, dgrouplist[j], a, solution, WEIGHT_ADD);
+            blender::ed::object::vgroup_vert_add(ob, dgrouplist[j], a, solution, WEIGHT_ADD);
           }
         }
         else {
           weight = heat_limit_weight(solution);
           if (weight > 0.0f) {
-            ED_vgroup_vert_add(ob, dgrouplist[j], a, weight, WEIGHT_REPLACE);
+            blender::ed::object::vgroup_vert_add(ob, dgrouplist[j], a, weight, WEIGHT_REPLACE);
           }
           else {
-            ED_vgroup_vert_remove(ob, dgrouplist[j], a);
+            blender::ed::object::vgroup_vert_remove(ob, dgrouplist[j], a);
           }
         }
 
@@ -786,23 +782,25 @@ void heat_bone_weighting(Object *ob,
         if (vertsflipped && dgroupflip[j] && vertsflipped[a] >= 0) {
           if (bbone) {
             if (solution > 0.0f) {
-              ED_vgroup_vert_add(ob, dgroupflip[j], vertsflipped[a], solution, WEIGHT_ADD);
+              blender::ed::object::vgroup_vert_add(
+                  ob, dgroupflip[j], vertsflipped[a], solution, WEIGHT_ADD);
             }
           }
           else {
             weight = heat_limit_weight(solution);
             if (weight > 0.0f) {
-              ED_vgroup_vert_add(ob, dgroupflip[j], vertsflipped[a], weight, WEIGHT_REPLACE);
+              blender::ed::object::vgroup_vert_add(
+                  ob, dgroupflip[j], vertsflipped[a], weight, WEIGHT_REPLACE);
             }
             else {
-              ED_vgroup_vert_remove(ob, dgroupflip[j], vertsflipped[a]);
+              blender::ed::object::vgroup_vert_remove(ob, dgroupflip[j], vertsflipped[a]);
             }
           }
         }
       }
     }
-    else if (*error_str == nullptr) {
-      *error_str = N_("Bone Heat Weighting: failed to find solution for one or more bones");
+    else if (*r_error_str == nullptr) {
+      *r_error_str = N_("Bone Heat Weighting: failed to find solution for one or more bones");
       break;
     }
 
@@ -813,17 +811,17 @@ void heat_bone_weighting(Object *ob,
           continue;
         }
 
-        weight = ED_vgroup_vert_weight(ob, dgrouplist[j], a);
+        weight = blender::ed::object::vgroup_vert_weight(ob, dgrouplist[j], a);
         weight = heat_limit_weight(weight);
         if (weight <= 0.0f) {
-          ED_vgroup_vert_remove(ob, dgrouplist[j], a);
+          blender::ed::object::vgroup_vert_remove(ob, dgrouplist[j], a);
         }
 
         if (vertsflipped && dgroupflip[j] && vertsflipped[a] >= 0) {
-          weight = ED_vgroup_vert_weight(ob, dgroupflip[j], vertsflipped[a]);
+          weight = blender::ed::object::vgroup_vert_weight(ob, dgroupflip[j], vertsflipped[a]);
           weight = heat_limit_weight(weight);
           if (weight <= 0.0f) {
-            ED_vgroup_vert_remove(ob, dgroupflip[j], vertsflipped[a]);
+            blender::ed::object::vgroup_vert_remove(ob, dgroupflip[j], vertsflipped[a]);
           }
         }
       }
@@ -1800,11 +1798,11 @@ void ED_mesh_deform_bind_callback(Object *object,
   mmd_orig->bindcagecos = (float *)mdb.cagecos;
   mmd_orig->verts_num = mdb.verts_num;
   mmd_orig->cage_verts_num = mdb.cage_verts_num;
-  copy_m4_m4(mmd_orig->bindmat, mmd_orig->object->object_to_world);
+  copy_m4_m4(mmd_orig->bindmat, mmd_orig->object->object_to_world().ptr());
 
   /* transform bindcagecos to world space */
   for (a = 0; a < mdb.cage_verts_num; a++) {
-    mul_m4_v3(mmd_orig->object->object_to_world, mmd_orig->bindcagecos + a * 3);
+    mul_m4_v3(mmd_orig->object->object_to_world().ptr(), mmd_orig->bindcagecos + a * 3);
   }
 
   /* free */

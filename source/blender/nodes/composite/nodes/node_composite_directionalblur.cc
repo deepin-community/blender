@@ -12,7 +12,7 @@
 #include "UI_interface.hh"
 #include "UI_resources.hh"
 
-#include "GPU_shader.h"
+#include "GPU_shader.hh"
 
 #include "COM_node_operation.hh"
 #include "COM_utilities.hh"
@@ -90,8 +90,8 @@ class DirectionalBlurOperation : public NodeOperation {
     GPU_shader_uniform_1f(shader, "scale", get_scale());
 
     const Result &input_image = get_input("Image");
-    GPU_texture_filter_mode(input_image.texture(), true);
-    GPU_texture_extend_mode(input_image.texture(), GPU_SAMPLER_EXTEND_MODE_CLAMP_TO_BORDER);
+    GPU_texture_filter_mode(input_image, true);
+    GPU_texture_extend_mode(input_image, GPU_SAMPLER_EXTEND_MODE_CLAMP_TO_BORDER);
     input_image.bind_as_texture(shader, "input_tx");
 
     const Domain domain = compute_domain();
@@ -186,15 +186,15 @@ void register_node_type_cmp_dblur()
 {
   namespace file_ns = blender::nodes::node_composite_directionalblur_cc;
 
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
 
   cmp_node_type_base(&ntype, CMP_NODE_DBLUR, "Directional Blur", NODE_CLASS_OP_FILTER);
   ntype.declare = file_ns::cmp_node_directional_blur_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_dblur;
   ntype.initfunc = file_ns::node_composit_init_dblur;
-  node_type_storage(
+  blender::bke::node_type_storage(
       &ntype, "NodeDBlurData", node_free_standard_storage, node_copy_standard_storage);
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  nodeRegisterType(&ntype);
+  blender::bke::node_register_type(&ntype);
 }

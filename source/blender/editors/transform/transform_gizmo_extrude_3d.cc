@@ -13,8 +13,8 @@
 #include "BLI_utildefines.h"
 
 #include "BKE_context.hh"
-#include "BKE_global.h"
-#include "BKE_scene.h"
+#include "BKE_global.hh"
+#include "BKE_scene.hh"
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
@@ -78,7 +78,7 @@ struct GizmoExtrudeGroup {
   int normal_axis;
 
   struct {
-    float normal_mat3[3][3]; /* use Z axis for normal. */
+    float normal_mat3[3][3]; /* Use Z axis for normal. */
     int orientation_index;
   } data;
 
@@ -144,12 +144,9 @@ static void gizmo_mesh_extrude_setup(const bContext *C, wmGizmoGroup *gzgroup)
   {
     const char *op_idname = nullptr;
     /* Grease pencil does not use `obedit`. */
-    /* GPXX: Remove if OB_MODE_EDIT_GPENCIL_LEGACY is merged with OB_MODE_EDIT */
+    /* GPXX: Remove if #OB_MODE_EDIT_GPENCIL_LEGACY is merged with #OB_MODE_EDIT. */
     const Object *obact = CTX_data_active_object(C);
-    if (obact->type == OB_GPENCIL_LEGACY) {
-      op_idname = "GPENCIL_OT_extrude_move";
-    }
-    else if (obact->type == OB_MESH) {
+    if (obact->type == OB_MESH) {
       op_idname = "MESH_OT_extrude_context_move";
       ggd->normal_axis = 2;
     }
@@ -430,7 +427,7 @@ static void gizmo_mesh_extrude_invoke_prepare(const bContext * /*C*/,
     RNA_float_set_array(&macroptr, "value", ggd->redo_xform.value);
   }
   else if (gz == ggd->invoke_view) {
-    /* pass */
+    /* Pass. */
   }
   else {
     /* Workaround for extrude action modifying normals. */
@@ -459,7 +456,7 @@ static void gizmo_mesh_extrude_message_subscribe(const bContext *C,
   GizmoExtrudeGroup *ggd = static_cast<GizmoExtrudeGroup *>(gzgroup->customdata);
   ARegion *region = CTX_wm_region(C);
 
-  /* Subscribe to view properties */
+  /* Subscribe to view properties. */
   wmMsgSubscribeValue msg_sub_value_gz_tag_refresh{};
   msg_sub_value_gz_tag_refresh.owner = region;
   msg_sub_value_gz_tag_refresh.user_data = gzgroup->parent_gzmap;

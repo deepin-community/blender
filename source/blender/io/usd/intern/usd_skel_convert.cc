@@ -4,12 +4,10 @@
 
 #include "usd_skel_convert.hh"
 
-#include "usd.hh"
 #include "usd_armature_utils.hh"
 #include "usd_blend_shape_utils.hh"
 #include "usd_hash_types.hh"
 
-#include <pxr/usd/sdf/namespaceEdit.h>
 #include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdSkel/animation.h>
 #include <pxr/usd/usdSkel/bindingAPI.h>
@@ -21,23 +19,17 @@
 #include "DNA_anim_types.h"
 #include "DNA_armature_types.h"
 #include "DNA_key_types.h"
+#include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
-#include "DNA_meta_types.h"
-#include "DNA_scene_types.h"
 
-#include "BKE_action.h"
+#include "BKE_action.hh"
 #include "BKE_armature.hh"
-#include "BKE_attribute.hh"
 #include "BKE_deform.hh"
-#include "BKE_fcurve.h"
+#include "BKE_fcurve.hh"
 #include "BKE_key.hh"
-#include "BKE_lib_id.hh"
-#include "BKE_mesh.hh"
-#include "BKE_mesh_runtime.hh"
 #include "BKE_modifier.hh"
-#include "BKE_object.hh"
 #include "BKE_object_deform.h"
-#include "BKE_report.h"
+#include "BKE_report.hh"
 
 #include "BLI_map.hh"
 #include "BLI_math_vector.h"
@@ -47,8 +39,7 @@
 #include "BLI_vector.hh"
 
 #include "ED_armature.hh"
-#include "ED_keyframing.hh"
-#include "ED_mesh.hh"
+#include "ED_object_vgroup.hh"
 
 #include "ANIM_animdata.hh"
 #include "ANIM_fcurve.hh"
@@ -151,7 +142,7 @@ void import_skeleton_curves(Main *bmain,
   const size_t num_samples = samples.size();
 
   /* Create the action on the armature. */
-  bAction *act = blender::animrig::id_action_ensure(bmain, (ID *)&arm_obj->id);
+  bAction *act = blender::animrig::id_action_ensure(bmain, &arm_obj->id);
 
   /* Create the curves. */
 
@@ -349,7 +340,7 @@ void import_skeleton_curves(Main *bmain,
 
 /* Set the skeleton path and bind transform on the given mesh. */
 void add_skinned_mesh_bindings(const pxr::UsdSkelSkeleton &skel,
-                               pxr::UsdPrim &mesh_prim,
+                               const pxr::UsdPrim &mesh_prim,
                                pxr::UsdGeomXformCache &xf_cache)
 {
   pxr::UsdSkelBindingAPI skel_api = pxr::UsdSkelBindingAPI::Apply(mesh_prim);
@@ -380,7 +371,7 @@ void add_skinned_mesh_bindings(const pxr::UsdSkelSkeleton &skel,
   }
 }
 
-}  // End anonymous namespace.
+}  // namespace
 
 namespace blender::io::usd {
 
@@ -544,11 +535,11 @@ void import_blendshapes(Main *bmain,
       /* Iterate over the point indices and add the offset to the corresponding
        * key block point. */
       int a = 0;
-      for (int i : point_indices) {
-        if (i < 0 || i > kb->totelem) {
+      for (const int point : point_indices) {
+        if (point < 0 || point > kb->totelem) {
           CLOG_WARN(&LOG,
                     "Out of bounds point index %d for blendshape %s",
-                    i,
+                    point,
                     path.GetAsString().c_str());
           ++a;
           continue;
@@ -562,7 +553,7 @@ void import_blendshapes(Main *bmain,
               path.GetAsString().c_str());
           break;
         }
-        add_v3_v3(&fp[3 * i], offsets[a].data());
+        add_v3_v3(&fp[3 * point], offsets[a].data());
         ++a;
       }
     }
@@ -634,7 +625,7 @@ void import_blendshapes(Main *bmain,
   const size_t num_samples = times.size();
 
   /* Create the animation and curves. */
-  bAction *act = blender::animrig::id_action_ensure(bmain, (ID *)&key->id);
+  bAction *act = blender::animrig::id_action_ensure(bmain, &key->id);
   blender::Vector<FCurve *> curves;
 
   for (auto blendshape_name : blendshapes) {
@@ -771,7 +762,7 @@ void import_skeleton(Main *bmain,
   if (bind_xforms.size() != num_joints) {
     BKE_reportf(reports,
                 RPT_WARNING,
-                "%s:  Mismatch in bind xforms and joint counts for skeleton %s",
+                "%s: Mismatch in bind xforms and joint counts for skeleton %s",
                 __func__,
                 skel.GetPath().GetAsString().c_str());
     return;
@@ -857,66 +848,84 @@ void import_skeleton(Main *bmain,
     }
   }
 
-  float avg_len_scale = 0;
-  for (size_t i = 0; i < num_joints; ++i) {
+  /* Use our custom bone length data if possible, otherwise fallback to estimated lengths. */
+  const pxr::UsdGeomPrimvarsAPI pv_api = pxr::UsdGeomPrimvarsAPI(skel.GetPrim());
+  const pxr::UsdGeomPrimvar pv_lengths = pv_api.GetPrimvar(BlenderBoneLengths);
+  if (pv_lengths.HasValue()) {
+    pxr::VtArray<float> bone_lengths;
+    pv_lengths.ComputeFlattened(&bone_lengths);
 
-    /* If the bone has any children, scale its length
-     * by the distance between this bone's head
-     * and the average head location of its children. */
+    for (size_t i = 0; i < num_joints; ++i) {
+      EditBone *bone = edit_bones[i];
+      pxr::GfVec3f head(bone->head);
+      pxr::GfVec3f tail(bone->tail);
 
-    if (child_bones[i].is_empty()) {
-      continue;
-    }
-
-    EditBone *parent = edit_bones[i];
-    if (!parent) {
-      continue;
-    }
-
-    pxr::GfVec3f avg_child_head(0);
-    for (int j : child_bones[i]) {
-      EditBone *child = edit_bones[j];
-      if (!child) {
-        continue;
-      }
-      pxr::GfVec3f child_head(child->head);
-      avg_child_head += child_head;
-    }
-
-    avg_child_head /= child_bones[i].size();
-
-    pxr::GfVec3f parent_head(parent->head);
-    pxr::GfVec3f parent_tail(parent->tail);
-
-    const float new_len = (avg_child_head - parent_head).GetLength();
-
-    /* Check for epsilon relative to the parent head before scaling. */
-    if (new_len > .00001 * max_mag_component(parent_head)) {
-      parent_tail = parent_head + (parent_tail - parent_head).GetNormalized() * new_len;
-      copy_v3_v3(parent->tail, parent_tail.data());
-      avg_len_scale += new_len;
+      tail = head + (tail - head).GetNormalized() * bone_lengths[i];
+      copy_v3_v3(bone->tail, tail.data());
     }
   }
+  else {
+    float avg_len_scale = 0;
+    for (size_t i = 0; i < num_joints; ++i) {
 
-  /* Scale terminal bones by the average length scale. */
-  avg_len_scale /= num_joints;
+      /* If the bone has any children, scale its length
+       * by the distance between this bone's head
+       * and the average head location of its children. */
 
-  for (size_t i = 0; i < num_joints; ++i) {
-    if (!child_bones[i].is_empty()) {
-      /* Not a terminal bone. */
-      continue;
+      if (child_bones[i].is_empty()) {
+        continue;
+      }
+
+      EditBone *parent = edit_bones[i];
+      if (!parent) {
+        continue;
+      }
+
+      pxr::GfVec3f avg_child_head(0);
+      for (int j : child_bones[i]) {
+        EditBone *child = edit_bones[j];
+        if (!child) {
+          continue;
+        }
+        pxr::GfVec3f child_head(child->head);
+        avg_child_head += child_head;
+      }
+
+      avg_child_head /= child_bones[i].size();
+
+      pxr::GfVec3f parent_head(parent->head);
+      pxr::GfVec3f parent_tail(parent->tail);
+
+      const float new_len = (avg_child_head - parent_head).GetLength();
+
+      /* Check for epsilon relative to the parent head before scaling. */
+      if (new_len > .00001 * max_mag_component(parent_head)) {
+        parent_tail = parent_head + (parent_tail - parent_head).GetNormalized() * new_len;
+        copy_v3_v3(parent->tail, parent_tail.data());
+        avg_len_scale += new_len;
+      }
     }
-    EditBone *bone = edit_bones[i];
-    if (!bone) {
-      continue;
-    }
-    pxr::GfVec3f head(bone->head);
 
-    /* Check for epsilon relative to the head before scaling. */
-    if (avg_len_scale > .00001 * max_mag_component(head)) {
-      pxr::GfVec3f tail(bone->tail);
-      tail = head + (tail - head).GetNormalized() * avg_len_scale;
-      copy_v3_v3(bone->tail, tail.data());
+    /* Scale terminal bones by the average length scale. */
+    avg_len_scale /= num_joints;
+
+    for (size_t i = 0; i < num_joints; ++i) {
+      if (!child_bones[i].is_empty()) {
+        /* Not a terminal bone. */
+        continue;
+      }
+      EditBone *bone = edit_bones[i];
+      if (!bone) {
+        continue;
+      }
+      pxr::GfVec3f head(bone->head);
+
+      /* Check for epsilon relative to the head before scaling. */
+      if (avg_len_scale > .00001 * max_mag_component(head)) {
+        pxr::GfVec3f tail(bone->tail);
+        tail = head + (tail - head).GetNormalized() * avg_len_scale;
+        copy_v3_v3(bone->tail, tail.data());
+      }
     }
   }
 
@@ -1111,7 +1120,7 @@ void import_mesh_skel_bindings(Main *bmain,
       }
       const int joint_idx = joint_indices[k];
       if (bDeformGroup *def_grp = joint_def_grps[joint_idx]) {
-        ED_vgroup_vert_add(mesh_obj, def_grp, i, w, WEIGHT_REPLACE);
+        blender::ed::object::vgroup_vert_add(mesh_obj, def_grp, i, w, WEIGHT_REPLACE);
       }
     }
   }
@@ -1240,14 +1249,14 @@ void shape_key_export_chaser(pxr::UsdStageRefPtr stage,
   }
 
   /* Finally, delete the temp blendshape weights attributes. */
-  for (pxr::UsdPrim &prim : mesh_prims) {
+  for (const pxr::UsdPrim &prim : mesh_prims) {
     pxr::UsdGeomPrimvarsAPI(prim).RemovePrimvar(TempBlendShapeWeightsPrimvarName);
   }
 }
 
 void export_deform_verts(const Mesh *mesh,
                          const pxr::UsdSkelBindingAPI &skel_api,
-                         const Vector<std::string> &bone_names)
+                         const Span<std::string> bone_names)
 {
   BLI_assert(mesh);
   BLI_assert(skel_api);
@@ -1311,7 +1320,7 @@ void export_deform_verts(const Mesh *mesh,
         continue;
       }
 
-      int def_nr = static_cast<int>(vert.dw[j].def_nr);
+      int def_nr = int(vert.dw[j].def_nr);
 
       if (def_nr >= joint_index.size()) {
         BLI_assert_unreachable();

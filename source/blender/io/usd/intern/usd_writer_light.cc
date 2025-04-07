@@ -12,10 +12,8 @@
 
 #include "BLI_assert.h"
 #include "BLI_math_rotation.h"
-#include "BLI_utildefines.h"
 
 #include "DNA_light_types.h"
-#include "DNA_object_types.h"
 
 namespace blender::io::usd {
 
@@ -44,7 +42,7 @@ void USDLightWriter::do_write(HierarchyContext &context)
   const pxr::SdfPath &usd_path = usd_export_context_.usd_path;
   pxr::UsdTimeCode timecode = get_export_time_code();
 
-  Light *light = static_cast<Light *>(context.object->data);
+  const Light *light = static_cast<const Light *>(context.object->data);
   pxr::UsdLuxLightAPI usd_light_api;
 
   switch (light->type) {
@@ -127,6 +125,9 @@ void USDLightWriter::do_write(HierarchyContext &context)
   usd_light_api.CreateDiffuseAttr().Set(light->diff_fac, timecode);
   usd_light_api.CreateSpecularAttr().Set(light->spec_fac, timecode);
   usd_light_api.CreateNormalizeAttr().Set(true, timecode);
+
+  auto prim = usd_light_api.GetPrim();
+  write_id_properties(prim, light->id, timecode);
 
   set_light_extents(usd_light_api.GetPrim(), timecode);
 }

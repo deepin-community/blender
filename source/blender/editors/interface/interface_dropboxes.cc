@@ -10,8 +10,7 @@
 
 #include "BKE_context.hh"
 
-#include "BLI_string.h"
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "DNA_material_types.h"
 #include "DNA_space_types.h"
@@ -19,7 +18,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "WM_api.hh"
 
@@ -91,7 +90,18 @@ static void ui_drop_name_copy(bContext * /*C*/, wmDrag *drag, wmDropBox *drop)
 static bool ui_drop_material_poll(bContext *C, wmDrag *drag, const wmEvent * /*event*/)
 {
   PointerRNA mat_slot = CTX_data_pointer_get_type(C, "material_slot", &RNA_MaterialSlot);
-  return WM_drag_is_ID_type(drag, ID_MA) && !RNA_pointer_is_null(&mat_slot);
+  if (RNA_pointer_is_null(&mat_slot)) {
+    return false;
+  }
+  PointerRNA ob_ptr = CTX_data_pointer_get_type(C, "object", &RNA_Object);
+  if (RNA_pointer_is_null(&ob_ptr)) {
+    return false;
+  }
+
+  Object *ob = static_cast<Object *>(ob_ptr.data);
+
+  return WM_drag_is_ID_type(drag, ID_MA) && ID_IS_EDITABLE(&ob->id) &&
+         !ID_IS_OVERRIDE_LIBRARY(&ob->id);
 }
 
 static void ui_drop_material_copy(bContext *C, wmDrag *drag, wmDropBox *drop)

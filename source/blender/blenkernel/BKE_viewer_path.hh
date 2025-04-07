@@ -26,13 +26,14 @@
 
 struct BlendWriter;
 struct BlendDataReader;
-struct BlendLibReader;
 struct LibraryForeachIDData;
-struct Library;
-struct IDRemapper;
+
+namespace blender::bke::id {
+class IDRemapper;
+}
 
 enum ViewerPathEqualFlag {
-  VIEWER_PATH_EQUAL_FLAG_IGNORE_REPEAT_ITERATION = (1 << 0),
+  VIEWER_PATH_EQUAL_FLAG_IGNORE_ITERATION = (1 << 0),
 };
 
 void BKE_viewer_path_init(ViewerPath *viewer_path);
@@ -44,7 +45,8 @@ bool BKE_viewer_path_equal(const ViewerPath *a,
 void BKE_viewer_path_blend_write(BlendWriter *writer, const ViewerPath *viewer_path);
 void BKE_viewer_path_blend_read_data(BlendDataReader *reader, ViewerPath *viewer_path);
 void BKE_viewer_path_foreach_id(LibraryForeachIDData *data, ViewerPath *viewer_path);
-void BKE_viewer_path_id_remap(ViewerPath *viewer_path, const IDRemapper *mappings);
+void BKE_viewer_path_id_remap(ViewerPath *viewer_path,
+                              const blender::bke::id::IDRemapper &mappings);
 
 ViewerPathElem *BKE_viewer_path_elem_new(ViewerPathElemType type);
 IDViewerPathElem *BKE_viewer_path_elem_new_id();
@@ -53,6 +55,7 @@ GroupNodeViewerPathElem *BKE_viewer_path_elem_new_group_node();
 SimulationZoneViewerPathElem *BKE_viewer_path_elem_new_simulation_zone();
 ViewerNodeViewerPathElem *BKE_viewer_path_elem_new_viewer_node();
 RepeatZoneViewerPathElem *BKE_viewer_path_elem_new_repeat_zone();
+ForeachGeometryElementZoneViewerPathElem *BKE_viewer_path_elem_new_foreach_geometry_element_zone();
 ViewerPathElem *BKE_viewer_path_elem_copy(const ViewerPathElem *src);
 bool BKE_viewer_path_elem_equal(const ViewerPathElem *a,
                                 const ViewerPathElem *b,

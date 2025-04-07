@@ -18,7 +18,7 @@
 #include "BLI_math_rotation.h"
 #include "BLI_utildefines.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
@@ -635,14 +635,14 @@ static PointerRNA rna_ShapeKey_data_get(CollectionPropertyIterator *iter)
   return rna_pointer_inherit_refine(&iter->parent, type, ptr);
 }
 
-int rna_ShapeKey_data_lookup_int(PointerRNA *ptr, int index, PointerRNA *r_ptr)
+bool rna_ShapeKey_data_lookup_int(PointerRNA *ptr, int index, PointerRNA *r_ptr)
 {
   Key *key = rna_ShapeKey_find_key(ptr->owner_id);
   KeyBlock *kb = (KeyBlock *)ptr->data;
   int elemsize = key->elemsize;
   char *databuf = static_cast<char *>(kb->data);
 
-  memset(r_ptr, 0, sizeof(*r_ptr));
+  *r_ptr = {};
 
   if (index < 0) {
     return false;
@@ -696,14 +696,14 @@ static int rna_ShapeKey_points_length(PointerRNA *ptr)
   return tot;
 }
 
-int rna_ShapeKey_points_lookup_int(PointerRNA *ptr, int index, PointerRNA *r_ptr)
+bool rna_ShapeKey_points_lookup_int(PointerRNA *ptr, int index, PointerRNA *r_ptr)
 {
   Key *key = rna_ShapeKey_find_key(ptr->owner_id);
   KeyBlock *kb = (KeyBlock *)ptr->data;
   int elemsize = key->elemsize;
   char *databuf = static_cast<char *>(kb->data);
 
-  memset(r_ptr, 0, sizeof(*r_ptr));
+  *r_ptr = {};
 
   if (index < 0) {
     return false;
@@ -1052,7 +1052,7 @@ static void rna_def_keyblock(BlenderRNA *brna)
                            "Points",
                            "Optimized access to shape keys point data, when using "
                            "foreach_get/foreach_set accessors. "
-                           "(Warning: Does not support legacy Curve shape keys)");
+                           "Warning: Does not support legacy Curve shape keys.");
   RNA_def_property_collection_funcs(prop,
                                     "rna_ShapeKey_points_begin",
                                     "rna_iterator_array_next",

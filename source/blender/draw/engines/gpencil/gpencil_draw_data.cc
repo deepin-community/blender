@@ -10,13 +10,13 @@
 
 #include "DNA_light_types.h"
 
-#include "BKE_image.h"
+#include "BKE_image.hh"
 
 #include "BLI_hash.h"
 #include "BLI_math_color.h"
 #include "BLI_memblock.h"
 
-#include "GPU_uniform_buffer.h"
+#include "GPU_uniform_buffer.hh"
 
 #include "IMB_imbuf_types.hh"
 
@@ -157,7 +157,10 @@ static MaterialGPencilStyle *gpencil_viewport_material_overrides(
   return gp_style;
 }
 
-GPENCIL_MaterialPool *gpencil_material_pool_create(GPENCIL_PrivateData *pd, Object *ob, int *ofs)
+GPENCIL_MaterialPool *gpencil_material_pool_create(GPENCIL_PrivateData *pd,
+                                                   Object *ob,
+                                                   int *ofs,
+                                                   const bool is_vertex_mode)
 {
   GPENCIL_MaterialPool *matpool = pd->last_material_pool;
 
@@ -175,10 +178,8 @@ GPENCIL_MaterialPool *gpencil_material_pool_create(GPENCIL_PrivateData *pd, Obje
   }
 
   /* Force vertex color in solid mode with vertex paint mode. Same behavior as meshes. */
-  bGPdata *gpd = (bGPdata *)ob->data;
-  int color_type = (pd->v3d_color_type != -1 && GPENCIL_VERTEX_MODE(gpd)) ?
-                       V3D_SHADING_VERTEX_COLOR :
-                       pd->v3d_color_type;
+  int color_type = (pd->v3d_color_type != -1 && is_vertex_mode) ? V3D_SHADING_VERTEX_COLOR :
+                                                                  pd->v3d_color_type;
   const eV3DShadingLightingMode lighting_mode = eV3DShadingLightingMode(
       (pd->v3d != nullptr) ? eV3DShadingLightingMode(pd->v3d->shading.light) :
                              V3D_LIGHTING_STUDIO);
@@ -303,6 +304,7 @@ void gpencil_material_resources_get(GPENCIL_MaterialPool *first_pool,
                                     GPUUniformBuf **r_ubo_mat)
 {
   GPENCIL_MaterialPool *matpool = first_pool;
+  BLI_assert(mat_id >= 0);
   int pool_id = mat_id / GPENCIL_MATERIAL_BUFFER_LEN;
   for (int i = 0; i < pool_id; i++) {
     matpool = matpool->next;
@@ -378,27 +380,27 @@ void gpencil_light_pool_populate(GPENCIL_LightPool *lightpool, Object *ob)
   float(*mat)[4] = reinterpret_cast<float(*)[4]>(&gp_light->right);
 
   if (la->type == LA_SPOT) {
-    copy_m4_m4(mat, ob->world_to_object);
+    copy_m4_m4(mat, ob->world_to_object().ptr());
     gp_light->type = GP_LIGHT_TYPE_SPOT;
     gp_light->spot_size = cosf(la->spotsize * 0.5f);
     gp_light->spot_blend = (1.0f - gp_light->spot_size) * la->spotblend;
   }
   else if (la->type == LA_AREA) {
     /* Simulate area lights using a spot light. */
-    normalize_m4_m4(mat, ob->object_to_world);
+    normalize_m4_m4(mat, ob->object_to_world().ptr());
     invert_m4(mat);
     gp_light->type = GP_LIGHT_TYPE_SPOT;
     gp_light->spot_size = cosf(M_PI_2);
     gp_light->spot_blend = (1.0f - gp_light->spot_size) * 1.0f;
   }
   else if (la->type == LA_SUN) {
-    normalize_v3_v3(gp_light->forward, ob->object_to_world[2]);
+    normalize_v3_v3(gp_light->forward, ob->object_to_world().ptr()[2]);
     gp_light->type = GP_LIGHT_TYPE_SUN;
   }
   else {
     gp_light->type = GP_LIGHT_TYPE_POINT;
   }
-  copy_v4_v4(gp_light->position, ob->object_to_world[3]);
+  copy_v4_v4(gp_light->position, ob->object_to_world().location());
   copy_v3_v3(gp_light->color, &la->r);
   mul_v3_fl(gp_light->color, la->energy * light_power_get(la));
 

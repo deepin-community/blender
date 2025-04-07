@@ -12,13 +12,14 @@
 
 #include "RE_pipeline.h"
 
-#include "GPU_shader.h"
-#include "GPU_texture.h"
+#include "GPU_shader.hh"
+#include "GPU_texture.hh"
 
+#include "IMB_colormanagement.hh"
 #include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
 
-#include "BKE_image.h"
+#include "BKE_image.hh"
 #include "BKE_lib_id.hh"
 
 #include "DNA_ID.h"
@@ -55,74 +56,6 @@ bool operator==(const CachedImageKey &a, const CachedImageKey &b)
 /* --------------------------------------------------------------------
  * Cached Image.
  */
-
-/* Returns a new texture of the given format and precision preprocessed using the given shader. The
- * input texture is freed. */
-static GPUTexture *preprocess_texture(Context &context,
-                                      GPUTexture *input_texture,
-                                      eGPUTextureFormat target_format,
-                                      ResultPrecision precision,
-                                      const char *shader_name)
-{
-  const int2 size = int2(GPU_texture_width(input_texture), GPU_texture_height(input_texture));
-
-  GPUTexture *preprocessed_texture = GPU_texture_create_2d(
-      "Cached Image", size.x, size.y, 1, target_format, GPU_TEXTURE_USAGE_GENERAL, nullptr);
-
-  GPUShader *shader = context.get_shader(shader_name, precision);
-  GPU_shader_bind(shader);
-
-  const int input_unit = GPU_shader_get_sampler_binding(shader, "input_tx");
-  GPU_texture_bind(input_texture, input_unit);
-
-  const int image_unit = GPU_shader_get_sampler_binding(shader, "output_img");
-  GPU_texture_image_bind(preprocessed_texture, image_unit);
-
-  compute_dispatch_threads_at_least(shader, size);
-
-  GPU_shader_unbind();
-  GPU_texture_unbind(input_texture);
-  GPU_texture_image_unbind(preprocessed_texture);
-  GPU_texture_free(input_texture);
-
-  return preprocessed_texture;
-}
-
-/* Compositor images are expected to be always pre-multiplied, so identify if the GPU texture
- * returned by the IMB module is straight and needs to be pre-multiplied. An exception is when
- * the image has an alpha mode of channel packed or alpha ignore, in which case, we always ignore
- * pre-multiplication. */
-static bool should_premultiply_alpha(Image *image, ImBuf *image_buffer)
-{
-  if (ELEM(image->alpha_mode, IMA_ALPHA_CHANNEL_PACKED, IMA_ALPHA_IGNORE)) {
-    return false;
-  }
-
-  return !BKE_image_has_gpu_texture_premultiplied_alpha(image, image_buffer);
-}
-
-/* Get a suitable texture format supported by the compositor given the format of the texture
- * returned by the IMB module. See imb_gpu_get_format for the formats that needs to be handled. */
-static eGPUTextureFormat get_compatible_texture_format(eGPUTextureFormat original_format)
-{
-  switch (original_format) {
-    case GPU_R16F:
-    case GPU_R32F:
-    case GPU_RGBA16F:
-    case GPU_RGBA32F:
-      return original_format;
-    case GPU_R8:
-      return GPU_R16F;
-    case GPU_RGBA8:
-    case GPU_SRGB8_A8:
-      return GPU_RGBA16F;
-    default:
-      break;
-  }
-
-  BLI_assert_unreachable();
-  return original_format;
-}
 
 /* Get the selected render layer selected assuming the image is a multilayer image. */
 static RenderLayer *get_render_layer(Image *image, ImageUser &image_user)
@@ -205,10 +138,61 @@ static ImageUser compute_image_user_for_pass(Context &context,
   return image_user_for_pass;
 }
 
+/* The image buffer might be stored as an sRGB 8-bit image, while the compositor expects linear
+ * float images, so compute a linear float buffer for the image buffer. This will also do linear
+ * space conversion and alpha pre-multiplication as needed. We could store those images in sRGB GPU
+ * textures and let the GPU do the linear space conversion, but the issues is that we don't control
+ * how the GPU does the conversion and so we get tiny differences across CPU and GPU compositing,
+ * and potentially even across GPUs/Drivers. Further, if alpha pre-multiplication is needed, we
+ * would need to do it ourself, which means alpha pre-multiplication will happen before linear
+ * space conversion, which would produce yet another difference. So we just do everything on the
+ * CPU, since this is already a cached resource.
+ *
+ * To avoid conflicts with other threads, create a new image buffer and assign all the necessary
+ * information to it, with IB_DO_NOT_TAKE_OWNERSHIP for buffers since a deep copy is not needed.
+ *
+ * The caller should free the returned image buffer. */
+static ImBuf *compute_linear_buffer(ImBuf *image_buffer)
+{
+  /* Do not pass the flags to the allocation function to avoid buffer allocation, but assign them
+   * after to retain important information like precision and alpha mode. */
+  ImBuf *linear_image_buffer = IMB_allocImBuf(
+      image_buffer->x, image_buffer->y, image_buffer->planes, 0);
+  linear_image_buffer->flags = image_buffer->flags;
+
+  /* Assign the float buffer if it exists, as well as its number of channels. */
+  IMB_assign_float_buffer(
+      linear_image_buffer, image_buffer->float_buffer, IB_DO_NOT_TAKE_OWNERSHIP);
+  linear_image_buffer->channels = image_buffer->channels;
+
+  /* If no float buffer exists, assign it then compute a float buffer from it. This is the main
+   * call of this function. */
+  if (!linear_image_buffer->float_buffer.data) {
+    IMB_assign_byte_buffer(
+        linear_image_buffer, image_buffer->byte_buffer, IB_DO_NOT_TAKE_OWNERSHIP);
+    IMB_float_from_rect(linear_image_buffer);
+  }
+
+  /* If the image buffer contained compressed data, assign them as well, but only if the color
+   * space of the buffer is linear or data, since we need linear data and can't preprocess the
+   * compressed buffer. If not, we fallback to the float buffer already assigned, which is
+   * guaranteed to exist as a fallback for compressed textures. */
+  const bool is_suitable_compressed_color_space =
+      IMB_colormanagement_space_is_data(image_buffer->byte_buffer.colorspace) ||
+      IMB_colormanagement_space_is_scene_linear(image_buffer->byte_buffer.colorspace);
+  if (image_buffer->ftype == IMB_FTYPE_DDS && is_suitable_compressed_color_space) {
+    linear_image_buffer->ftype = IMB_FTYPE_DDS;
+    IMB_assign_dds_data(linear_image_buffer, image_buffer->dds_data, IB_DO_NOT_TAKE_OWNERSHIP);
+  }
+
+  return linear_image_buffer;
+}
+
 CachedImage::CachedImage(Context &context,
                          Image *image,
                          ImageUser *image_user,
                          const char *pass_name)
+    : result(context)
 {
   /* We can't retrieve the needed image buffer yet, because we still need to assign the pass index
    * to the image user in order to acquire the image buffer corresponding to the given pass name.
@@ -227,45 +211,43 @@ CachedImage::CachedImage(Context &context,
       context, image, image_user, pass_name);
 
   ImBuf *image_buffer = BKE_image_acquire_ibuf(image, &image_user_for_pass, nullptr);
-  const bool is_premultiplied = BKE_image_has_gpu_texture_premultiplied_alpha(image, image_buffer);
-  texture_ = IMB_create_gpu_texture("Image Texture", image_buffer, true, is_premultiplied);
-  GPU_texture_update_mipmap_chain(texture_);
+  ImBuf *linear_image_buffer = compute_linear_buffer(image_buffer);
 
-  const eGPUTextureFormat original_format = GPU_texture_format(texture_);
-  const eGPUTextureFormat target_format = get_compatible_texture_format(original_format);
-  const ResultType result_type = Result::type(target_format);
-  const ResultPrecision precision = Result::precision(target_format);
+  const bool use_half_float = linear_image_buffer->flags & IB_halffloat;
+  this->result.set_precision(use_half_float ? ResultPrecision::Half : ResultPrecision::Full);
 
-  /* The GPU image returned by the IMB module can be in a format not supported by the compositor,
-   * or it might need pre-multiplication, so preprocess them first. */
-  if (result_type == ResultType::Color && should_premultiply_alpha(image, image_buffer)) {
-    texture_ = preprocess_texture(
-        context, texture_, target_format, precision, "compositor_premultiply_alpha");
+  /* At the user level, vector images are always treated as color, so there are only two possible
+   * options, float images and color images. 3-channel images should then be converted to 4-channel
+   * images below. */
+  const bool is_single_channel = linear_image_buffer->channels == 1;
+  this->result.set_type(is_single_channel ? ResultType::Float : ResultType::Color);
+
+  /* For GPU, we wrap the texture returned by IMB module and free it ourselves in destructor. For
+   * CPU, we allocate the result and copy to it from the image buffer. */
+  if (context.use_gpu()) {
+    texture_ = IMB_create_gpu_texture("Image Texture", linear_image_buffer, true, true);
+    GPU_texture_update_mipmap_chain(texture_);
+    this->result.wrap_external(texture_);
   }
-  else if (original_format != target_format) {
-    const char *conversion_shader_name = result_type == ResultType::Float ?
-                                             "compositor_convert_float_to_float" :
-                                             "compositor_convert_color_to_color";
-    texture_ = preprocess_texture(
-        context, texture_, target_format, precision, conversion_shader_name);
+  else {
+    const int2 size = int2(image_buffer->x, image_buffer->y);
+    const int channels_count = linear_image_buffer->channels;
+    Result buffer_result(context, Result::float_type(channels_count), ResultPrecision::Full);
+    buffer_result.wrap_external(linear_image_buffer->float_buffer.data, size);
+    this->result.allocate_texture(size, false);
+    parallel_for(size, [&](const int2 texel) {
+      this->result.store_pixel(texel, buffer_result.load_pixel(texel));
+    });
   }
 
-  /* Set the alpha to 1 using swizzling if alpha is ignored. */
-  if (result_type == ResultType::Color && image->alpha_mode == IMA_ALPHA_IGNORE) {
-    GPU_texture_swizzle_set(texture_, "rgb1");
-  }
-
+  IMB_freeImBuf(linear_image_buffer);
   BKE_image_release_ibuf(image, image_buffer, nullptr);
 }
 
 CachedImage::~CachedImage()
 {
+  this->result.release();
   GPU_TEXTURE_FREE_SAFE(texture_);
-}
-
-GPUTexture *CachedImage::texture()
-{
-  return texture_;
 }
 
 /* --------------------------------------------------------------------
@@ -289,10 +271,10 @@ void CachedImageContainer::reset()
   }
 }
 
-GPUTexture *CachedImageContainer::get(Context &context,
-                                      Image *image,
-                                      const ImageUser *image_user,
-                                      const char *pass_name)
+Result *CachedImageContainer::get(Context &context,
+                                  Image *image,
+                                  const ImageUser *image_user,
+                                  const char *pass_name)
 {
   if (!image || !image_user) {
     return nullptr;
@@ -304,7 +286,9 @@ GPUTexture *CachedImageContainer::get(Context &context,
 
   const CachedImageKey key(image_user_for_frame, pass_name);
 
-  auto &cached_images_for_id = map_.lookup_or_add_default(image->id.name);
+  const std::string library_key = image->id.lib ? image->id.lib->id.name : "";
+  const std::string id_key = std::string(image->id.name) + library_key;
+  auto &cached_images_for_id = map_.lookup_or_add_default(id_key);
 
   /* Invalidate the cache for that image ID if it was changed and reset the recalculate flag. */
   if (context.query_id_recalc_flag(reinterpret_cast<ID *>(image)) & ID_RECALC_ALL) {
@@ -316,7 +300,7 @@ GPUTexture *CachedImageContainer::get(Context &context,
   });
 
   cached_image.needed = true;
-  return cached_image.texture();
+  return &cached_image.result;
 }
 
 }  // namespace blender::realtime_compositor

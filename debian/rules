@@ -1,6 +1,5 @@
 #!/usr/bin/make -f
 
-INSTDIR = debian/tmp
 PY3VERS = $(shell py3versions -dv)
 
 export DEB_CPPFLAGS_MAINT_APPEND = -DNDEBUG
@@ -11,41 +10,37 @@ else
 	SETEMBREE = OFF
 endif
 
-ifeq ($(DEB_HOST_ARCH),i386)
-	SETSSE = OFF
-else
-	SETSSE = ON
-endif
-
-ifneq (,$(filter $(DEB_BUILD_ARCH_CPU), mipsel))
-	CXXFLAGS+=-g1
-endif
-
-ifneq (,$(filter $(DEB_HOST_ARCH), armel m68k mipsel powerpc sh4))
-  export DEB_LDFLAGS_MAINT_APPEND += -Wl,--no-as-needed -latomic -Wl,--as-needed
-endif
-
-ifneq (,$(filter $(DEB_HOST_ARCH),amd64 i386))
+ifneq (,$(filter $(DEB_HOST_ARCH),amd64))
 	SETVDB = ON
 else
 	SETVDB = OFF
 endif
 
+ifneq (,$(filter $(DEB_HOST_ARCH), amd64 arm64 ppc64el))
+	CUDA = ON
+else
+	CUDA = OFF
+endif
+
+ifneq (,$(filter $(DEB_HOST_ARCH), amd64))
+	HIP = ON
+else
+	HIP = OFF
+endif
+
 override_dh_auto_configure:
 	dh_auto_configure -- \
-		-DCMAKE_INSTALL_PREFIX=/usr \
 		-DCMAKE_SKIP_RPATH=ON \
-		-DCMAKE_VERBOSE_MAKEFILE=ON \
-		-DFREETYPE_INCLUDE_DIRS="/usr/include/freetype2" \
 		-DPYTHON_VERSION=$(PY3VERS) \
 		-DWITH_CODEC_FFMPEG=ON \
 		-DWITH_CODEC_SNDFILE=ON \
-		-DWITH_CPU_SSE=$(SETSSE) \
 		-DWITH_CYCLES=ON \
 		-DWITH_CYCLES_EMBREE=$(SETEMBREE) \
+		-DWITH_CYCLES_DEVICE_CUDA=$(CUDA) \
+		-DWITH_CYCLES_DEVICE_OPTIX=$(CUDA) \
+		-DWITH_CYCLES_DEVICE_HIP=$(HIP) \
 		-DWITH_DOC_MANPAGE=ON \
 		-DWITH_FFTW3=ON \
-		-DWITH_GAMEENGINE=ON \
 		-DWITH_IMAGE_OPENJPEG=ON \
 		-DWITH_INPUT_NDOF=ON \
 		-DWITH_INSTALL_PORTABLE=OFF \
@@ -54,17 +49,7 @@ override_dh_auto_configure:
 		-DWITH_OPENCOLORIO=ON \
 		-DWITH_OPENSUBDIV=ON \
 		-DWITH_OPENVDB=$(SETVDB) \
-		-DWITH_PLAYER=ON \
-		-DWITH_PYTHON_INSTALL=OFF \
-		-DWITH_SYSTEM_GLEW=ON \
-		-DWITH_SYSTEM_OPENJPEG=ON
-
-override_dh_auto_install:
-	dh_auto_install --buildsystem=cmake
-	find $(INSTDIR)/usr/share/blender/ -type d -empty -delete
-
-override_dh_missing:
-	dh_missing --fail-missing
+		-DWITH_PYTHON_INSTALL=OFF
 
 override_dh_auto_test:
 

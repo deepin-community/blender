@@ -15,12 +15,23 @@ void OVERLAY_facing_init(OVERLAY_Data * /*vedata*/) {}
 
 void OVERLAY_facing_cache_init(OVERLAY_Data *vedata)
 {
+  const DRWContextState *draw_ctx = DRW_context_state_get();
   OVERLAY_PassList *psl = vedata->psl;
   OVERLAY_PrivateData *pd = vedata->stl->pd;
+  const bool is_solid_viewport = draw_ctx->v3d && draw_ctx->v3d->shading.type == OB_SOLID;
 
   for (int i = 0; i < 2; i++) {
     /* Non Meshes Pass (Camera, empties, lights ...) */
-    DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_EQUAL | DRW_STATE_BLEND_ALPHA;
+    DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH;
+    /* Use the Depth Equal test in solid mode to ensure transparent textures display correctly.
+     * (See #128113). And the Depth-Less test in other modes (E.g. EEVEE) to ensure the overlay
+     * displays correctly (See # 114000). */
+    state |= is_solid_viewport ? DRW_STATE_DEPTH_EQUAL : DRW_STATE_DEPTH_LESS_EQUAL;
+
+    if (is_solid_viewport && (draw_ctx->v3d->shading.flag & V3D_SHADING_BACKFACE_CULLING)) {
+      state |= DRW_STATE_CULL_BACK;
+    }
+
     DRW_PASS_CREATE(psl->facing_ps[i], state | pd->clipping_state);
 
     GPUShader *sh = OVERLAY_shader_facing();
@@ -50,7 +61,7 @@ void OVERLAY_facing_cache_populate(OVERLAY_Data *vedata, Object *ob)
     DRW_shgroup_call_sculpt(pd->facing_grp[is_xray], ob, false, false, false, false, false);
   }
   else {
-    GPUBatch *geom = DRW_cache_object_surface_get(ob);
+    blender::gpu::Batch *geom = DRW_cache_object_surface_get(ob);
     if (geom) {
       DRW_shgroup_call(pd->facing_grp[is_xray], geom, ob);
     }

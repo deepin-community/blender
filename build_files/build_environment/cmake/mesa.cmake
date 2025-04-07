@@ -2,10 +2,6 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-set(MESA_CFLAGS "-static-libgcc")
-set(MESA_CXXFLAGS "-static-libgcc -static-libstdc++ -Bstatic -lstdc++ -Bdynamic -l:libstdc++.a")
-set(MESA_LDFLAGS "-L${LIBDIR}/zlib/lib -pthread -static-libgcc -static-libstdc++ -Bstatic -lstdc++ -Bdynamic -l:libstdc++.a -l:libz_pic.a")
-
 # The 'native-file', used for overrides with the meson build system.
 # meson does not provide a way to do this using command line arguments.
 #
@@ -35,8 +31,8 @@ set(MESA_EXTRA_FLAGS
   # At some point we will likely want to support Wayland.
   # Disable for now since it's not officially supported.
   -Dplatforms=x11
-  # Needed to find the local expat.
-  --pkg-config-path=${LIBDIR}/expat/lib/pkgconfig
+  # Needed to find the local expat,zlib,zstd.
+  --pkg-config-path=${LIBDIR}/expat/lib/pkgconfig,${LIBDIR}/zstd/lib/pkgconfig,${LIBDIR}/zlib/share/pkgconfig
   --native-file ${BUILD_DIR}/mesa/tmp/native-file.ini
 )
 
@@ -45,11 +41,22 @@ ExternalProject_Add(external_mesa
   DOWNLOAD_DIR ${DOWNLOAD_DIR}
   URL_HASH ${MESA_HASH_TYPE}=${MESA_HASH}
   PREFIX ${BUILD_DIR}/mesa
+
   CONFIGURE_COMMAND ${CONFIGURE_ENV} &&
     cd ${BUILD_DIR}/mesa/src/external_mesa/ &&
-    ${MESON} ${BUILD_DIR}/mesa/src/external_mesa-build --prefix=${LIBDIR}/mesa ${MESA_EXTRA_FLAGS}
-  BUILD_COMMAND ${CONFIGURE_ENV} && cd ${BUILD_DIR}/mesa/src/external_mesa-build && ninja -j${MAKE_THREADS}
-  INSTALL_COMMAND ${CONFIGURE_ENV} && cd ${BUILD_DIR}/mesa/src/external_mesa-build && ninja install
+    ${MESON}
+      ${BUILD_DIR}/mesa/src/external_mesa-build
+      --prefix=${LIBDIR}/mesa
+      ${MESA_EXTRA_FLAGS}
+
+  BUILD_COMMAND ${CONFIGURE_ENV} &&
+    cd ${BUILD_DIR}/mesa/src/external_mesa-build &&
+    ninja -j${MAKE_THREADS}
+
+  INSTALL_COMMAND ${CONFIGURE_ENV} &&
+    cd ${BUILD_DIR}/mesa/src/external_mesa-build &&
+    ninja install
+
   INSTALL_DIR ${LIBDIR}/mesa
 )
 
@@ -57,8 +64,12 @@ add_dependencies(
   external_mesa
   ll
   external_zlib
+  external_zstd
   # Run-time dependency.
   external_expat
   # Needed for `MESON`.
   external_python_site_packages
 )
+
+harvest(external_mesa libglu/lib mesa/lib "*${SHAREDLIBEXT}*")
+harvest(external_mesa mesa/lib64 mesa/lib "*${SHAREDLIBEXT}*")

@@ -10,11 +10,17 @@ Utility functions for make update and make tests.
 import re
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
 
+from types import (
+    TracebackType,
+)
 from typing import (
+    Any,
+    Callable,
     Dict,
     Sequence,
     Optional,
@@ -115,7 +121,8 @@ def git_branch(git_command: str) -> str:
 
     try:
         branch = subprocess.check_output([git_command, "rev-parse", "--abbrev-ref", "HEAD"])
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
+        # No need to print the exception, error text is written to the output already.
         sys.stderr.write("Failed to get Blender git branch\n")
         sys.exit(1)
 
@@ -268,3 +275,22 @@ def parse_blender_version() -> BlenderVersion:
         int(version_info["BLENDER_VERSION_PATCH"]),
         version_info["BLENDER_VERSION_CYCLE"],
     )
+
+
+def remove_directory(directory: Path) -> None:
+    """
+    Recursively remove the given directory
+
+    Takes care of clearing read-only attributes which might prevent deletion on
+    Windows.
+    """
+    def remove_readonly(
+            func: Callable[..., Any],
+            path: str,
+            _: tuple[type[BaseException], BaseException, TracebackType],
+    ) -> None:
+        "Clear the read-only bit and reattempt the removal."
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+
+    shutil.rmtree(directory, onerror=remove_readonly)

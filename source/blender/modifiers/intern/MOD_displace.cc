@@ -12,7 +12,7 @@
 #include "BLI_math_vector.h"
 #include "BLI_task.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "DNA_defaults.h"
 #include "DNA_mesh_types.h"
@@ -20,25 +20,19 @@
 #include "DNA_object_types.h"
 #include "DNA_screen_types.h"
 
-#include "BKE_context.hh"
 #include "BKE_customdata.hh"
 #include "BKE_deform.hh"
-#include "BKE_editmesh.hh"
-#include "BKE_image.h"
-#include "BKE_lib_id.hh"
+#include "BKE_image.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_mesh.hh"
-#include "BKE_mesh_wrapper.hh"
 #include "BKE_modifier.hh"
-#include "BKE_object.hh"
-#include "BKE_screen.hh"
 #include "BKE_texture.h"
 
 #include "UI_interface.hh"
 #include "UI_resources.hh"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
@@ -91,12 +85,6 @@ static bool depends_on_time(Scene * /*scene*/, ModifierData *md)
   return false;
 }
 
-static bool depends_on_normals(ModifierData *md)
-{
-  DisplaceModifierData *dmd = (DisplaceModifierData *)md;
-  return ELEM(dmd->direction, MOD_DISP_DIR_NOR, MOD_DISP_DIR_CLNOR);
-}
-
 static void foreach_ID_link(ModifierData *md, Object *ob, IDWalkFunc walk, void *user_data)
 {
   DisplaceModifierData *dmd = (DisplaceModifierData *)md;
@@ -107,7 +95,9 @@ static void foreach_ID_link(ModifierData *md, Object *ob, IDWalkFunc walk, void 
 
 static void foreach_tex_link(ModifierData *md, Object *ob, TexWalkFunc walk, void *user_data)
 {
-  walk(user_data, ob, md, "texture");
+  PointerRNA ptr = RNA_pointer_create(&ob->id, &RNA_Modifier, md);
+  PropertyRNA *prop = RNA_struct_find_property(&ptr, "texture");
+  walk(user_data, ob, md, &ptr, prop);
 }
 
 static bool is_disabled(const Scene * /*scene*/, ModifierData *md, bool /*use_render_params*/)
@@ -323,7 +313,7 @@ static void displaceModifier_do(DisplaceModifierData *dmd,
   else if (ELEM(direction, MOD_DISP_DIR_X, MOD_DISP_DIR_Y, MOD_DISP_DIR_Z, MOD_DISP_DIR_RGB_XYZ) &&
            use_global_direction)
   {
-    copy_m4_m4(local_mat, ob->object_to_world);
+    copy_m4_m4(local_mat, ob->object_to_world().ptr());
   }
 
   DisplaceUserdata data = {nullptr};
@@ -388,7 +378,7 @@ static void panel_draw(const bContext *C, Panel *panel)
 
   uiLayoutSetPropSep(layout, true);
 
-  uiTemplateID(layout, C, ptr, "texture", "texture.new", nullptr, nullptr, 0, ICON_NONE, nullptr);
+  uiTemplateID(layout, C, ptr, "texture", "texture.new", nullptr, nullptr);
 
   col = uiLayoutColumn(layout, false);
   uiLayoutSetActive(col, has_texture);
@@ -467,7 +457,7 @@ ModifierTypeInfo modifierType_Displace = {
     /*is_disabled*/ is_disabled,
     /*update_depsgraph*/ update_depsgraph,
     /*depends_on_time*/ depends_on_time,
-    /*depends_on_normals*/ depends_on_normals,
+    /*depends_on_normals*/ nullptr,
     /*foreach_ID_link*/ foreach_ID_link,
     /*foreach_tex_link*/ foreach_tex_link,
     /*free_runtime_data*/ nullptr,

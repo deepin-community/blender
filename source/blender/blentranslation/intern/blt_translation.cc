@@ -12,14 +12,14 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "MEM_guardedalloc.h"
 
 #include "DNA_userdef_types.h" /* For user settings. */
 
 #ifdef WITH_PYTHON
-#  include "BPY_extern.h"
+#  include "BPY_extern.hh"
 #endif
 
 #ifdef WITH_INTERNATIONAL

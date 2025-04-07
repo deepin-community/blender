@@ -20,25 +20,26 @@
 #include "BLI_math_vector.h"
 #include "BLI_string_utils.hh"
 
-#include "BKE_action.h"
+#include "BKE_action.hh"
 #include "BKE_animsys.h"
 #include "BKE_appdir.hh"
 #include "BKE_armature.hh"
 #include "BKE_blender_copybuffer.hh"
+#include "BKE_blendfile.hh"
 #include "BKE_context.hh"
-#include "BKE_deform.hh"
-#include "BKE_idprop.h"
+#include "BKE_idprop.hh"
 #include "BKE_layer.hh"
+#include "BKE_lib_query.hh"
 #include "BKE_main.hh"
 #include "BKE_object.hh"
-#include "BKE_report.h"
+#include "BKE_report.hh"
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
@@ -46,10 +47,10 @@
 #include "ED_armature.hh"
 #include "ED_keyframing.hh"
 #include "ED_screen.hh"
-#include "ED_util.hh"
 
 #include "ANIM_bone_collections.hh"
 #include "ANIM_keyframing.hh"
+#include "ANIM_keyingsets.hh"
 
 #include "UI_interface.hh"
 #include "UI_resources.hh"
@@ -85,10 +86,9 @@ static void applyarmature_fix_boneparents(const bContext *C, Scene *scene, Objec
    * in this function. */
   Depsgraph *depsgraph = CTX_data_depsgraph_pointer(C);
   Main *bmain = CTX_data_main(C);
-  Object workob, *ob;
 
   /* go through all objects in database */
-  for (ob = static_cast<Object *>(bmain->objects.first); ob;
+  for (Object *ob = static_cast<Object *>(bmain->objects.first); ob;
        ob = static_cast<Object *>(ob->id.next))
   {
     /* if parent is bone in this armature, apply corrections */
@@ -96,10 +96,9 @@ static void applyarmature_fix_boneparents(const bContext *C, Scene *scene, Objec
       /* apply current transform from parent (not yet destroyed),
        * then calculate new parent inverse matrix
        */
-      BKE_object_apply_mat4(ob, ob->object_to_world, false, false);
+      BKE_object_apply_mat4(ob, ob->object_to_world().ptr(), false, false);
 
-      BKE_object_workob_calc_parent(depsgraph, scene, ob, &workob);
-      invert_m4_m4(ob->parentinv, workob.object_to_world);
+      invert_m4_m4(ob->parentinv, BKE_object_calc_parent(depsgraph, scene, ob).ptr());
     }
   }
 }
@@ -213,7 +212,7 @@ static void applyarmature_process_selected_recursive(bArmature *arm,
                                                      bPose *pose,
                                                      bPose *pose_eval,
                                                      Bone *bone,
-                                                     ListBase *selected,
+                                                     blender::Span<PointerRNA> selected,
                                                      ApplyArmature_ParentState *pstate)
 {
   bPoseChannel *pchan = BKE_pose_channel_find_name(pose, bone->name);
@@ -226,7 +225,10 @@ static void applyarmature_process_selected_recursive(bArmature *arm,
   ApplyArmature_ParentState new_pstate{};
   new_pstate.bone = bone;
 
-  if (BLI_findptr(selected, pchan, offsetof(CollectionPointerLink, ptr.data))) {
+  if (std::find_if(selected.begin(), selected.end(), [&](const PointerRNA &ptr) {
+        return ptr.data == pchan;
+      }) != selected.end())
+  {
     /* SELECTED BONE: Snap to final pose transform minus un-applied parent effects.
      *
      * I.e. bone position with accumulated parent effects but no local
@@ -392,7 +394,7 @@ static int apply_armature_pose2bones_exec(bContext *C, wmOperator *op)
   const Object *ob_eval = DEG_get_evaluated_object(depsgraph, ob);
   bArmature *arm = BKE_armature_from_object(ob);
   bPose *pose;
-  ListBase selected_bones;
+  blender::Vector<PointerRNA> selected_bones;
 
   const bool use_selected = RNA_boolean_get(op->ptr, "selected");
 
@@ -418,7 +420,7 @@ static int apply_armature_pose2bones_exec(bContext *C, wmOperator *op)
   if (use_selected) {
     CTX_data_selected_pose_bones(C, &selected_bones);
 
-    if (!selected_bones.first) {
+    if (selected_bones.is_empty()) {
       return OPERATOR_CANCELLED;
     }
   }
@@ -433,10 +435,8 @@ static int apply_armature_pose2bones_exec(bContext *C, wmOperator *op)
     /* The selected only mode requires a recursive walk to handle parent-child relations. */
     LISTBASE_FOREACH (Bone *, bone, &arm->bonebase) {
       applyarmature_process_selected_recursive(
-          arm, pose, ob_eval->pose, bone, &selected_bones, nullptr);
+          arm, pose, ob_eval->pose, bone, selected_bones, nullptr);
     }
-
-    BLI_freelistN(&selected_bones);
   }
   else {
     LISTBASE_FOREACH (bPoseChannel *, pchan, &pose->chanbase) {
@@ -464,7 +464,7 @@ static int apply_armature_pose2bones_exec(bContext *C, wmOperator *op)
 
   /* NOTE: notifier might evolve. */
   WM_event_add_notifier(C, NC_OBJECT | ND_POSE, ob);
-  DEG_id_tag_update(&ob->id, ID_RECALC_COPY_ON_WRITE);
+  DEG_id_tag_update(&ob->id, ID_RECALC_SYNC_TO_EVAL);
 
   return OPERATOR_FINISHED;
 }
@@ -775,8 +775,11 @@ static bPoseChannel *pose_bone_do_paste(Object *ob,
 
 static int pose_copy_exec(bContext *C, wmOperator *op)
 {
+  using namespace blender::bke::blendfile;
+
+  Main *bmain = CTX_data_main(C);
   Object *ob = BKE_object_pose_armature_get(CTX_data_active_object(C));
-  char filepath[FILE_MAX];
+
   /* Sanity checking. */
   if (ELEM(nullptr, ob, ob->pose)) {
     BKE_report(op->reports, RPT_ERROR, "No pose to copy");
@@ -784,47 +787,29 @@ static int pose_copy_exec(bContext *C, wmOperator *op)
   }
   /* Sets chan->flag to POSE_KEY if bone selected. */
   set_pose_keys(ob);
-  /* Construct a local bmain and only put object and its data into it,
-   * o this way we don't expand any other objects into the copy buffer
-   * file.
-   *
-   * TODO(sergey): Find an easier way to tell copy buffer to only store
-   * data we are actually interested in. Maybe pass it a flag to skip
-   * any datablock expansion?
-   */
-  Main *temp_bmain = BKE_main_new();
-  STRNCPY(temp_bmain->filepath, BKE_main_blendfile_path_from_global());
 
-  Object ob_copy = blender::dna::shallow_copy(*ob);
-  ob_copy.adt = nullptr;
+  PartialWriteContext copybuffer{BKE_main_blendfile_path(bmain)};
+  copybuffer.id_add(
+      &ob->id,
+      PartialWriteContext::IDAddOptions{PartialWriteContext::IDAddOperations(
+          PartialWriteContext::IDAddOperations::MAKE_LOCAL |
+          PartialWriteContext::IDAddOperations::SET_FAKE_USER |
+          PartialWriteContext::IDAddOperations::SET_CLIPBOARD_MARK)},
+      [ob](LibraryIDLinkCallbackData *cb_data,
+           PartialWriteContext::IDAddOptions /*options*/) -> PartialWriteContext::IDAddOperations {
+        /* Only include `ob->data` (i.e. the Armature) dependency. */
+        if (*(cb_data->id_pointer) == ob->data) {
+          return PartialWriteContext::IDAddOperations(
+              PartialWriteContext::IDAddOperations::MAKE_LOCAL |
+              PartialWriteContext::IDAddOperations::ADD_DEPENDENCIES);
+        }
+        return PartialWriteContext::IDAddOperations::CLEAR_DEPENDENCIES;
+      });
 
-  /* Copy the armature without using the default copy constructor. This prevents
-   * the compiler from complaining that the `layer`, `layer_used`, and
-   * `layer_protected` fields are DNA_DEPRECATED.
-   */
-  bArmature arm_copy;
-  memcpy(&arm_copy, ob->data, sizeof(arm_copy));
-
-  arm_copy.adt = nullptr;
-  ob_copy.data = &arm_copy;
-  BLI_addtail(&temp_bmain->objects, &ob_copy);
-  BLI_addtail(&temp_bmain->armatures, &arm_copy);
-  /* begin copy buffer on a temp bmain. */
-  BKE_copybuffer_copy_begin(temp_bmain);
-  /* Store the whole object to the copy buffer because pose can't be
-   * existing on its own.
-   */
-  BKE_copybuffer_copy_tag_ID(&ob_copy.id);
-
+  char filepath[FILE_MAX];
   pose_copybuffer_filepath_get(filepath, sizeof(filepath));
-  BKE_copybuffer_copy_end(temp_bmain, filepath, op->reports);
-  /* We clear the lists so no datablocks gets freed,
-   * This is required because objects in temp bmain shares same pointers
-   * as the real ones.
-   */
-  BLI_listbase_clear(&temp_bmain->objects);
-  BLI_listbase_clear(&temp_bmain->armatures);
-  BKE_main_free(temp_bmain);
+  copybuffer.write(filepath, *op->reports);
+
   /* We are all done! */
   BKE_report(op->reports, RPT_INFO, "Copied pose to internal clipboard");
   return OPERATOR_FINISHED;
@@ -1231,7 +1216,8 @@ static int pose_clear_transform_generic_exec(bContext *C,
         KeyingSet *ks = ANIM_get_keyingset_for_autokeying(scene, default_ksName);
 
         /* insert keyframes */
-        ANIM_apply_keyingset(C, &sources, ks, MODIFYKEY_MODE_INSERT, float(scene->r.cfra));
+        ANIM_apply_keyingset(
+            C, &sources, ks, blender::animrig::ModifyKeyMode::INSERT, float(scene->r.cfra));
 
         /* now recalculate paths */
         if (ob_iter->pose->avs.path_bakeflag & MOTIONPATH_BAKE_HAS_PATHS) {

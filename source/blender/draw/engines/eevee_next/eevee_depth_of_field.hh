@@ -67,7 +67,7 @@ class DepthOfField {
   /** Stabilization (flicker attenuation) of Color and CoC output of the setup pass. */
   TextureFromPool stabilize_output_tx_ = {"dof_taa"};
   GPUTexture *stabilize_input_ = nullptr;
-  bool1 stabilize_valid_history_ = false;
+  bool32_t stabilize_valid_history_ = false;
   int3 dispatch_stabilize_size_ = int3(-1);
   PassSimple stabilize_ps_ = {"Stabilize"};
 
@@ -188,6 +188,10 @@ class DepthOfField {
   void hole_fill_pass_sync();
   void resolve_pass_sync();
 
+  /**
+   * Similar to #Film::update_sample_table()
+   * but with constant filter radius and constant sample count.
+   */
   void update_sample_table();
 };
 

@@ -23,6 +23,8 @@ endif()
 
 set(_hip_SEARCH_DIRS
   ${HIP_ROOT_DIR}
+  /opt/rocm
+  /opt/rocm/hip
 )
 
 find_program(HIP_HIPCC_EXECUTABLE
@@ -35,18 +37,22 @@ find_program(HIP_HIPCC_EXECUTABLE
 )
 
 if(WIN32)
-  # Needed for HIP-RT on Windows.
-  find_program(HIP_LINKER_EXECUTABLE
-    NAMES
-      clang++
-    HINTS
-      ${_hip_SEARCH_DIRS}
+  set(LINKER clang++)
+else()
+  set(LINKER amdclang++)
+endif()
+
+find_program(HIP_LINKER_EXECUTABLE
+  NAMES
+    ${LINKER}
+  HINTS
+    ${_hip_SEARCH_DIRS}
     PATH_SUFFIXES
       bin
     NO_DEFAULT_PATH
     NO_CMAKE_PATH
-  )
-endif()
+)
+
 
 if(HIP_HIPCC_EXECUTABLE)
   set(HIP_VERSION_MAJOR 0)
@@ -93,6 +99,7 @@ if(HIP_HIPCC_EXECUTABLE)
 
   # Construct full semantic version.
   set(HIP_VERSION "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
+  set(HIP_VERSION_SHORT "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}")
   unset(_hip_version_raw)
   unset(_hipcc_executable)
 endif()
@@ -101,3 +108,5 @@ include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(HIP
     REQUIRED_VARS HIP_HIPCC_EXECUTABLE
     VERSION_VAR HIP_VERSION)
+
+unset(_hip_SEARCH_DIRS)

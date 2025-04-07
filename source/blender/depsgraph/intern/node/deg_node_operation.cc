@@ -162,9 +162,9 @@ const char *operationCodeAsString(OperationCode opcode)
     /* Collections. */
     case OperationCode::VIEW_LAYER_EVAL:
       return "VIEW_LAYER_EVAL";
-    /* Copy on write. */
-    case OperationCode::COPY_ON_WRITE:
-      return "COPY_ON_WRITE";
+    /* Copy on eval. */
+    case OperationCode::COPY_ON_EVAL:
+      return "COPY_ON_EVAL";
     /* Shading. */
     case OperationCode::SHADING:
       return "SHADING";
@@ -204,6 +204,8 @@ const char *operationCodeAsString(OperationCode opcode)
       return "INSTANCER";
     case OperationCode::INSTANCE:
       return "INSTANCE";
+    case OperationCode::INSTANCE_GEOMETRY:
+      return "INSTANCE_GEOMETRY";
   }
   BLI_assert_msg(0, "Unhandled operation code, should never happen.");
   return "UNKNOWN";

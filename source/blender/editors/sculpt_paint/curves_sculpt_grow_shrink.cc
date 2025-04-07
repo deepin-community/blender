@@ -6,7 +6,6 @@
 
 #include "BLI_math_vector.hh"
 
-#include "BLI_enumerable_thread_specific.hh"
 #include "BLI_length_parameterize.hh"
 #include "BLI_math_geom.h"
 #include "BLI_math_matrix_types.hh"
@@ -70,19 +69,19 @@ class ShrinkCurvesEffect : public CurvesEffect {
 
   /** Storage of per-curve parameterization data to avoid reallocation. */
   struct ParameterizationBuffers {
-    Array<float3> old_positions;
-    Array<float> old_lengths;
-    Array<float> sample_lengths;
-    Array<int> indices;
-    Array<float> factors;
+    Vector<float3> old_positions;
+    Vector<float> old_lengths;
+    Vector<float> sample_lengths;
+    Vector<int> indices;
+    Vector<float> factors;
 
-    void reinitialize(const int points_num)
+    void resize(const int points_num)
     {
-      this->old_positions.reinitialize(points_num);
-      this->old_lengths.reinitialize(length_parameterize::segments_num(points_num, false));
-      this->sample_lengths.reinitialize(points_num);
-      this->indices.reinitialize(points_num);
-      this->factors.reinitialize(points_num);
+      this->old_positions.resize(points_num);
+      this->old_lengths.resize(length_parameterize::segments_num(points_num, false));
+      this->sample_lengths.resize(points_num);
+      this->indices.resize(points_num);
+      this->factors.resize(points_num);
     }
   };
 
@@ -111,7 +110,7 @@ class ShrinkCurvesEffect : public CurvesEffect {
                     ParameterizationBuffers &data) const
   {
     namespace lp = length_parameterize;
-    data.reinitialize(positions.size());
+    data.resize(positions.size());
 
     /* Copy the old positions to facilitate mixing from neighbors for the resulting curve. */
     data.old_positions.as_mutable_span().copy_from(positions);
@@ -156,7 +155,8 @@ class ExtrapolateCurvesEffect : public CurvesEffect {
         const float3 old_last_pos_cu = positions_cu[points.last()];
         /* Use some point within the curve rather than the end point to smooth out some random
          * variation. */
-        const float3 direction_reference_point = positions_cu[points[points.size() / 2]];
+        const float3 direction_reference_point =
+            positions_cu[points.size() > 2 ? points[points.size() / 2] : points.first()];
         const float3 direction = math::normalize(old_last_pos_cu - direction_reference_point);
 
         const float3 new_last_pos_cu = old_last_pos_cu + direction * move_distance_cu;

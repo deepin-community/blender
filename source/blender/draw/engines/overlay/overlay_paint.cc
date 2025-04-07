@@ -8,7 +8,7 @@
 
 #include "DRW_render.hh"
 
-#include "BKE_image.h"
+#include "BKE_image.hh"
 
 #include "DNA_mesh_types.h"
 
@@ -30,7 +30,11 @@ static bool paint_object_is_rendered_transparent(View3D *v3d, Object *ob)
     if (ob && v3d->shading.color_type == V3D_SHADING_OBJECT_COLOR) {
       return ob->color[3] < 1.0f;
     }
-    if (ob && ob->type == OB_MESH && ob->data &&
+
+    /* NOTE: The active object might be hidden and hence have inconsistent evaluated state of its
+     * mesh data. So only perform checks dependent on mesh after checking the object is actually
+     * visible. */
+    if (ob && ob->type == OB_MESH && BKE_object_is_visible_in_viewport(v3d, ob) && ob->data &&
         v3d->shading.color_type == V3D_SHADING_MATERIAL_COLOR)
     {
       Mesh *mesh = static_cast<Mesh *>(ob->data);
@@ -85,7 +89,13 @@ void OVERLAY_paint_cache_init(OVERLAY_Data *vedata)
     case CTX_MODE_PAINT_WEIGHT: {
       opacity = is_edit_mode ? 1.0 : pd->overlay.weight_paint_mode_opacity;
       if (opacity > 0.0f) {
-        state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_EQUAL | DRW_STATE_BLEND_ALPHA;
+        state = DRW_STATE_WRITE_COLOR;
+        const bool is_workbench = (draw_ctx->v3d->shading.type <= OB_SOLID) ||
+                                  BKE_scene_uses_blender_workbench(draw_ctx->scene);
+        /* Support masked transparency in Workbench.
+         * EEVEE can't be supported since depth won't match. */
+        state |= is_workbench ? DRW_STATE_DEPTH_EQUAL | DRW_STATE_BLEND_ALPHA :
+                                DRW_STATE_DEPTH_LESS_EQUAL | DRW_STATE_WRITE_DEPTH;
         DRW_PASS_CREATE(psl->paint_color_ps, state | pd->clipping_state);
 
         const bool do_shading = draw_ctx->v3d->shading.type != OB_WIRE;
@@ -193,7 +203,7 @@ void OVERLAY_paint_cache_init(OVERLAY_Data *vedata)
 void OVERLAY_paint_texture_cache_populate(OVERLAY_Data *vedata, Object *ob)
 {
   OVERLAY_PrivateData *pd = vedata->stl->pd;
-  GPUBatch *geom = nullptr;
+  blender::gpu::Batch *geom = nullptr;
 
   const Mesh *me_orig = static_cast<Mesh *>(DEG_get_original_object(ob)->data);
   const bool use_face_sel = (me_orig->editflag & ME_EDIT_PAINT_FACE_SEL) != 0;
@@ -212,7 +222,7 @@ void OVERLAY_paint_texture_cache_populate(OVERLAY_Data *vedata, Object *ob)
 void OVERLAY_paint_vertex_cache_populate(OVERLAY_Data *vedata, Object *ob)
 {
   OVERLAY_PrivateData *pd = vedata->stl->pd;
-  GPUBatch *geom = nullptr;
+  blender::gpu::Batch *geom = nullptr;
 
   const Mesh *me_orig = static_cast<Mesh *>(DEG_get_original_object(ob)->data);
   const bool is_edit_mode = (pd->ctx_mode == CTX_MODE_EDIT_MESH);

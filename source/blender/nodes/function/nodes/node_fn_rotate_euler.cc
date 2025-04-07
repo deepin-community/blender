@@ -42,11 +42,11 @@ static void node_update(bNodeTree *ntree, bNode *node)
   bNodeSocket *axis_socket = static_cast<bNodeSocket *>(BLI_findlink(&node->inputs, 2));
   bNodeSocket *angle_socket = static_cast<bNodeSocket *>(BLI_findlink(&node->inputs, 3));
 
-  bke::nodeSetSocketAvailability(
+  bke::node_set_socket_availability(
       ntree, rotate_by_socket, ELEM(node->custom1, FN_NODE_ROTATE_EULER_TYPE_EULER));
-  bke::nodeSetSocketAvailability(
+  bke::node_set_socket_availability(
       ntree, axis_socket, ELEM(node->custom1, FN_NODE_ROTATE_EULER_TYPE_AXIS_ANGLE));
-  bke::nodeSetSocketAvailability(
+  bke::node_set_socket_availability(
       ntree, angle_socket, ELEM(node->custom1, FN_NODE_ROTATE_EULER_TYPE_AXIS_ANGLE));
 }
 
@@ -131,7 +131,7 @@ static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
 
 static void node_register()
 {
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
 
   fn_node_type_base(&ntype, FN_NODE_ROTATE_EULER, "Rotate Euler", NODE_CLASS_CONVERTER);
   ntype.declare = node_declare;
@@ -139,7 +139,7 @@ static void node_register()
   ntype.updatefunc = node_update;
   ntype.build_multi_function = node_build_multi_function;
   ntype.deprecation_notice = N_("Use the \"Rotate Rotation\" node instead");
-  nodeRegisterType(&ntype);
+  blender::bke::node_register_type(&ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

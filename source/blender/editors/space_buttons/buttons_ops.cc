@@ -14,16 +14,16 @@
 #include "DNA_userdef_types.h"
 
 #include "BLI_fileops.h"
-#include "BLI_path_util.h"
+#include "BLI_path_utils.hh"
 #include "BLI_string.h"
 #include "BLI_utildefines.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "BKE_appdir.hh"
 #include "BKE_context.hh"
 #include "BKE_main.hh"
-#include "BKE_report.h"
+#include "BKE_report.hh"
 #include "BKE_screen.hh"
 
 #include "WM_api.hh"
@@ -33,12 +33,12 @@
 #include "ED_undo.hh"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "UI_interface.hh"
 #include "UI_resources.hh"
 
-#include "buttons_intern.h" /* own include */
+#include "buttons_intern.hh" /* own include */
 
 /* -------------------------------------------------------------------- */
 /** \name Start / Clear Search Filter Operators
@@ -301,6 +301,20 @@ static int file_browse_invoke(bContext *C, wmOperator *op, const wmEvent *event)
     return OPERATOR_CANCELLED;
   }
 
+  {
+    const char *info;
+    if (!RNA_property_editable_info(&ptr, prop, &info)) {
+      if (info[0]) {
+        BKE_reportf(op->reports, RPT_ERROR, "Property is not editable: %s", info);
+      }
+      else {
+        BKE_report(op->reports, RPT_ERROR, "Property is not editable");
+      }
+      MEM_freeN(path);
+      return OPERATOR_CANCELLED;
+    }
+  }
+
   PropertyRNA *prop_relpath;
   const char *path_prop = RNA_struct_find_property(op->ptr, "directory") ? "directory" :
                                                                            "filepath";
@@ -334,30 +348,38 @@ static int file_browse_invoke(bContext *C, wmOperator *op, const wmEvent *event)
   }
 
   if (!path[0]) {
+    /* Assign a new value (don't use this one). */
+    MEM_freeN(path);
+    path = nullptr;
+
+    /* When no path was found, calculate a reasonable fallback. */
+    char path_fallback[FILE_MAX];
+    bool path_fallback_set = false;
+
     /* Defaults if the path is empty. */
     const char *prop_id = RNA_property_identifier(prop);
     /* NOTE: relying on built-in names isn't useful for add-on authors.
      * The property itself should support this kind of meta-data. */
     if (STR_ELEM(prop_id, "font_path_ui", "font_path_ui_mono", "font_directory")) {
-      if (!U.fontdir[0]) {
-        char fonts_dir[FILE_MAXDIR];
-        BKE_appdir_font_folder_default(fonts_dir, ARRAY_SIZE(fonts_dir));
-        BLI_path_slash_ensure(fonts_dir, ARRAY_SIZE(fonts_dir));
-        path = BLI_strdup(fonts_dir);
+      if (U.fontdir[0]) {
+        STRNCPY(path_fallback, U.fontdir);
+        path_fallback_set = true;
       }
-      else {
-        MEM_freeN(path);
-        path = BLI_strdup(U.fontdir);
+      else if (BKE_appdir_font_folder_default(path_fallback, ARRAY_SIZE(path_fallback))) {
+        path_fallback_set = true;
       }
       RNA_boolean_set(op->ptr, "filter_font", true);
       RNA_boolean_set(op->ptr, "filter_folder", true);
       RNA_enum_set(op->ptr, "display_type", FILE_IMGDISPLAY);
       RNA_enum_set(op->ptr, "sort_method", FILE_SORT_ALPHA);
     }
-    else {
-      MEM_freeN(path);
-      path = BLI_strdup(BKE_appdir_folder_default_or_root());
+
+    if (path_fallback_set == false) {
+      STRNCPY(path_fallback, BKE_appdir_folder_default_or_root());
     }
+
+    BLI_path_slash_ensure(path_fallback, ARRAY_SIZE(path_fallback));
+    path = BLI_strdup(path_fallback);
   }
 
   RNA_string_set(op->ptr, path_prop, path);

@@ -17,9 +17,8 @@
 #include "BKE_curves.hh"
 #include "BKE_customdata.hh"
 #include "BKE_geometry_set.hh"
-#include "BKE_global.h"
+#include "BKE_global.hh"
 #include "BKE_instances.hh"
-#include "BKE_mesh.hh"
 
 #include "BLI_array.hh"
 
@@ -75,7 +74,7 @@ static int seed_from_instances(const bke::Instances &instances)
 static void reorder_customdata(CustomData &data, const Span<int> new_by_old_map)
 {
   CustomData new_data;
-  CustomData_copy_layout(&data, &new_data, CD_MASK_ALL, CD_CONSTRUCT, new_by_old_map.size());
+  CustomData_init_layout_from(&data, &new_data, CD_MASK_ALL, CD_CONSTRUCT, new_by_old_map.size());
 
   for (const int old_i : new_by_old_map.index_range()) {
     const int new_i = new_by_old_map[old_i];
@@ -144,7 +143,7 @@ static void reorder_customdata_groups(CustomData &data,
   const int elements_num = new_offsets.total_size();
   const int groups_num = new_by_old_map.size();
   CustomData new_data;
-  CustomData_copy_layout(&data, &new_data, CD_MASK_ALL, CD_CONSTRUCT, elements_num);
+  CustomData_init_layout_from(&data, &new_data, CD_MASK_ALL, CD_CONSTRUCT, elements_num);
   for (const int old_i : IndexRange(groups_num)) {
     const int new_i = new_by_old_map[old_i];
     const IndexRange old_range = old_offsets[old_i];
@@ -234,27 +233,10 @@ void debug_randomize_instance_order(bke::Instances *instances)
   if (instances == nullptr || !use_debug_randomization()) {
     return;
   }
-
   const int instances_num = instances->instances_num();
   const int seed = seed_from_instances(*instances);
   const Array<int> new_by_old_map = get_permutation(instances_num, seed);
-
   reorder_customdata(instances->custom_data_attributes(), new_by_old_map);
-
-  const Span<int> old_reference_handles = instances->reference_handles();
-  const Span<float4x4> old_transforms = instances->transforms();
-
-  Vector<int> new_reference_handles(instances_num);
-  Vector<float4x4> new_transforms(instances_num);
-
-  for (const int old_i : new_by_old_map.index_range()) {
-    const int new_i = new_by_old_map[old_i];
-    new_reference_handles[new_i] = old_reference_handles[old_i];
-    new_transforms[new_i] = old_transforms[old_i];
-  }
-
-  instances->reference_handles_for_write().copy_from(new_reference_handles);
-  instances->transforms().copy_from(new_transforms);
 }
 
 bool use_debug_randomization()

@@ -4,6 +4,7 @@
 
 set(INC
   PUBLIC .
+  ../animrig
   ../blenkernel
   ../bmesh
   ../draw
@@ -12,7 +13,7 @@ set(INC
   ../modifiers
   ../sequencer
   ../windowmanager
-  # RNA_prototypes.h
+  # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
 
@@ -43,6 +44,7 @@ set(SRC
   intern/builder/pipeline.cc
   intern/builder/pipeline_all_objects.cc
   intern/builder/pipeline_compositor.cc
+  intern/builder/pipeline_from_collection.cc
   intern/builder/pipeline_from_ids.cc
   intern/builder/pipeline_render.cc
   intern/builder/pipeline_view_layer.cc
@@ -54,7 +56,6 @@ set(SRC
   intern/eval/deg_eval_flush.cc
   intern/eval/deg_eval_runtime_backup.cc
   intern/eval/deg_eval_runtime_backup_animation.cc
-  intern/eval/deg_eval_runtime_backup_gpencil.cc
   intern/eval/deg_eval_runtime_backup_modifier.cc
   intern/eval/deg_eval_runtime_backup_movieclip.cc
   intern/eval/deg_eval_runtime_backup_object.cc
@@ -114,6 +115,7 @@ set(SRC
   intern/builder/pipeline.h
   intern/builder/pipeline_all_objects.h
   intern/builder/pipeline_compositor.h
+  intern/builder/pipeline_from_collection.h
   intern/builder/pipeline_from_ids.h
   intern/builder/pipeline_render.h
   intern/builder/pipeline_view_layer.h
@@ -123,7 +125,6 @@ set(SRC
   intern/eval/deg_eval_flush.h
   intern/eval/deg_eval_runtime_backup.h
   intern/eval/deg_eval_runtime_backup_animation.h
-  intern/eval/deg_eval_runtime_backup_gpencil.h
   intern/eval/deg_eval_runtime_backup_modifier.h
   intern/eval/deg_eval_runtime_backup_movieclip.h
   intern/eval/deg_eval_runtime_backup_object.h
@@ -165,10 +166,14 @@ if(WITH_PYTHON)
   )
 endif()
 
+if(WITH_EXPERIMENTAL_FEATURES)
+  add_definitions(-DWITH_ANIM_BAKLAVA)
+endif()
+
 blender_add_lib(bf_depsgraph "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 add_library(bf::depsgraph ALIAS bf_depsgraph)
 
-# RNA_prototypes.h
+# RNA_prototypes.hh
 add_dependencies(bf_depsgraph bf_rna)
 
 if(WITH_GTESTS)

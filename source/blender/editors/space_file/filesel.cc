@@ -37,9 +37,9 @@
 #include "BLI_math_base.h"
 #include "BLI_utildefines.h"
 
-#include "BLO_readfile.h"
+#include "BLO_userdef_default.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "BKE_appdir.hh"
 #include "BKE_context.hh"
@@ -484,6 +484,10 @@ ID *ED_fileselect_active_asset_get(const SpaceFile *sfile)
     return nullptr;
   }
 
+  if (sfile->files == nullptr) {
+    return nullptr;
+  }
+
   FileSelectParams *params = ED_fileselect_get_active_params(sfile);
   const FileDirEntry *file = filelist_file(sfile->files, params->active_file);
   if (file == nullptr) {
@@ -628,8 +632,9 @@ void ED_fileselect_window_params_get(const wmWindow *win, int r_win_size[2], boo
   /* Get DPI/pixel-size independent size to be stored in preferences. */
   WM_window_set_dpi(win); /* Ensure the DPI is taken from the right window. */
 
-  r_win_size[0] = WM_window_pixels_x(win) / UI_SCALE_FAC;
-  r_win_size[1] = WM_window_pixels_y(win) / UI_SCALE_FAC;
+  const blender::int2 win_size = WM_window_native_pixel_size(win);
+  r_win_size[0] = win_size[0] / UI_SCALE_FAC;
+  r_win_size[1] = win_size[1] / UI_SCALE_FAC;
 
   *r_is_maximized = WM_window_is_maximized(win);
 }
@@ -1095,7 +1100,9 @@ void ED_fileselect_init_layout(SpaceFile *sfile, ARegion *region)
     file_attribute_columns_init(params, layout);
 
     layout->rows = std::max(rowcount, numfiles);
-    BLI_assert(layout->rows != 0);
+
+    /* layout->rows can be zero if a very small area is changed to a File Browser. #124168. */
+
     layout->height = sfile->layout->rows * (layout->tile_h + 2 * layout->tile_border_y) +
                      layout->tile_border_y * 2 + layout->offset_top;
     layout->flag = FILE_LAYOUT_VER;
@@ -1349,7 +1356,7 @@ void file_params_invoke_rename_postscroll(wmWindowManager *wm, wmWindow *win, Sp
 void file_params_rename_end(wmWindowManager *wm,
                             wmWindow *win,
                             SpaceFile *sfile,
-                            FileDirEntry *rename_file)
+                            const FileDirEntry *rename_file)
 {
   FileSelectParams *params = ED_fileselect_get_active_params(sfile);
 

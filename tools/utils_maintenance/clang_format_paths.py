@@ -22,6 +22,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Tuple,
 )
 
@@ -47,35 +48,33 @@ extensions_only_retab = (
     ".sh",
 )
 
-ignore_files = {
-    "intern/cycles/render/sobol.cpp",  # Too heavy for clang-format
+# Add files which are too large/heavy to format.
+ignore_files: Set[str] = set([
+    # Currently empty, looks like.
+    # "intern/cycles/render/sobol.cpp",
+])
+
+# Directories not to format (recursively).
+#
+# Notes:
+# - These directories must also have a `.clang-format` that disables formatting,
+#   so developers who use format-on-save functionality enabled don't have these files formatted on save.
+# - The reason to exclude here is to prevent unnecessary work were the files would run through clang-format
+#   only to do nothing because the `.clang-format` file prevents it.
+ignore_directories = {
+    "intern/itasc"
 }
 
 
 def compute_paths(paths: List[str], use_default_paths: bool) -> List[str]:
+    # The resulting paths:
+    # - Use forward slashes on all systems.
+    # - Are relative to the GIT repository without any `.` or `./` prefix.
+
     # Optionally pass in files to operate on.
     if use_default_paths:
         paths = [
-            "intern/atomic",
-            "intern/audaspace",
-            "intern/clog",
-            "intern/cycles",
-            "intern/dualcon",
-            "intern/eigen",
-            "intern/ffmpeg",
-            "intern/ghost",
-            "intern/glew-mx",
-            "intern/guardedalloc",
-            "intern/iksolver",
-            "intern/libmv",
-            "intern/locale",
-            "intern/memutil",
-            "intern/mikktspace",
-            "intern/opencolorio",
-            "intern/opensubdiv",
-            "intern/openvdb",
-            "intern/rigidbody",
-            "intern/utfconv",
+            "intern",
             "source",
             "tests/gtests",
         ]
@@ -133,7 +132,7 @@ def clang_format_ensure_version() -> Optional[Tuple[int, int, int]]:
     version_output = ""
     for i in range(2, -1, -1):
         clang_format_cmd = (
-            "clang-format-" + (".".join(["%d"] * i) % VERSION_MIN[:i])
+            "clang-format-" + (".".join(["{:d}"] * i).format(*VERSION_MIN[:i]))
             if i > 0 else
             "clang-format"
         )
@@ -150,7 +149,7 @@ def clang_format_ensure_version() -> Optional[Tuple[int, int, int]]:
     version = version.split("-")[0]
     # Ensure exactly 3 numbers.
     version_num: Tuple[int, int, int] = (tuple(int(n) for n in version.split(".")) + (0, 0, 0))[:3]  # type: ignore
-    print("Using %s (%d.%d.%d)..." % (CLANG_FORMAT_CMD, version_num[0], version_num[1], version_num[2]))
+    print("Using {:s} ({:d}.{:d}.{:d})...".format(CLANG_FORMAT_CMD, version_num[0], version_num[1], version_num[2]))
     return version_num
 
 
@@ -222,51 +221,70 @@ def argparse_create() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
+def main() -> int:
     version = clang_format_ensure_version()
     if version is None:
         print("Unable to detect 'clang-format -version'")
-        sys.exit(1)
+        return 1
     if version < VERSION_MIN:
         print("Version of clang-format is too old:", version, "<", VERSION_MIN)
-        sys.exit(1)
-    if version > VERSION_MAX_RECOMMENDED:
-        print(
-            "WARNING: Version of clang-format is too recent:",
-            version, ">", VERSION_MAX_RECOMMENDED,
-        )
-        print(
-            "You may want to install clang-format-%d.%d, "
-            "or use the precompiled libs repository." %
-            (VERSION_MAX_RECOMMENDED[0], VERSION_MAX_RECOMMENDED[1]),
-        )
+        return 1
 
     args = argparse_create().parse_args()
 
     use_default_paths = not (bool(args.paths) or bool(args.changed_only))
-
     paths = compute_paths(args.paths, use_default_paths)
-    print("Operating on:" + (" (%d changed paths)" % len(paths) if args.changed_only else ""))
+    # Check if user-defined paths exclude all clang-format sources.
+    if args.paths and not paths:
+        print("Skip clang-format: no target to format")
+        return 0
+
+    print("Operating on:" + (" ({:d} changed paths)".format(len(paths)) if args.changed_only else ""))
     for p in paths:
         print(" ", p)
+
+    # Notes:
+    # - Paths from GIT always use forward slashes (even on WIN32),
+    #   so there is no need to convert slashes.
+    # - Ensure a trailing slash so a `str.startswith` check can be used.
+    ignore_directories_tuple = tuple(p.rstrip("/") + "/" for p in ignore_directories)
 
     files = [
         f for f in source_files_from_git(paths, args.changed_only)
         if f.endswith(extensions)
         if f not in ignore_files
-    ]
+        if not f.startswith(ignore_directories_tuple)
 
-    # Always operate on all CMAKE files (when expanding tabs and no paths given).
-    files_retab = [
-        f for f in source_files_from_git((".",) if use_default_paths else paths, args.changed_only)
-        if f.endswith(extensions_only_retab)
-        if f not in ignore_files
     ]
 
     if args.expand_tabs:
+        # Always operate on all CMAKE files (when expanding tabs and no paths given).
+        files_retab = [
+            f for f in source_files_from_git((".",) if use_default_paths else paths, args.changed_only)
+            if f.endswith(extensions_only_retab)
+            if f not in ignore_files
+            if not f.startswith(ignore_directories_tuple)
+        ]
         convert_tabs_to_spaces(files + files_retab)
+
     clang_format(files)
+
+    if version > VERSION_MAX_RECOMMENDED:
+        print()
+        print(
+            "WARNING: Version of clang-format is too recent:",
+            version, ">", VERSION_MAX_RECOMMENDED,
+        )
+        print(
+            "You may want to install clang-format-{:d}.{:d}, "
+            "or use the precompiled libs repository.".format(
+                VERSION_MAX_RECOMMENDED[0], VERSION_MAX_RECOMMENDED[1],
+            ),
+        )
+        print()
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -25,7 +25,7 @@
 #include "BKE_main.hh"
 #include "BKE_mesh_runtime.hh"
 
-#include "BLO_readfile.h" /* for UserDef version patching. */
+#include "BLO_userdef_default.h"
 
 #include "BLF_api.hh"
 
@@ -34,7 +34,7 @@
 #include "UI_interface.hh"
 #include "UI_interface_icons.hh"
 
-#include "GPU_framebuffer.h"
+#include "GPU_framebuffer.hh"
 #include "interface_intern.hh"
 
 /* be sure to keep 'bThemeState' in sync */
@@ -63,7 +63,6 @@ const uchar *UI_ThemeGetColorPtr(bTheme *btheme, int spacetype, int colorid)
   ThemeSpace *ts = nullptr;
   static uchar error[4] = {240, 0, 240, 255};
   static uchar alert[4] = {240, 60, 60, 255};
-  static uchar header_active[4] = {0, 0, 0, 255};
   static uchar back[4] = {0, 0, 0, 255};
   static uchar setting = 0;
   const uchar *cp = error;
@@ -246,17 +245,6 @@ const uchar *UI_ThemeGetColorPtr(bTheme *btheme, int spacetype, int colorid)
           cp = ts->header;
           break;
 
-        case TH_HEADER_ACTIVE: {
-          cp = ts->header;
-          const int factor = 5;
-          /* Lighten the header color when editor is active. */
-          header_active[0] = cp[0] > 245 ? cp[0] - factor : cp[0] + factor;
-          header_active[1] = cp[1] > 245 ? cp[1] - factor : cp[1] + factor;
-          header_active[2] = cp[2] > 245 ? cp[2] - factor : cp[2] + factor;
-          header_active[3] = cp[3];
-          cp = header_active;
-          break;
-        }
         case TH_HEADER_TEXT:
           cp = ts->header_text;
           break;
@@ -505,6 +493,12 @@ const uchar *UI_ThemeGetColorPtr(bTheme *btheme, int spacetype, int colorid)
         case TH_KEYTYPE_MOVEHOLD_SELECT:
           cp = ts->keytype_movehold_select;
           break;
+        case TH_KEYTYPE_GENERATED:
+          cp = ts->keytype_generated;
+          break;
+        case TH_KEYTYPE_GENERATED_SELECT:
+          cp = ts->keytype_generated_select;
+          break;
         case TH_KEYBORDER:
           cp = ts->keyborder;
           break;
@@ -513,6 +507,12 @@ const uchar *UI_ThemeGetColorPtr(bTheme *btheme, int spacetype, int colorid)
           break;
         case TH_CFRAME:
           cp = ts->cframe;
+          break;
+        case TH_FRAME_BEFORE:
+          cp = ts->before_current_frame;
+          break;
+        case TH_FRAME_AFTER:
+          cp = ts->after_current_frame;
           break;
         case TH_TIME_KEYFRAME:
           cp = ts->time_keyframe;
@@ -671,6 +671,9 @@ const uchar *UI_ThemeGetColorPtr(bTheme *btheme, int spacetype, int colorid)
           break;
         case TH_NODE_ZONE_REPEAT:
           cp = ts->node_zone_repeat;
+          break;
+        case TH_NODE_ZONE_FOREACH_GEOMETRY_ELEMENT:
+          cp = ts->node_zone_foreach_geometry_element;
           break;
         case TH_SIMULATED_FRAMES:
           cp = ts->simulated_frames;
@@ -928,8 +931,14 @@ const uchar *UI_ThemeGetColorPtr(bTheme *btheme, int spacetype, int colorid)
           cp = btheme->tui.widget_emboss;
           break;
 
+        case TH_EDITOR_BORDER:
+          cp = btheme->tui.editor_border;
+          break;
         case TH_EDITOR_OUTLINE:
           cp = btheme->tui.editor_outline;
+          break;
+        case TH_EDITOR_OUTLINE_ACTIVE:
+          cp = btheme->tui.editor_outline_active;
           break;
         case TH_WIDGET_TEXT_CURSOR:
           cp = btheme->tui.widget_text_cursor;
@@ -1001,6 +1010,9 @@ const uchar *UI_ThemeGetColorPtr(bTheme *btheme, int spacetype, int colorid)
         case TH_ICON_FOLDER:
           cp = btheme->tui.icon_folder;
           break;
+        case TH_ICON_AUTOKEY:
+          cp = btheme->tui.icon_autokey;
+          break;
         case TH_ICON_FUND: {
           /* Development fund icon color is not part of theme. */
           static const uchar red[4] = {204, 48, 72, 255};
@@ -1066,18 +1078,22 @@ const uchar *UI_ThemeGetColorPtr(bTheme *btheme, int spacetype, int colorid)
 
 void UI_theme_init_default()
 {
-  /* we search for the theme with name Default */
+  /* We search for the theme with the default name. */
   bTheme *btheme = static_cast<bTheme *>(
-      BLI_findstring(&U.themes, "Default", offsetof(bTheme, name)));
+      BLI_findstring(&U.themes, U_theme_default.name, offsetof(bTheme, name)));
   if (btheme == nullptr) {
     btheme = MEM_cnew<bTheme>(__func__);
-    BLI_addtail(&U.themes, btheme);
+    STRNCPY(btheme->name, U_theme_default.name);
+    BLI_addhead(&U.themes, btheme);
   }
+
+  /* Must be first, see `U.themes` doc-string. */
+  BLI_listbase_rotate_first(&U.themes, btheme);
 
   UI_SetTheme(0, 0); /* make sure the global used in this file is set */
 
   const int active_theme_area = btheme->active_theme_area;
-  memcpy(btheme, &U_theme_default, sizeof(*btheme));
+  MEMCPY_STRUCT_AFTER(btheme, &U_theme_default, name);
   btheme->active_theme_area = active_theme_area;
 }
 
@@ -1119,7 +1135,7 @@ void UI_Theme_Store(bThemeState *theme_state)
 {
   *theme_state = g_theme_state;
 }
-void UI_Theme_Restore(bThemeState *theme_state)
+void UI_Theme_Restore(const bThemeState *theme_state)
 {
   g_theme_state = *theme_state;
 }
@@ -1458,7 +1474,7 @@ bool UI_GetIconThemeColor4ubv(int colorid, uchar col[4])
   return true;
 }
 
-void UI_GetColorPtrShade3ubv(const uchar cp[3], uchar col[3], int offset)
+void UI_GetColorPtrShade3ubv(const uchar cp[3], int offset, uchar r_col[3])
 {
   int r, g, b;
 
@@ -1470,13 +1486,13 @@ void UI_GetColorPtrShade3ubv(const uchar cp[3], uchar col[3], int offset)
   CLAMP(g, 0, 255);
   CLAMP(b, 0, 255);
 
-  col[0] = r;
-  col[1] = g;
-  col[2] = b;
+  r_col[0] = r;
+  r_col[1] = g;
+  r_col[2] = b;
 }
 
 void UI_GetColorPtrBlendShade3ubv(
-    const uchar cp1[3], const uchar cp2[3], uchar col[3], float fac, int offset)
+    const uchar cp1[3], const uchar cp2[3], float fac, int offset, uchar r_col[3])
 {
   int r, g, b;
 
@@ -1489,9 +1505,9 @@ void UI_GetColorPtrBlendShade3ubv(
   CLAMP(g, 0, 255);
   CLAMP(b, 0, 255);
 
-  col[0] = r;
-  col[1] = g;
-  col[2] = b;
+  r_col[0] = r;
+  r_col[1] = g;
+  r_col[2] = b;
 }
 
 void UI_ThemeClearColor(int colorid)
@@ -1504,26 +1520,26 @@ void UI_ThemeClearColor(int colorid)
 
 int UI_ThemeMenuShadowWidth()
 {
-  bTheme *btheme = UI_GetTheme();
+  const bTheme *btheme = UI_GetTheme();
   return int(btheme->tui.menu_shadow_width * UI_SCALE_FAC);
 }
 
-void UI_make_axis_color(const uchar src_col[3], uchar dst_col[3], const char axis)
+void UI_make_axis_color(const uchar col[3], const char axis, uchar r_col[3])
 {
-  uchar col[3];
+  uchar col_axis[3];
 
   switch (axis) {
     case 'X':
-      UI_GetThemeColor3ubv(TH_AXIS_X, col);
-      UI_GetColorPtrBlendShade3ubv(src_col, col, dst_col, 0.5f, -10);
+      UI_GetThemeColor3ubv(TH_AXIS_X, col_axis);
+      UI_GetColorPtrBlendShade3ubv(col, col_axis, 0.5f, -10, r_col);
       break;
     case 'Y':
-      UI_GetThemeColor3ubv(TH_AXIS_Y, col);
-      UI_GetColorPtrBlendShade3ubv(src_col, col, dst_col, 0.5f, -10);
+      UI_GetThemeColor3ubv(TH_AXIS_Y, col_axis);
+      UI_GetColorPtrBlendShade3ubv(col, col_axis, 0.5f, -10, r_col);
       break;
     case 'Z':
-      UI_GetThemeColor3ubv(TH_AXIS_Z, col);
-      UI_GetColorPtrBlendShade3ubv(src_col, col, dst_col, 0.5f, -10);
+      UI_GetThemeColor3ubv(TH_AXIS_Z, col_axis);
+      UI_GetColorPtrBlendShade3ubv(col, col_axis, 0.5f, -10, r_col);
       break;
     default:
       BLI_assert(0);

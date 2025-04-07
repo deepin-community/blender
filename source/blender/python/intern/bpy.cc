@@ -21,41 +21,39 @@
 
 #include "BKE_appdir.hh"
 #include "BKE_blender_version.h"
-#include "BKE_bpath.h"
-#include "BKE_global.h" /* XXX, G_MAIN only */
+#include "BKE_bpath.hh"
+#include "BKE_global.hh" /* XXX, G_MAIN only */
 
 #include "RNA_access.hh"
 #include "RNA_enum_types.hh"
-#include "RNA_prototypes.h"
-#include "RNA_types.hh"
+#include "RNA_prototypes.hh"
 
-#include "GPU_state.h"
+#include "GPU_state.hh"
 
 #include "WM_api.hh" /* For #WM_ghost_backend */
 
-#include "bpy.h"
-#include "bpy_app.h"
-#include "bpy_capi_utils.h"
-#include "bpy_driver.h"
-#include "bpy_library.h"
-#include "bpy_operator.h"
-#include "bpy_props.h"
-#include "bpy_rna.h"
-#include "bpy_rna_data.h"
-#include "bpy_rna_gizmo.h"
-#include "bpy_rna_id_collection.h"
-#include "bpy_rna_types_capi.h"
-#include "bpy_utils_previews.h"
-#include "bpy_utils_units.h"
+#include "bpy.hh"
+#include "bpy_app.hh"
+#include "bpy_cli_command.hh"
+#include "bpy_driver.hh"
+#include "bpy_library.hh"
+#include "bpy_operator.hh"
+#include "bpy_props.hh"
+#include "bpy_rna.hh"
+#include "bpy_rna_data.hh"
+#include "bpy_rna_gizmo.hh"
+#include "bpy_rna_types_capi.hh"
+#include "bpy_utils_previews.hh"
+#include "bpy_utils_units.hh"
 
-#include "../generic/py_capi_utils.h"
-#include "../generic/python_compat.h"
-#include "../generic/python_utildefines.h"
+#include "../generic/py_capi_utils.hh"
+#include "../generic/python_compat.hh"
+#include "../generic/python_utildefines.hh"
 
 /* external util modules */
-#include "../generic/idprop_py_api.h"
-#include "../generic/idprop_py_ui_api.h"
-#include "bpy_msgbus.h"
+#include "../generic/idprop_py_api.hh"
+#include "../generic/idprop_py_ui_api.hh"
+#include "bpy_msgbus.hh"
 
 #ifdef WITH_FREESTYLE
 #  include "BPy_Freestyle.h"
@@ -71,18 +69,18 @@ PyDoc_STRVAR(
     "   Return 2 paths to blender scripts directories.\n"
     "\n"
     "   :return: (system, user) strings will be empty when not found.\n"
-    "   :rtype: tuple of strings\n");
+    "   :rtype: tuple[str, str]\n");
 static PyObject *bpy_script_paths(PyObject * /*self*/)
 {
   PyObject *ret = PyTuple_New(2);
   PyObject *item;
 
   std::optional<std::string> path = BKE_appdir_folder_id(BLENDER_SYSTEM_SCRIPTS, nullptr);
-  item = PyC_UnicodeFromStdStr(path.has_value() ? path.value() : "");
+  item = PyC_UnicodeFromStdStr(path.value_or(""));
   BLI_assert(item != nullptr);
   PyTuple_SET_ITEM(ret, 0, item);
   path = BKE_appdir_folder_id(BLENDER_USER_SCRIPTS, nullptr);
-  item = PyC_UnicodeFromStdStr(path.has_value() ? path.value() : "");
+  item = PyC_UnicodeFromStdStr(path.value_or(""));
   BLI_assert(item != nullptr);
   PyTuple_SET_ITEM(ret, 1, item);
 
@@ -107,13 +105,13 @@ PyDoc_STRVAR(
     "   Returns a list of paths to external files referenced by the loaded .blend file.\n"
     "\n"
     "   :arg absolute: When true the paths returned are made absolute.\n"
-    "   :type absolute: boolean\n"
+    "   :type absolute: bool\n"
     "   :arg packed: When true skip file paths for packed data.\n"
-    "   :type packed: boolean\n"
+    "   :type packed: bool\n"
     "   :arg local: When true skip linked library paths.\n"
-    "   :type local: boolean\n"
+    "   :type local: bool\n"
     "   :return: path list.\n"
-    "   :rtype: list of strings\n");
+    "   :rtype: list[str]\n");
 static PyObject *bpy_blend_paths(PyObject * /*self*/, PyObject *args, PyObject *kw)
 {
   eBPathForeachFlag flag = eBPathForeachFlag(0);
@@ -178,11 +176,11 @@ PyDoc_STRVAR(
     "   mirroring bone names.\n"
     "\n"
     "   :arg name: Bone name to flip.\n"
-    "   :type name: string\n"
+    "   :type name: str\n"
     "   :arg strip_digits: Whether to remove ``.###`` suffix.\n"
     "   :type strip_digits: bool\n"
     "   :return: The flipped name.\n"
-    "   :rtype: string\n");
+    "   :rtype: str\n");
 static PyObject *bpy_flip_name(PyObject * /*self*/, PyObject *args, PyObject *kw)
 {
   const char *name_src = nullptr;
@@ -225,7 +223,7 @@ static PyObject *bpy_user_resource(PyObject * /*self*/, PyObject *args, PyObject
       {BLENDER_USER_DATAFILES, "DATAFILES"},
       {BLENDER_USER_CONFIG, "CONFIG"},
       {BLENDER_USER_SCRIPTS, "SCRIPTS"},
-      {BLENDER_USER_AUTOSAVE, "AUTOSAVE"},
+      {BLENDER_USER_EXTENSIONS, "EXTENSIONS"},
       {0, nullptr},
   };
   PyC_StringEnum type = {type_items};
@@ -258,7 +256,7 @@ static PyObject *bpy_user_resource(PyObject * /*self*/, PyObject *args, PyObject
                                                                            subdir_data.value);
   Py_XDECREF(subdir_data.value_coerce);
 
-  return PyC_UnicodeFromStdStr(path.has_value() ? path.value() : "");
+  return PyC_UnicodeFromStdStr(path.value_or(""));
 }
 
 PyDoc_STRVAR(
@@ -268,15 +266,16 @@ PyDoc_STRVAR(
     "\n"
     "   Return a system resource path.\n"
     "\n"
-    "   :arg type: string in ['DATAFILES', 'SCRIPTS', 'PYTHON'].\n"
-    "   :type type: string\n"
+    "   :arg type: string in ['DATAFILES', 'SCRIPTS', 'EXTENSIONS', 'PYTHON'].\n"
+    "   :type type: str\n"
     "   :arg path: Optional subdirectory.\n"
-    "   :type path: string or bytes\n");
+    "   :type path: str | bytes\n");
 static PyObject *bpy_system_resource(PyObject * /*self*/, PyObject *args, PyObject *kw)
 {
   const PyC_StringEnumItems type_items[] = {
       {BLENDER_SYSTEM_DATAFILES, "DATAFILES"},
       {BLENDER_SYSTEM_SCRIPTS, "SCRIPTS"},
+      {BLENDER_SYSTEM_EXTENSIONS, "EXTENSIONS"},
       {BLENDER_SYSTEM_PYTHON, "PYTHON"},
       {0, nullptr},
   };
@@ -308,7 +307,7 @@ static PyObject *bpy_system_resource(PyObject * /*self*/, PyObject *args, PyObje
   std::optional<std::string> path = BKE_appdir_folder_id(type.value_found, subdir_data.value);
   Py_XDECREF(subdir_data.value_coerce);
 
-  return PyC_UnicodeFromStdStr(path.has_value() ? path.value() : "");
+  return PyC_UnicodeFromStdStr(path.value_or(""));
 }
 
 PyDoc_STRVAR(
@@ -319,13 +318,13 @@ PyDoc_STRVAR(
     "   Return the base path for storing system files.\n"
     "\n"
     "   :arg type: string in ['USER', 'LOCAL', 'SYSTEM'].\n"
-    "   :type type: string\n"
+    "   :type type: str\n"
     "   :arg major: major version, defaults to current.\n"
     "   :type major: int\n"
     "   :arg minor: minor version, defaults to current.\n"
-    "   :type minor: string\n"
+    "   :type minor: str\n"
     "   :return: the resource path (not necessarily existing).\n"
-    "   :rtype: string\n");
+    "   :rtype: str\n");
 static PyObject *bpy_resource_path(PyObject * /*self*/, PyObject *args, PyObject *kw)
 {
   const PyC_StringEnumItems type_items[] = {
@@ -358,7 +357,7 @@ static PyObject *bpy_resource_path(PyObject * /*self*/, PyObject *args, PyObject
   const std::optional<std::string> path = BKE_appdir_resource_path_id_with_version(
       type.value_found, false, (major * 100) + minor);
 
-  return PyC_UnicodeFromStdStr(path.has_value() ? path.value() : "");
+  return PyC_UnicodeFromStdStr(path.value_or(""));
 }
 
 /* This is only exposed for tests, see: `tests/python/bl_pyapi_bpy_driver_secure_eval.py`. */
@@ -372,7 +371,7 @@ PyDoc_STRVAR(
     "   :arg code: The code to test.\n"
     "   :type code: code\n"
     "   :arg namespace: The namespace of values which are allowed.\n"
-    "   :type namespace: dict\n"
+    "   :type namespace: dict[str, Any]\n"
     "   :arg verbose: Print the reason for considering insecure to the ``stderr``.\n"
     "   :type verbose: bool\n"
     "   :return: True when the script is considered trusted.\n"
@@ -416,9 +415,9 @@ PyDoc_STRVAR(
     "   Simple string escaping function used for animation paths.\n"
     "\n"
     "   :arg string: text\n"
-    "   :type string: string\n"
+    "   :type string: str\n"
     "   :return: The escaped string.\n"
-    "   :rtype: string\n");
+    "   :rtype: str\n");
 static PyObject *bpy_escape_identifier(PyObject * /*self*/, PyObject *value)
 {
   Py_ssize_t value_str_len;
@@ -453,12 +452,12 @@ PyDoc_STRVAR(
     ".. function:: unescape_identifier(string)\n"
     "\n"
     "   Simple string un-escape function used for animation paths.\n"
-    "   This performs the reverse of `escape_identifier`.\n"
+    "   This performs the reverse of :func:`escape_identifier`.\n"
     "\n"
     "   :arg string: text\n"
-    "   :type string: string\n"
+    "   :type string: str\n"
     "   :return: The un-escaped string.\n"
-    "   :rtype: string\n");
+    "   :rtype: str\n");
 static PyObject *bpy_unescape_identifier(PyObject * /*self*/, PyObject *value)
 {
   Py_ssize_t value_str_len;
@@ -506,7 +505,7 @@ PyDoc_STRVAR(
     ".. function:: context_members()\n"
     "\n"
     "   :return: A dict where the key is the context and the value is a tuple of it's members.\n"
-    "   :rtype: dict\n");
+    "   :rtype: dict[str, tuple[str]]\n");
 static PyObject *bpy_context_members(PyObject * /*self*/)
 {
 
@@ -553,9 +552,8 @@ PyDoc_STRVAR(
     bpy_rna_enum_items_static_doc,
     ".. function:: rna_enum_items_static()\n"
     "\n"
-    "   :return: A dict where the key the name of the enum, the value is a tuple of "
-    ":class:`bpy.types.EnumPropertyItem`.\n"
-    "   :rtype: dict of \n");
+    "   :return: A dict where the key the name of the enum, the value is a tuple of enum items.\n"
+    "   :rtype: dict[str, tuple[:class:`bpy.types.EnumPropertyItem`]]\n");
 static PyObject *bpy_rna_enum_items_static(PyObject * /*self*/)
 {
 #define DEF_ENUM(id) {STRINGIFY(id), id},
@@ -589,10 +587,61 @@ PyDoc_STRVAR(
     ".. function:: _ghost_backend()\n"
     "\n"
     "   :return: An identifier for the GHOST back-end.\n"
-    "   :rtype: string\n");
+    "   :rtype: str\n");
 static PyObject *bpy_ghost_backend(PyObject * /*self*/)
 {
   return PyUnicode_FromString(WM_ghost_backend());
+}
+
+/* NOTE(@ideasman42): This is a private function because the keys in the returned dictionary,
+ * are not considered stable. Sometimes a function is temporarily only supported by one platform.
+ * Once all platforms support the functionality there is no need for the flag
+ * and it can be removed. This is at odds with a public API that has values which are
+ * intended to be kept between releases.
+ * If this were to be made public we would have to document that this is subject to change. */
+
+PyDoc_STRVAR(
+    /* Wrap. */
+    bpy_wm_capabilities_doc,
+    ".. function:: _wm_capabilities()\n"
+    "\n"
+    "   :return: A dictionary of capabilities (string keys, boolean values).\n"
+    "   :rtype: dict[str, bool]\n");
+static PyObject *bpy_wm_capabilities(PyObject *self)
+{
+  static _Py_Identifier PyId_capabilities = {"_wm_capabilities_", -1};
+
+  PyObject *result = nullptr;
+  switch (_PyObject_LookupAttrId(self, &PyId_capabilities, &result)) {
+    case 1:
+      return result;
+    case 0:
+      break;
+    default:
+      /* Unlikely, but there may be an error, forward it. */
+      return nullptr;
+  }
+
+  result = PyDict_New();
+
+  const eWM_CapabilitiesFlag flag = WM_capabilities_flag();
+
+#define SetFlagItem(x) \
+  PyDict_SetItemString(result, STRINGIFY(x), PyBool_FromLong((WM_CAPABILITY_##x) & flag));
+
+  SetFlagItem(CURSOR_WARP);
+  SetFlagItem(WINDOW_POSITION);
+  SetFlagItem(PRIMARY_CLIPBOARD);
+  SetFlagItem(GPU_FRONT_BUFFER_READ);
+  SetFlagItem(CLIPBOARD_IMAGES);
+  SetFlagItem(DESKTOP_SAMPLE);
+  SetFlagItem(INPUT_IME);
+  SetFlagItem(TRACKPAD_PHYSICAL_DIRECTION);
+
+#undef SetFlagItem
+
+  _PyObject_SetAttrId(self, &PyId_capabilities, result);
+  return result;
 }
 
 #if (defined(__GNUC__) && !defined(__clang__))
@@ -633,6 +682,7 @@ static PyMethodDef bpy_methods[] = {
      METH_VARARGS | METH_KEYWORDS,
      bpy_driver_secure_code_test_doc},
     {"_ghost_backend", (PyCFunction)bpy_ghost_backend, METH_NOARGS, bpy_ghost_backend_doc},
+    {"_wm_capabilities", (PyCFunction)bpy_wm_capabilities, METH_NOARGS, bpy_wm_capabilities_doc},
 
     {nullptr, nullptr, 0, nullptr},
 };
@@ -689,7 +739,8 @@ void BPy_init_modules(bContext *C)
   Py_DECREF(mod);
 
   /* needs to be first so bpy_types can run */
-  PyModule_AddObject(mod, "types", BPY_rna_types());
+  PyObject *bpy_types = BPY_rna_types();
+  PyModule_AddObject(mod, "types", bpy_types);
 
   /* needs to be first so bpy_types can run */
   BPY_library_load_type_ready();
@@ -701,6 +752,8 @@ void BPy_init_modules(bContext *C)
   bpy_import_test("bpy_types");
   PyModule_AddObject(mod, "data", BPY_rna_module()); /* imports bpy_types by running this */
   bpy_import_test("bpy_types");
+  BPY_rna_types_finalize_external_types(bpy_types);
+
   PyModule_AddObject(mod, "props", BPY_rna_props());
   /* ops is now a python module that does the conversion from SOME_OT_foo -> some.foo */
   PyModule_AddObject(mod, "ops", BPY_operator_module());
@@ -720,27 +773,28 @@ void BPy_init_modules(bContext *C)
   /* Register methods and property get/set for RNA types. */
   BPY_rna_types_extend_capi();
 
+#define PYMODULE_ADD_METHOD(mod, meth) \
+  PyModule_AddObject(mod, (meth)->ml_name, (PyObject *)PyCFunction_New(meth, mod))
+
   for (int i = 0; bpy_methods[i].ml_name; i++) {
     PyMethodDef *m = &bpy_methods[i];
     /* Currently there is no need to support these. */
     BLI_assert((m->ml_flags & (METH_CLASS | METH_STATIC)) == 0);
-    PyModule_AddObject(mod, m->ml_name, (PyObject *)PyCFunction_New(m, nullptr));
+    PYMODULE_ADD_METHOD(mod, m);
   }
 
   /* Register functions (`bpy_rna.cc`). */
-  PyModule_AddObject(mod,
-                     meth_bpy_register_class.ml_name,
-                     (PyObject *)PyCFunction_New(&meth_bpy_register_class, nullptr));
-  PyModule_AddObject(mod,
-                     meth_bpy_unregister_class.ml_name,
-                     (PyObject *)PyCFunction_New(&meth_bpy_unregister_class, nullptr));
+  PYMODULE_ADD_METHOD(mod, &meth_bpy_register_class);
+  PYMODULE_ADD_METHOD(mod, &meth_bpy_unregister_class);
 
-  PyModule_AddObject(mod,
-                     meth_bpy_owner_id_get.ml_name,
-                     (PyObject *)PyCFunction_New(&meth_bpy_owner_id_get, nullptr));
-  PyModule_AddObject(mod,
-                     meth_bpy_owner_id_set.ml_name,
-                     (PyObject *)PyCFunction_New(&meth_bpy_owner_id_set, nullptr));
+  PYMODULE_ADD_METHOD(mod, &meth_bpy_owner_id_get);
+  PYMODULE_ADD_METHOD(mod, &meth_bpy_owner_id_set);
+
+  /* Register command functions. */
+  PYMODULE_ADD_METHOD(mod, &BPY_cli_command_register_def);
+  PYMODULE_ADD_METHOD(mod, &BPY_cli_command_unregister_def);
+
+#undef PYMODULE_ADD_METHOD
 
   /* add our own modules dir, this is a python package */
   bpy_package_py = bpy_import_test("bpy");

@@ -33,7 +33,7 @@ class HIPRTDevice : public HIPDevice {
  public:
   virtual BVHLayoutMask get_bvh_layout_mask(const uint kernel_features) const override;
 
-  HIPRTDevice(const DeviceInfo &info, Stats &stats, Profiler &profiler);
+  HIPRTDevice(const DeviceInfo &info, Stats &stats, Profiler &profiler, bool headless);
 
   virtual ~HIPRTDevice();
   virtual unique_ptr<DeviceQueue> gpu_queue_create() override;
@@ -53,7 +53,7 @@ class HIPRTDevice : public HIPDevice {
     return hiprt_context;
   }
 
-  device_vector<int> global_stack_buffer;
+  hiprtGlobalStackBuffer global_stack_buffer;
 
  protected:
   enum Filter_Function { Closest = 0, Shadows, Local, Volume, Max_Intersect_Filter_Function };
@@ -111,7 +111,7 @@ class HIPRTDevice : public HIPDevice {
    * blas_ptr has all the valid pointers and null pointers and blas for any geometry can be
    * directly retrieved from this array (used in subsurface scattering). */
   device_vector<int> user_instance_id;
-  device_vector<uint64_t> hiprt_blas_ptr;
+  device_vector<hiprtInstance> hiprt_blas_ptr;
   device_vector<uint64_t> blas_ptr;
 
   /* custom_prim_info stores custom information for custom primitives for all the primitives in a

@@ -17,8 +17,8 @@
 #include "UI_interface.hh"
 #include "UI_resources.hh"
 
-#include "GPU_shader.h"
-#include "GPU_texture.h"
+#include "GPU_shader.hh"
+#include "GPU_texture.hh"
 
 #include "COM_distortion_grid.hh"
 #include "COM_node_operation.hh"
@@ -77,16 +77,7 @@ static void node_composit_buts_moviedistortion(uiLayout *layout, bContext *C, Po
 {
   bNode *node = (bNode *)ptr->data;
 
-  uiTemplateID(layout,
-               C,
-               ptr,
-               "clip",
-               nullptr,
-               "CLIP_OT_open",
-               nullptr,
-               UI_TEMPLATE_ID_FILTER_ALL,
-               false,
-               nullptr);
+  uiTemplateID(layout, C, ptr, "clip", nullptr, "CLIP_OT_open", nullptr);
 
   if (!node->id) {
     return;
@@ -121,8 +112,8 @@ class MovieDistortionOperation : public NodeOperation {
     GPUShader *shader = context().get_shader("compositor_movie_distortion");
     GPU_shader_bind(shader);
 
-    GPU_texture_extend_mode(input_image.texture(), GPU_SAMPLER_EXTEND_MODE_CLAMP_TO_BORDER);
-    GPU_texture_filter_mode(input_image.texture(), true);
+    GPU_texture_extend_mode(input_image, GPU_SAMPLER_EXTEND_MODE_CLAMP_TO_BORDER);
+    GPU_texture_filter_mode(input_image, true);
     input_image.bind_as_texture(shader, "input_tx");
 
     distortion_grid.bind_as_texture(shader, "distortion_grid_tx");
@@ -160,15 +151,15 @@ void register_node_type_cmp_moviedistortion()
 {
   namespace file_ns = blender::nodes::node_composite_moviedistortion_cc;
 
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
 
   cmp_node_type_base(&ntype, CMP_NODE_MOVIEDISTORTION, "Movie Distortion", NODE_CLASS_DISTORT);
   ntype.declare = file_ns::cmp_node_moviedistortion_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_moviedistortion;
   ntype.labelfunc = file_ns::label;
   ntype.initfunc_api = file_ns::init;
-  node_type_storage(&ntype, nullptr, file_ns::storage_free, file_ns::storage_copy);
+  blender::bke::node_type_storage(&ntype, nullptr, file_ns::storage_free, file_ns::storage_copy);
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  nodeRegisterType(&ntype);
+  blender::bke::node_register_type(&ntype);
 }

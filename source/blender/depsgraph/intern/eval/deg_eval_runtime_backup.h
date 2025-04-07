@@ -11,7 +11,6 @@
 #include "DNA_ID.h"
 
 #include "intern/eval/deg_eval_runtime_backup_animation.h"
-#include "intern/eval/deg_eval_runtime_backup_gpencil.h"
 #include "intern/eval/deg_eval_runtime_backup_movieclip.h"
 #include "intern/eval/deg_eval_runtime_backup_object.h"
 #include "intern/eval/deg_eval_runtime_backup_scene.h"
@@ -34,13 +33,13 @@ class RuntimeBackup {
 
   /* Denotes whether init_from_id did put anything into the backup storage.
    * This will not be the case when init_from_id() is called for an ID which has never been
-   * copied-on-write. In this case there is no need to backup or restore anything.
+   * copied-on-eval. In this case there is no need to backup or restore anything.
    *
    * It also allows to have restore() logic to be symmetrical to init() without need to worry
    * that init() might not have happened.
    *
    * In practice this is used by audio system to lock audio while scene is going through
-   * copy-on-write mechanism. */
+   * copy-on-evaluation mechanism. */
   bool have_backup;
 
   /* Struct members of the ID pointer. */
@@ -56,7 +55,6 @@ class RuntimeBackup {
   DrawDataList *drawdata_ptr;
   MovieClipBackup movieclip_backup;
   VolumeBackup volume_backup;
-  GPencilBackup gpencil_backup;
 };
 
 }  // namespace blender::deg

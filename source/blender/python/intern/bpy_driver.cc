@@ -20,21 +20,20 @@
 
 #include "BKE_animsys.h"
 #include "BKE_fcurve_driver.h"
-#include "BKE_global.h"
+#include "BKE_global.hh"
 #include "BKE_idtype.hh"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
-#include "RNA_types.hh"
+#include "RNA_prototypes.hh"
 
-#include "bpy_rna_driver.h" /* For #pyrna_driver_get_variable_value. */
+#include "bpy_rna_driver.hh" /* For #pyrna_driver_get_variable_value. */
 
-#include "bpy_intern_string.h"
+#include "bpy_intern_string.hh"
 
-#include "bpy_driver.h"
-#include "bpy_rna.h"
+#include "bpy_driver.hh"
+#include "bpy_rna.hh"
 
-#include "BPY_extern.h"
+#include "BPY_extern.hh"
 
 #define USE_RNA_AS_PYOBJECT
 
@@ -494,7 +493,7 @@ float BPY_driver_exec(PathResolvedRNA *anim_rna,
    * now release the GIL on python operator execution instead, using
    * #PyEval_SaveThread() / #PyEval_RestoreThread() so we don't lock up blender.
    *
-   * For copy-on-write we always cache expressions and write errors in the
+   * For copy-on-evaluation we always cache expressions and write errors in the
    * original driver, otherwise these would get freed while editing.
    * Due to the GIL this is thread-safe. */
 
@@ -528,6 +527,7 @@ float BPY_driver_exec(PathResolvedRNA *anim_rna,
 
       printf("skipping driver '%s', automatic scripts are disabled\n", expr);
     }
+    driver_orig->flag |= DRIVER_FLAG_PYTHON_BLOCKED;
     return 0.0f;
   }
 #else
@@ -582,6 +582,8 @@ float BPY_driver_exec(PathResolvedRNA *anim_rna,
 
     /* Maybe this can be removed but for now best keep until were sure. */
     driver_orig->flag |= DRIVER_FLAG_RENAMEVAR;
+    driver_orig->flag &= ~DRIVER_FLAG_PYTHON_BLOCKED;
+
 #ifdef USE_BYTECODE_WHITELIST
     is_recompile = true;
 #endif
@@ -634,7 +636,7 @@ float BPY_driver_exec(PathResolvedRNA *anim_rna,
           dvar->curval = float(PyLong_AsLong(driver_arg));
         }
         else if (PyBool_Check(driver_arg)) {
-          dvar->curval = (driver_arg == Py_True);
+          dvar->curval = float(driver_arg == Py_True);
         }
         else {
           dvar->curval = 0.0f;
@@ -690,6 +692,7 @@ float BPY_driver_exec(PathResolvedRNA *anim_rna,
         Py_DECREF(expr_code);
         expr_code = nullptr;
         PyTuple_SET_ITEM(((PyObject *)driver_orig->expr_comp), 0, nullptr);
+        driver_orig->flag |= DRIVER_FLAG_PYTHON_BLOCKED;
       }
     }
   }

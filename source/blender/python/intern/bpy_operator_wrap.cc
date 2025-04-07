@@ -20,11 +20,11 @@
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
-#include "bpy_intern_string.h"
-#include "bpy_operator_wrap.h" /* own include */
-#include "bpy_rna.h"
+#include "bpy_intern_string.hh"
+#include "bpy_operator_wrap.hh" /* own include */
+#include "bpy_rna.hh"
 
 static void operator_properties_init(wmOperatorType *ot)
 {
@@ -129,15 +129,17 @@ PyObject *PYOP_wrap_macro_define(PyObject * /*self*/, PyObject *args)
   PyObject *macro;
   StructRNA *srna;
 
-  const char *opname;
-  const char *macroname;
+  const char *idname_py;
+  char idname[OP_MAX_TYPENAME];
 
-  if (!PyArg_ParseTuple(args, "Os:_bpy.ops.macro_define", &macro, &opname)) {
+  if (!PyArg_ParseTuple(args, "Os:_bpy.ops.macro_define", &macro, &idname_py)) {
     return nullptr;
   }
 
-  if (WM_operatortype_find(opname, true) == nullptr) {
-    PyErr_Format(PyExc_ValueError, "Macro Define: '%s' is not a valid operator id", opname);
+  /* Support both `foo.bar` & `FOO_OT_bar`. */
+  WM_operator_bl_idname(idname, idname_py);
+  if (!WM_operator_bl_idname_is_valid(idname)) {
+    PyErr_Format(PyExc_ValueError, "Macro Define: '%s' is not a valid operator id name", idname);
     return nullptr;
   }
 
@@ -147,15 +149,15 @@ PyObject *PYOP_wrap_macro_define(PyObject * /*self*/, PyObject *args)
     return nullptr;
   }
 
-  macroname = RNA_struct_identifier(srna);
-  ot = WM_operatortype_find(macroname, true);
+  const char *macro_idname = RNA_struct_identifier(srna);
+  ot = WM_operatortype_find(macro_idname, true);
 
   if (!ot) {
-    PyErr_Format(PyExc_ValueError, "Macro Define: '%s' is not a valid macro", macroname);
+    PyErr_Format(PyExc_ValueError, "Macro Define: '%s' is not a valid macro", macro_idname);
     return nullptr;
   }
 
-  otmacro = WM_operatortype_macro_define(ot, opname);
+  otmacro = WM_operatortype_macro_define(ot, idname);
 
   PointerRNA ptr_otmacro = RNA_pointer_create(nullptr, &RNA_OperatorMacro, otmacro);
   return pyrna_struct_CreatePyObject(&ptr_otmacro);

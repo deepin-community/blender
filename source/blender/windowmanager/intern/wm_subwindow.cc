@@ -15,8 +15,8 @@
 #include "DNA_screen_types.h"
 #include "DNA_windowmanager_types.h"
 
-#include "GPU_matrix.h"
-#include "GPU_viewport.h"
+#include "GPU_matrix.hh"
+#include "GPU_viewport.hh"
 
 #include "WM_api.hh"
 
@@ -71,21 +71,27 @@ void wmPartialViewport(rcti *drawrct, const rcti *winrct, const rcti *partialrct
   GPU_matrix_identity_set();
 }
 
-void wmWindowViewport(wmWindow *win)
+static void wmOrtho2_offset(const float x, const float y, const float ofs);
+
+void wmWindowViewport_ex(const wmWindow *win, float offset)
 {
-  int width = WM_window_pixels_x(win);
-  int height = WM_window_pixels_y(win);
+  const blender::int2 win_size = WM_window_native_pixel_size(win);
 
-  GPU_viewport(0, 0, width, height);
-  GPU_scissor(0, 0, width, height);
+  GPU_viewport(0, 0, win_size[0], win_size[1]);
+  GPU_scissor(0, 0, win_size[0], win_size[1]);
 
-  wmOrtho2_pixelspace(width, height);
+  wmOrtho2_offset(win_size[0], win_size[1], offset);
   GPU_matrix_identity_set();
+}
+
+void wmWindowViewport(const wmWindow *win)
+{
+  wmWindowViewport_ex(win, -GLA_PIXEL_OFS);
 }
 
 void wmOrtho2(float x1, float x2, float y1, float y2)
 {
-  /* prevent opengl from generating errors */
+  /* Prevent opengl from generating errors. */
   if (x2 == x1) {
     x2 += 1.0f;
   }

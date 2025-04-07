@@ -5,11 +5,10 @@
 #include "BLI_math_base.hh"
 #include "BLI_math_vector_types.hh"
 
-#include "GPU_shader.h"
-#include "GPU_texture.h"
+#include "GPU_shader.hh"
+#include "GPU_texture.hh"
 
 #include "COM_algorithm_morphological_distance_feather.hh" /* Own include. */
-#include "COM_algorithm_symmetric_separable_blur.hh"
 #include "COM_context.hh"
 #include "COM_morphological_distance_feather_weights.hh"
 #include "COM_result.hh"
@@ -49,7 +48,7 @@ static Result horizontal_pass(Context &context, Result &input, int distance, int
   const Domain domain = input.domain();
   const int2 transposed_domain = int2(domain.size.y, domain.size.x);
 
-  Result output = context.create_temporary_result(ResultType::Float);
+  Result output = context.create_result(ResultType::Float);
   output.allocate_texture(transposed_domain);
   output.bind_as_image(shader, "output_img");
 

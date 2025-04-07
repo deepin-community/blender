@@ -2,10 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_path_util.h"
+#include "BLI_path_utils.hh"
 #include "BLI_string.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "BKE_file_handler.hh"
 
@@ -15,7 +15,7 @@
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
@@ -143,7 +143,7 @@ static int wm_drop_import_file_invoke(bContext *C, wmOperator *op, const wmEvent
     wmOperatorType *ot = WM_operatortype_find(file_handler->import_operator, false);
     uiItemFullO_ptr(layout,
                     ot,
-                    TIP_(ot->name),
+                    CTX_TIP_(ot->translation_context, ot->name),
                     ICON_NONE,
                     static_cast<IDProperty *>(file_props.data),
                     WM_OP_INVOKE_DEFAULT,

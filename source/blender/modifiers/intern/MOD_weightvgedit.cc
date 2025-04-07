@@ -14,7 +14,7 @@
 #include "BLI_listbase.h"
 #include "BLI_rand.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "DNA_color_types.h" /* CurveMapping. */
 #include "DNA_defaults.h"
@@ -25,13 +25,11 @@
 #include "DNA_screen_types.h"
 
 #include "BKE_colortools.hh" /* CurveMapping. */
-#include "BKE_context.hh"
 #include "BKE_customdata.hh"
 #include "BKE_deform.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_mesh.hh"
 #include "BKE_modifier.hh"
-#include "BKE_screen.hh"
 #include "BKE_texture.h" /* Texture masking. */
 
 #include "UI_interface.hh"
@@ -40,14 +38,13 @@
 #include "BLO_read_write.hh"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "DEG_depsgraph_build.hh"
 #include "DEG_depsgraph_query.hh"
 
 #include "MEM_guardedalloc.h"
 
-#include "MOD_modifiertypes.hh"
 #include "MOD_ui_common.hh"
 #include "MOD_util.hh"
 #include "MOD_weightvg_util.hh"
@@ -116,7 +113,9 @@ static void foreach_ID_link(ModifierData *md, Object *ob, IDWalkFunc walk, void 
 
 static void foreach_tex_link(ModifierData *md, Object *ob, TexWalkFunc walk, void *user_data)
 {
-  walk(user_data, ob, md, "mask_texture");
+  PointerRNA ptr = RNA_pointer_create(&ob->id, &RNA_Modifier, md);
+  PropertyRNA *prop = RNA_struct_find_property(&ptr, "mask_texture");
+  walk(user_data, ob, md, &ptr, prop);
 }
 
 static void update_depsgraph(ModifierData *md, const ModifierUpdateDepsgraphContext *ctx)
@@ -381,7 +380,7 @@ static void blend_read(BlendDataReader *reader, ModifierData *md)
 {
   WeightVGEditModifierData *wmd = (WeightVGEditModifierData *)md;
 
-  BLO_read_data_address(reader, &wmd->cmap_curve);
+  BLO_read_struct(reader, CurveMapping, &wmd->cmap_curve);
   if (wmd->cmap_curve) {
     BKE_curvemapping_blend_read(reader, wmd->cmap_curve);
   }

@@ -7,7 +7,7 @@
  */
 #pragma once
 
-#include "GPU_vertex_format.h"
+#include "GPU_vertex_format.hh"
 
 #include <Metal/Metal.h>
 
@@ -346,6 +346,12 @@ struct MTLComputePipelineStateDescriptor {
 
   /* Specialization constants map. */
   SpecializationStateDescriptor specialization_state;
+
+  MTLComputePipelineStateDescriptor() {}
+  MTLComputePipelineStateDescriptor(Vector<Shader::Constants::Value> values)
+  {
+    specialization_state.values = values;
+  }
 
   /* Comparison Operator for caching. */
   bool operator==(const MTLComputePipelineStateDescriptor &other) const

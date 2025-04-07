@@ -40,17 +40,17 @@
 #include "BLI_utildefines.h"
 
 #include "BKE_camera.h"
-#include "BKE_collection.h"
-#include "BKE_fcurve.h"
-#include "BKE_global.h"
-#include "BKE_image.h"
+#include "BKE_collection.hh"
+#include "BKE_fcurve.hh"
+#include "BKE_global.hh"
+#include "BKE_image.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_light.h"
 #include "BKE_material.h"
-#include "BKE_scene.h"
+#include "BKE_scene.hh"
 
-#include "BLI_path_util.h"
+#include "BLI_path_utils.hh"
 
 #include "DNA_camera_types.h"
 #include "DNA_light_types.h"
@@ -76,10 +76,6 @@
  * COLLADA Importer limitations:
  * - no multiple scene import, all objects are added to active scene
  */
-
-// #define COLLADA_DEBUG
-/* creates empties for each imported bone on layer 2, for debugging */
-// #define ARMATURE_TEST
 
 DocumentImporter::DocumentImporter(bContext *C, const ImportSettings *import_settings)
     : import_settings(import_settings),
@@ -256,7 +252,7 @@ void DocumentImporter::finish()
   delete objects_to_scale;
 
   /* update scene */
-  DEG_id_tag_update(&sce->id, ID_RECALC_COPY_ON_WRITE);
+  DEG_id_tag_update(&sce->id, ID_RECALC_SYNC_TO_EVAL);
   DEG_relations_tag_update(bmain);
   WM_event_add_notifier(mContext, NC_OBJECT | ND_TRANSFORM, nullptr);
 }
@@ -412,8 +408,8 @@ Object *DocumentImporter::create_instance_node(Object *source_ob,
         }
       }
       /* calc new matrix and apply */
-      mul_m4_m4m4(obn->object_to_world, obn->object_to_world, mat);
-      BKE_object_apply_mat4(obn, obn->object_to_world, false, false);
+      mul_m4_m4m4(obn->runtime->object_to_world.ptr(), obn->object_to_world().ptr(), mat);
+      BKE_object_apply_mat4(obn, obn->object_to_world().ptr(), false, false);
     }
   }
   else {
@@ -456,7 +452,6 @@ Object *DocumentImporter::create_instance_node(Object *source_ob,
 void DocumentImporter::create_constraints(ExtraTags *et, Object *ob)
 {
   if (et && et->isProfile("blender")) {
-    std::string name;
     short type = 0;
     et->setData("type", &type);
     BKE_constraint_add_for_object(ob, "Test_con", type);
@@ -642,7 +637,7 @@ std::vector<Object *> *DocumentImporter::write_node(COLLADAFW::Node *node,
 
     for (Object *ob : *objects_done) {
       std::string nodename = node->getName().empty() ? node->getOriginalId() : node->getName();
-      BKE_libblock_rename(bmain, &ob->id, (char *)nodename.c_str());
+      BKE_libblock_rename(*bmain, ob->id, (char *)nodename.c_str());
       object_map.insert(std::pair<COLLADAFW::UniqueId, Object *>(node->getUniqueId(), ob));
       node_map[node->getUniqueId()] = node;
 
@@ -1014,16 +1009,12 @@ bool DocumentImporter::writeLight(const COLLADAFW::Light *light)
     et->setData("red", &(lamp->r));
     et->setData("green", &(lamp->g));
     et->setData("blue", &(lamp->b));
-    et->setData("shadow_r", &(lamp->shdwr));
-    et->setData("shadow_g", &(lamp->shdwg));
-    et->setData("shadow_b", &(lamp->shdwb));
     et->setData("energy", &(lamp->energy));
     et->setData("spotsize", &(lamp->spotsize));
     lamp->spotsize = DEG2RADF(lamp->spotsize);
     et->setData("spotblend", &(lamp->spotblend));
     et->setData("clipsta", &(lamp->clipsta));
-    et->setData("clipend", &(lamp->clipend));
-    et->setData("bias", &(lamp->bias));
+    et->setData("clipend", &(lamp->att_dist));
     et->setData("radius", &(lamp->radius));
     et->setData("area_shape", &(lamp->area_shape));
     et->setData("area_size", &(lamp->area_size));
@@ -1031,7 +1022,7 @@ bool DocumentImporter::writeLight(const COLLADAFW::Light *light)
     et->setData("area_sizez", &(lamp->area_sizez));
   }
   else {
-    float d = 25.0f;
+    // float d = 25.0f; /* UNUSED. */
     float e = 1.0f;
 
     if (light->getColor().isValid()) {

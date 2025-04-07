@@ -14,8 +14,8 @@
 
 #include "DNA_scene_types.h"
 
-#include "GPU_shader.h"
-#include "GPU_texture.h"
+#include "GPU_shader.hh"
+#include "GPU_texture.hh"
 
 #include "COM_context.hh"
 #include "COM_morphological_distance_feather_weights.hh"
@@ -96,7 +96,7 @@ void MorphologicalDistanceFeatherWeights::compute_weights(Context &context, int 
       "Weights",
       size,
       1,
-      Result::texture_format(ResultType::Float, context.get_precision()),
+      Result::gpu_texture_format(ResultType::Float, context.get_precision()),
       GPU_TEXTURE_USAGE_GENERAL,
       weights.data());
 }
@@ -147,7 +147,7 @@ void MorphologicalDistanceFeatherWeights::compute_distance_falloffs(Context &con
       "Distance Factors",
       size,
       1,
-      Result::texture_format(ResultType::Float, context.get_precision()),
+      Result::gpu_texture_format(ResultType::Float, context.get_precision()),
       GPU_TEXTURE_USAGE_GENERAL,
       falloffs.data());
 }

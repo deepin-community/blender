@@ -18,16 +18,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_layout(uiLayout *layout, bContext *C, PointerRNA *ptr)
 {
-  uiTemplateID(layout,
-               C,
-               ptr,
-               "image",
-               "IMAGE_OT_new",
-               "IMAGE_OT_open",
-               nullptr,
-               UI_TEMPLATE_ID_FILTER_ALL,
-               false,
-               nullptr);
+  uiTemplateID(layout, C, ptr, "image", "IMAGE_OT_new", "IMAGE_OT_open", nullptr);
 }
 
 static void node_geo_exec(GeoNodeExecParams params)
@@ -37,14 +28,14 @@ static void node_geo_exec(GeoNodeExecParams params)
 
 static void node_register()
 {
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
 
   geo_node_type_base(&ntype, GEO_NODE_IMAGE, "Image", NODE_CLASS_INPUT);
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
   ntype.declare = node_declare;
-  blender::bke::node_type_size_preset(&ntype, blender::bke::eNodeSizePreset::LARGE);
-  nodeRegisterType(&ntype);
+  blender::bke::node_type_size_preset(&ntype, blender::bke::eNodeSizePreset::Large);
+  blender::bke::node_register_type(&ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

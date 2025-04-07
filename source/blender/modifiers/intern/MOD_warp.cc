@@ -14,25 +14,18 @@
 #include "BLI_math_vector.h"
 #include "BLI_utildefines.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "DNA_defaults.h"
-#include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
 #include "DNA_object_types.h"
 #include "DNA_screen_types.h"
 
-#include "BKE_action.h" /* BKE_pose_channel_find_name */
+#include "BKE_action.hh" /* BKE_pose_channel_find_name */
 #include "BKE_colortools.hh"
-#include "BKE_context.hh"
 #include "BKE_deform.hh"
-#include "BKE_editmesh.hh"
-#include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
-#include "BKE_mesh.hh"
-#include "BKE_mesh_wrapper.hh"
 #include "BKE_modifier.hh"
-#include "BKE_screen.hh"
 #include "BKE_texture.h"
 
 #include "UI_interface.hh"
@@ -41,10 +34,7 @@
 #include "BLO_read_write.hh"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
-
-#include "DEG_depsgraph.hh"
-#include "DEG_depsgraph_query.hh"
+#include "RNA_prototypes.hh"
 
 #include "RE_texture.h"
 
@@ -95,11 +85,11 @@ static void matrix_from_obj_pchan(float mat[4][4],
   bPoseChannel *pchan = BKE_pose_channel_find_name(ob->pose, bonename);
   if (pchan) {
     float mat_bone_world[4][4];
-    mul_m4_m4m4(mat_bone_world, ob->object_to_world, pchan->pose_mat);
+    mul_m4_m4m4(mat_bone_world, ob->object_to_world().ptr(), pchan->pose_mat);
     mul_m4_m4m4(mat, obinv, mat_bone_world);
   }
   else {
-    mul_m4_m4m4(mat, obinv, ob->object_to_world);
+    mul_m4_m4m4(mat, obinv, ob->object_to_world().ptr());
   }
 }
 
@@ -139,7 +129,9 @@ static void foreach_ID_link(ModifierData *md, Object *ob, IDWalkFunc walk, void 
 
 static void foreach_tex_link(ModifierData *md, Object *ob, TexWalkFunc walk, void *user_data)
 {
-  walk(user_data, ob, md, "texture");
+  PointerRNA ptr = RNA_pointer_create(&ob->id, &RNA_Modifier, md);
+  PropertyRNA *prop = RNA_struct_find_property(&ptr, "texture");
+  walk(user_data, ob, md, &ptr, prop);
 }
 
 static void update_depsgraph(ModifierData *md, const ModifierUpdateDepsgraphContext *ctx)
@@ -215,7 +207,7 @@ static void warpModifier_do(WarpModifierData *wmd,
     BKE_curvemapping_init(wmd->curfalloff);
   }
 
-  invert_m4_m4(obinv, ob->object_to_world);
+  invert_m4_m4(obinv, ob->object_to_world().ptr());
 
   /* Checks that the objects/bones are available. */
   matrix_from_obj_pchan(mat_from, obinv, wmd->object_from, wmd->bone_from);
@@ -413,7 +405,7 @@ static void texture_panel_draw(const bContext *C, Panel *panel)
 
   int texture_coords = RNA_enum_get(ptr, "texture_coords");
 
-  uiTemplateID(layout, C, ptr, "texture", "texture.new", nullptr, nullptr, 0, ICON_NONE, nullptr);
+  uiTemplateID(layout, C, ptr, "texture", "texture.new", nullptr, nullptr);
 
   uiLayoutSetPropSep(layout, true);
 
@@ -465,7 +457,7 @@ static void blend_read(BlendDataReader *reader, ModifierData *md)
 {
   WarpModifierData *wmd = (WarpModifierData *)md;
 
-  BLO_read_data_address(reader, &wmd->curfalloff);
+  BLO_read_struct(reader, CurveMapping, &wmd->curfalloff);
   if (wmd->curfalloff) {
     BKE_curvemapping_blend_read(reader, wmd->curfalloff);
   }

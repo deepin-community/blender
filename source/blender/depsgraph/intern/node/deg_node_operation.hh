@@ -159,7 +159,7 @@ enum class OperationCode {
   VIEW_LAYER_EVAL,
 
   /* Copy on Write. ------------------------------------------------------- */
-  COPY_ON_WRITE,
+  COPY_ON_EVAL,
 
   /* Shading. ------------------------------------------------------------- */
   SHADING,
@@ -205,6 +205,7 @@ enum class OperationCode {
 
   /* Operation on an object which is being instanced. */
   INSTANCE,
+  INSTANCE_GEOMETRY,
 };
 const char *operationCodeAsString(OperationCode opcode);
 

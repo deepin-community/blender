@@ -6,26 +6,6 @@
  * \ingroup imbuf
  */
 
-#ifdef _WIN32
-#  include "BLI_winstuff.h"
-#  include <vfw.h>
-
-#  undef AVIIF_KEYFRAME /* redefined in AVI_avi.h */
-#  undef AVIIF_LIST     /* redefined in AVI_avi.h */
-
-#  define FIXCC(fcc) \
-    { \
-      if (fcc == 0) { \
-        fcc = mmioFOURCC('N', 'o', 'n', 'e'); \
-      } \
-      if (fcc == BI_RLE8) { \
-        fcc = mmioFOURCC('R', 'l', 'e', '8'); \
-      } \
-    } \
-    (void)0
-
-#endif
-
 #include <cctype>
 #include <climits>
 #include <cmath>
@@ -38,7 +18,8 @@
 #  include <io.h>
 #endif
 
-#include "BLI_path_util.h"
+#include "BLI_math_base.hh"
+#include "BLI_path_utils.hh"
 #include "BLI_string.h"
 #include "BLI_threads.h"
 #include "BLI_utildefines.h"
@@ -46,10 +27,6 @@
 #include "DNA_scene_types.h"
 
 #include "MEM_guardedalloc.h"
-
-#ifdef WITH_AVI
-#  include "AVI_avi.h"
-#endif
 
 #include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
@@ -62,7 +39,6 @@
 #include "IMB_metadata.hh"
 
 #ifdef WITH_FFMPEG
-#  include "BKE_global.h" /* ENDIAN_ORDER */
 #  include "BKE_writeffmpeg.hh"
 
 extern "C" {
@@ -77,66 +53,6 @@ extern "C" {
 
 #endif /* WITH_FFMPEG */
 
-int ismovie(const char * /*filepath*/)
-{
-  return 0;
-}
-
-/* never called, just keep the linker happy */
-static int startmovie(ImBufAnim * /*anim*/)
-{
-  return 1;
-}
-static ImBuf *movie_fetchibuf(ImBufAnim * /*anim*/, int /*position*/)
-{
-  return nullptr;
-}
-static void free_anim_movie(ImBufAnim * /*anim*/)
-{
-  /* pass */
-}
-
-#ifdef WITH_AVI
-static void free_anim_avi(ImBufAnim *anim)
-{
-#  if defined(_WIN32)
-  int i;
-#  endif
-
-  if (anim == nullptr) {
-    return;
-  }
-  if (anim->avi == nullptr) {
-    return;
-  }
-
-  AVI_close(anim->avi);
-  MEM_freeN(anim->avi);
-  anim->avi = nullptr;
-
-#  if defined(_WIN32)
-
-  if (anim->pgf) {
-    AVIStreamGetFrameClose(anim->pgf);
-    anim->pgf = nullptr;
-  }
-
-  for (i = 0; i < anim->avistreams; i++) {
-    AVIStreamRelease(anim->pavi[i]);
-  }
-  anim->avistreams = 0;
-
-  if (anim->pfileopen) {
-    AVIFileRelease(anim->pfile);
-    anim->pfileopen = 0;
-    AVIFileExit();
-  }
-#  endif
-
-  anim->duration_in_frames = 0;
-}
-#endif /* WITH_AVI */
-
 #ifdef WITH_FFMPEG
 static void free_anim_ffmpeg(ImBufAnim *anim);
 #endif
@@ -147,12 +63,6 @@ void IMB_free_anim(ImBufAnim *anim)
     printf("free anim, anim == nullptr\n");
     return;
   }
-
-  free_anim_movie(anim);
-
-#ifdef WITH_AVI
-  free_anim_avi(anim);
-#endif
 
 #ifdef WITH_FFMPEG
   free_anim_ffmpeg(anim);
@@ -183,35 +93,23 @@ void IMB_close_anim_proxies(ImBufAnim *anim)
 
 IDProperty *IMB_anim_load_metadata(ImBufAnim *anim)
 {
-  switch (anim->curtype) {
-    case ANIM_FFMPEG: {
+  if (anim->state == ImBufAnim::State::Valid) {
 #ifdef WITH_FFMPEG
-      AVDictionaryEntry *entry = nullptr;
+    BLI_assert(anim->pFormatCtx != nullptr);
+    av_log(anim->pFormatCtx, AV_LOG_DEBUG, "METADATA FETCH\n");
 
-      BLI_assert(anim->pFormatCtx != nullptr);
-      av_log(anim->pFormatCtx, AV_LOG_DEBUG, "METADATA FETCH\n");
-
-      while (true) {
-        entry = av_dict_get(anim->pFormatCtx->metadata, "", entry, AV_DICT_IGNORE_SUFFIX);
-        if (entry == nullptr) {
-          break;
-        }
-
-        /* Delay creation of the property group until there is actual metadata to put in there. */
-        IMB_metadata_ensure(&anim->metadata);
-        IMB_metadata_set_field(anim->metadata, entry->key, entry->value);
+    AVDictionaryEntry *entry = nullptr;
+    while (true) {
+      entry = av_dict_get(anim->pFormatCtx->metadata, "", entry, AV_DICT_IGNORE_SUFFIX);
+      if (entry == nullptr) {
+        break;
       }
-#endif
-      break;
+
+      /* Delay creation of the property group until there is actual metadata to put in there. */
+      IMB_metadata_ensure(&anim->metadata);
+      IMB_metadata_set_field(anim->metadata, entry->key, entry->value);
     }
-    case ANIM_SEQUENCE:
-    case ANIM_AVI:
-    case ANIM_MOVIE:
-      /* TODO */
-      break;
-    case ANIM_NONE:
-    default:
-      break;
+#endif
   }
   return anim->metadata;
 }
@@ -245,15 +143,10 @@ ImBufAnim *IMB_open_anim(const char *filepath,
 
 bool IMB_anim_can_produce_frames(const ImBufAnim *anim)
 {
-#if !(defined(WITH_AVI) || defined(WITH_FFMPEG))
+#if !defined(WITH_FFMPEG)
   UNUSED_VARS(anim);
 #endif
 
-#ifdef WITH_AVI
-  if (anim->avi != nullptr) {
-    return true;
-  }
-#endif
 #ifdef WITH_FFMPEG
   if (anim->pCodecCtx != nullptr) {
     return true;
@@ -267,190 +160,87 @@ void IMB_suffix_anim(ImBufAnim *anim, const char *suffix)
   STRNCPY(anim->suffix, suffix);
 }
 
-#ifdef WITH_AVI
-static int startavi(ImBufAnim *anim)
+#ifdef WITH_FFMPEG
+
+static double ffmpeg_stream_start_time_get(AVStream *stream)
 {
-
-  AviError avierror;
-#  if defined(_WIN32)
-  HRESULT hr;
-  int i, firstvideo = -1;
-  int streamcount;
-  BYTE abFormat[1024];
-  LONG l;
-  LPBITMAPINFOHEADER lpbi;
-  AVISTREAMINFO avis;
-
-  streamcount = anim->streamindex;
-#  endif
-
-  anim->avi = MEM_cnew<AviMovie>("animavi");
-
-  if (anim->avi == nullptr) {
-    printf("Can't open avi: %s\n", anim->filepath);
-    return -1;
+  if (stream->start_time == AV_NOPTS_VALUE) {
+    return 0.0;
   }
 
-  avierror = AVI_open_movie(anim->filepath, anim->avi);
+  return stream->start_time * av_q2d(stream->time_base);
+}
 
-#  if defined(_WIN32)
-  if (avierror == AVI_ERROR_COMPRESSION) {
-    AVIFileInit();
-    hr = AVIFileOpen(&anim->pfile, anim->filepath, OF_READ, 0L);
-    if (hr == 0) {
-      anim->pfileopen = 1;
-      for (i = 0; i < MAXNUMSTREAMS; i++) {
-        if (AVIFileGetStream(anim->pfile, &anim->pavi[i], 0L, i) != AVIERR_OK) {
-          break;
-        }
+static int ffmpeg_container_frame_count_get(AVFormatContext *pFormatCtx, AVStream *video_stream)
+{
+  /* Find audio stream to guess the duration of the video.
+   * Sometimes the audio AND the video stream have a start offset.
+   * The difference between these is the offset we want to use to
+   * calculate the video duration.
+   */
+  const double video_start = ffmpeg_stream_start_time_get(video_stream);
+  double audio_start = 0;
 
-        AVIStreamInfo(anim->pavi[i], &avis, sizeof(avis));
-        if ((avis.fccType == streamtypeVIDEO) && (firstvideo == -1)) {
-          if (streamcount > 0) {
-            streamcount--;
-            continue;
-          }
-          anim->pgf = AVIStreamGetFrameOpen(anim->pavi[i], nullptr);
-          if (anim->pgf) {
-            firstvideo = i;
-
-            /* get stream length */
-            anim->avi->header->TotalFrames = AVIStreamLength(anim->pavi[i]);
-
-            /* get information about images inside the stream */
-            l = sizeof(abFormat);
-            AVIStreamReadFormat(anim->pavi[i], 0, &abFormat, &l);
-            lpbi = (LPBITMAPINFOHEADER)abFormat;
-            anim->avi->header->Height = lpbi->biHeight;
-            anim->avi->header->Width = lpbi->biWidth;
-          }
-          else {
-            FIXCC(avis.fccHandler);
-            FIXCC(avis.fccType);
-            printf("Can't find AVI decoder for type : %4.4hs/%4.4hs\n",
-                   (LPSTR)&avis.fccType,
-                   (LPSTR)&avis.fccHandler);
-          }
-        }
-      }
-
-      /* register number of opened avistreams */
-      anim->avistreams = i;
-
-      /*
-       * Couldn't get any video streams out of this file
-       */
-      if ((anim->avistreams == 0) || (firstvideo == -1)) {
-        avierror = AVI_ERROR_FORMAT;
-      }
-      else {
-        avierror = AVI_ERROR_NONE;
-        anim->firstvideo = firstvideo;
-      }
-    }
-    else {
-      AVIFileExit();
+  for (int i = 0; i < pFormatCtx->nb_streams; i++) {
+    if (pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+      AVStream *audio_stream = pFormatCtx->streams[i];
+      audio_start = ffmpeg_stream_start_time_get(audio_stream);
+      break;
     }
   }
-#  endif
 
-  if (avierror != AVI_ERROR_NONE) {
-    AVI_print_error(avierror);
-    printf("Error loading avi: %s\n", anim->filepath);
-    free_anim_avi(anim);
-    return -1;
+  const AVRational frame_rate = av_guess_frame_rate(pFormatCtx, video_stream, nullptr);
+  double stream_dur;
+
+  if (video_start > audio_start) {
+    stream_dur = double(pFormatCtx->duration) / AV_TIME_BASE - (video_start - audio_start);
+  }
+  else {
+    /* The video stream starts before or at the same time as the audio stream!
+     * We have to assume that the video stream is as long as the full pFormatCtx->duration.
+     */
+    stream_dur = double(pFormatCtx->duration) / AV_TIME_BASE;
   }
 
-  anim->duration_in_frames = anim->avi->header->TotalFrames;
-  anim->start_offset = 0.0f;
-  anim->params = nullptr;
+  return lround(stream_dur * av_q2d(frame_rate));
+}
 
-  anim->x = anim->avi->header->Width;
-  anim->y = anim->avi->header->Height;
-  anim->interlacing = 0;
-  anim->orientation = 0;
-  anim->framesize = anim->x * anim->y * 4;
+static int ffmpeg_frame_count_get(AVFormatContext *pFormatCtx, AVStream *video_stream)
+{
+  /* Use stream duration to determine frame count. */
+  if (video_stream->duration != AV_NOPTS_VALUE) {
+    const AVRational frame_rate = av_guess_frame_rate(pFormatCtx, video_stream, nullptr);
+    const double stream_dur = video_stream->duration * av_q2d(video_stream->time_base);
+    return lround(stream_dur * av_q2d(frame_rate));
+  }
 
-  anim->cur_position = 0;
+  /* Fall back to manually estimating the video stream duration.
+   * This is because the video stream duration can be shorter than the `pFormatCtx->duration`.
+   */
+  if (pFormatCtx->duration != AV_NOPTS_VALUE) {
+    return ffmpeg_container_frame_count_get(pFormatCtx, video_stream);
+  }
 
-#  if 0
-  printf("x:%d y:%d size:%d interlace:%d dur:%d\n",
-         anim->x,
-         anim->y,
-         anim->framesize,
-         anim->interlacing,
-         anim->duration_in_frames);
-#  endif
+  /* Read frame count from the stream if we can. Note, that this value can not be trusted. */
+  if (video_stream->nb_frames != 0) {
+    return video_stream->nb_frames;
+  }
 
+  /* The duration has not been set, happens for single JPEG2000 images.
+   * NOTE: Leave the duration zeroed, although it could set to 1 so the file is recognized
+   * as a movie with 1 frame, leave as-is since image loading code-paths are preferred
+   * in this case. The following assertion should be valid in this case. */
+  BLI_assert(pFormatCtx->duration == AV_NOPTS_VALUE);
   return 0;
 }
-#endif /* WITH_AVI */
-
-#ifdef WITH_AVI
-static ImBuf *avi_fetchibuf(ImBufAnim *anim, int position)
-{
-  ImBuf *ibuf = nullptr;
-  int *tmp;
-  int y;
-
-  if (anim == nullptr) {
-    return nullptr;
-  }
-
-#  if defined(_WIN32)
-  if (anim->avistreams) {
-    LPBITMAPINFOHEADER lpbi;
-
-    if (anim->pgf) {
-      lpbi = static_cast<LPBITMAPINFOHEADER>(
-          AVIStreamGetFrame(anim->pgf, position + AVIStreamStart(anim->pavi[anim->firstvideo])));
-      if (lpbi) {
-        ibuf = IMB_ibImageFromMemory(
-            (const uchar *)lpbi, 100, IB_rect, anim->colorspace, "<avi_fetchibuf>");
-        /* Oh brother... */
-      }
-    }
-  }
-  else
-#  endif
-  {
-    ibuf = IMB_allocImBuf(anim->x, anim->y, 24, IB_rect);
-
-    tmp = static_cast<int *>(AVI_read_frame(
-        anim->avi, AVI_FORMAT_RGB32, position, AVI_get_stream(anim->avi, AVIST_VIDEO, 0)));
-
-    if (tmp == nullptr) {
-      printf("Error reading frame from AVI: '%s'\n", anim->filepath);
-      IMB_freeImBuf(ibuf);
-      return nullptr;
-    }
-
-    for (y = 0; y < anim->y; y++) {
-      memcpy(&(ibuf->byte_buffer.data)[((anim->y - y) - 1) * anim->x],
-             &tmp[y * anim->x],
-             anim->x * 4);
-    }
-
-    MEM_freeN(tmp);
-  }
-
-  ibuf->byte_buffer.colorspace = colormanage_colorspace_get_named(anim->colorspace);
-
-  return ibuf;
-}
-#endif /* WITH_AVI */
-
-#ifdef WITH_FFMPEG
 
 static int startffmpeg(ImBufAnim *anim)
 {
-  int i, video_stream_index;
-
   const AVCodec *pCodec;
   AVFormatContext *pFormatCtx = nullptr;
   AVCodecContext *pCodecCtx;
-  AVRational frame_rate;
   AVStream *video_stream;
+  int video_stream_index;
   int frs_num;
   double frs_den;
   int streamcount;
@@ -480,7 +270,7 @@ static int startffmpeg(ImBufAnim *anim)
   /* Find the video stream */
   video_stream_index = -1;
 
-  for (i = 0; i < pFormatCtx->nb_streams; i++) {
+  for (int i = 0; i < pFormatCtx->nb_streams; i++) {
     if (pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
       if (streamcount > 0) {
         streamcount--;
@@ -533,82 +323,7 @@ static int startffmpeg(ImBufAnim *anim)
     return -1;
   }
 
-  double video_start = 0;
-  double pts_time_base = av_q2d(video_stream->time_base);
-
-  if (video_stream->start_time != AV_NOPTS_VALUE) {
-    video_start = video_stream->start_time * pts_time_base;
-  }
-
-  frame_rate = av_guess_frame_rate(pFormatCtx, video_stream, nullptr);
-  anim->duration_in_frames = 0;
-
-  /* Take from the stream if we can. */
-  if (video_stream->nb_frames != 0) {
-    anim->duration_in_frames = video_stream->nb_frames;
-
-    /* Sanity check on the detected duration. This is to work around corruption like reported in
-     * #68091. */
-    if (frame_rate.den != 0 && pFormatCtx->duration > 0) {
-      double stream_sec = anim->duration_in_frames * av_q2d(frame_rate);
-      double container_sec = pFormatCtx->duration / double(AV_TIME_BASE);
-      if (stream_sec > 4.0 * container_sec) {
-        /* The stream is significantly longer than the container duration, which is
-         * suspicious. */
-        anim->duration_in_frames = 0;
-      }
-    }
-  }
-
-  if (anim->duration_in_frames != 0) {
-    /* Pass (already valid). */
-  }
-  else if (pFormatCtx->duration == AV_NOPTS_VALUE) {
-    /* The duration has not been set, happens for single JPEG2000 images.
-     * NOTE: Leave the duration zeroed, although it could set to 1 so the file is recognized
-     * as a movie with 1 frame, leave as-is since image loading code-paths are preferred
-     * in this case. */
-  }
-  else {
-    /* Fall back to manually estimating the video stream duration.
-     * This is because the video stream duration can be shorter than the `pFormatCtx->duration`. */
-    BLI_assert(anim->duration_in_frames == 0);
-    double stream_dur;
-
-    if (video_stream->duration != AV_NOPTS_VALUE) {
-      stream_dur = video_stream->duration * pts_time_base;
-    }
-    else {
-      double audio_start = 0;
-
-      /* Find audio stream to guess the duration of the video.
-       * Sometimes the audio AND the video stream have a start offset.
-       * The difference between these is the offset we want to use to
-       * calculate the video duration.
-       */
-      for (i = 0; i < pFormatCtx->nb_streams; i++) {
-        if (pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-          AVStream *audio_stream = pFormatCtx->streams[i];
-          if (audio_stream->start_time != AV_NOPTS_VALUE) {
-            audio_start = audio_stream->start_time * av_q2d(audio_stream->time_base);
-          }
-          break;
-        }
-      }
-
-      if (video_start > audio_start) {
-        stream_dur = double(pFormatCtx->duration) / AV_TIME_BASE - (video_start - audio_start);
-      }
-      else {
-        /* The video stream starts before or at the same time as the audio stream!
-         * We have to assume that the video stream is as long as the full pFormatCtx->duration.
-         */
-        stream_dur = double(pFormatCtx->duration) / AV_TIME_BASE;
-      }
-    }
-    anim->duration_in_frames = int(stream_dur * av_q2d(frame_rate) + 0.5f);
-  }
-
+  const AVRational frame_rate = av_guess_frame_rate(pFormatCtx, video_stream, nullptr);
   frs_num = frame_rate.num;
   frs_den = frame_rate.den;
 
@@ -623,9 +338,8 @@ static int startffmpeg(ImBufAnim *anim)
   anim->frs_sec_base = frs_den;
   /* Save the relative start time for the video. IE the start time in relation to where playback
    * starts. */
-  anim->start_offset = video_start;
-
-  anim->params = nullptr;
+  anim->start_offset = ffmpeg_stream_start_time_get(video_stream);
+  anim->duration_in_frames = ffmpeg_frame_count_get(pFormatCtx, video_stream);
 
   anim->x = pCodecCtx->width;
   anim->y = pCodecCtx->height;
@@ -634,10 +348,6 @@ static int startffmpeg(ImBufAnim *anim)
   anim->pCodecCtx = pCodecCtx;
   anim->pCodec = pCodec;
   anim->videoStream = video_stream_index;
-
-  anim->interlacing = 0;
-  anim->orientation = 0;
-  anim->framesize = anim->x * anim->y * 4;
 
   anim->cur_position = 0;
   anim->cur_pts = -1;
@@ -655,7 +365,8 @@ static int startffmpeg(ImBufAnim *anim)
   anim->pFrameRGB->width = anim->x;
   anim->pFrameRGB->height = anim->y;
 
-  if (av_frame_get_buffer(anim->pFrameRGB, 0) < 0) {
+  const size_t align = ffmpeg_get_buffer_alignment();
+  if (av_frame_get_buffer(anim->pFrameRGB, align) < 0) {
     fprintf(stderr, "Could not allocate frame data.\n");
     avcodec_free_context(&anim->pCodecCtx);
     avformat_close_input(&anim->pFormatCtx);
@@ -682,6 +393,9 @@ static int startffmpeg(ImBufAnim *anim)
   }
 
   if (anim->ib_flags & IB_animdeinterlace) {
+    anim->pFrameDeinterlaced->format = anim->pCodecCtx->pix_fmt;
+    anim->pFrameDeinterlaced->width = anim->pCodecCtx->width;
+    anim->pFrameDeinterlaced->height = anim->pCodecCtx->height;
     av_image_fill_arrays(
         anim->pFrameDeinterlaced->data,
         anim->pFrameDeinterlaced->linesize,
@@ -698,6 +412,8 @@ static int startffmpeg(ImBufAnim *anim)
   anim->img_convert_ctx = BKE_ffmpeg_sws_get_context(anim->x,
                                                      anim->y,
                                                      anim->pCodecCtx->pix_fmt,
+                                                     anim->x,
+                                                     anim->y,
                                                      AV_PIX_FMT_RGBA,
                                                      SWS_BILINEAR | SWS_PRINT_INFO |
                                                          SWS_FULL_CHR_H_INT);
@@ -1361,6 +1077,11 @@ static int ffmpeg_seek_to_key_frame(ImBufAnim *anim,
   return ret;
 }
 
+static bool ffmpeg_must_decode(ImBufAnim *anim, int position)
+{
+  return !anim->pFrame_complete || anim->cur_position != position;
+}
+
 static bool ffmpeg_must_seek(ImBufAnim *anim, int position)
 {
   bool must_seek = position != anim->cur_position + 1 || ffmpeg_is_first_frame_decode(anim);
@@ -1392,34 +1113,17 @@ static ImBuf *ffmpeg_fetchibuf(ImBufAnim *anim, int position, IMB_Timecode_Type 
          frame_rate,
          start_pts);
 
-  if (ffmpeg_must_seek(anim, position)) {
-    ffmpeg_seek_to_key_frame(anim, position, tc_index, pts_to_search);
-  }
+  if (ffmpeg_must_decode(anim, position)) {
+    if (ffmpeg_must_seek(anim, position)) {
+      ffmpeg_seek_to_key_frame(anim, position, tc_index, pts_to_search);
+    }
 
-  ffmpeg_decode_video_frame_scan(anim, pts_to_search);
+    ffmpeg_decode_video_frame_scan(anim, pts_to_search);
+  }
 
   /* Update resolution as it can change per-frame with WebM. See #100741 & #100081. */
   anim->x = anim->pCodecCtx->width;
   anim->y = anim->pCodecCtx->height;
-
-  /* Certain versions of FFmpeg have a bug in libswscale which ends up in crash
-   * when destination buffer is not properly aligned. For example, this happens
-   * in FFmpeg 4.3.1. It got fixed later on, but for compatibility reasons is
-   * still best to avoid crash.
-   *
-   * This is achieved by using own allocation call rather than relying on
-   * IMB_allocImBuf() to do so since the IMB_allocImBuf() is not guaranteed
-   * to perform aligned allocation.
-   *
-   * In theory this could give better performance, since SIMD operations on
-   * aligned data are usually faster.
-   *
-   * Note that even though sometimes vertical flip is required it does not
-   * affect on alignment of data passed to sws_scale because if the X dimension
-   * is not 32 byte aligned special intermediate buffer is allocated.
-   *
-   * The issue was reported to FFmpeg under ticket #8747 in the FFmpeg tracker
-   * and is fixed in the newer versions than 4.3.1. */
 
   const AVPixFmtDescriptor *pix_fmt_descriptor = av_pix_fmt_desc_get(anim->pCodecCtx->pix_fmt);
 
@@ -1431,8 +1135,9 @@ static ImBuf *ffmpeg_fetchibuf(ImBufAnim *anim, int position, IMB_Timecode_Type 
   ImBuf *cur_frame_final = IMB_allocImBuf(anim->x, anim->y, planes, 0);
 
   /* Allocate the storage explicitly to ensure the memory is aligned. */
+  const size_t align = ffmpeg_get_buffer_alignment();
   uint8_t *buffer_data = static_cast<uint8_t *>(
-      MEM_mallocN_aligned(size_t(4) * anim->x * anim->y, 32, "ffmpeg ibuf"));
+      MEM_mallocN_aligned(size_t(4) * anim->x * anim->y, align, "ffmpeg ibuf"));
   IMB_assign_byte_buffer(cur_frame_final, buffer_data, IB_TAKE_OWNERSHIP);
 
   cur_frame_final->byte_buffer.colorspace = colormanage_colorspace_get_named(anim->colorspace);
@@ -1469,9 +1174,11 @@ static void free_anim_ffmpeg(ImBufAnim *anim)
     av_frame_free(&anim->pFrame);
     av_frame_free(&anim->pFrame_backup);
     av_frame_free(&anim->pFrameRGB);
+    if (anim->pFrameDeinterlaced->data[0] != nullptr) {
+      MEM_freeN(anim->pFrameDeinterlaced->data[0]);
+    }
     av_frame_free(&anim->pFrameDeinterlaced);
-
-    sws_freeContext(anim->img_convert_ctx);
+    BKE_ffmpeg_sws_release_context(anim->img_convert_ctx);
   }
   anim->duration_in_frames = 0;
 }
@@ -1484,58 +1191,21 @@ static void free_anim_ffmpeg(ImBufAnim *anim)
  */
 static bool anim_getnew(ImBufAnim *anim)
 {
-  BLI_assert(anim->curtype == ANIM_NONE);
   if (anim == nullptr) {
     /* Nothing to initialize. */
     return false;
   }
 
-  free_anim_movie(anim);
-
-#ifdef WITH_AVI
-  free_anim_avi(anim);
-#endif
+  BLI_assert(anim->state == ImBufAnim::State::Uninitialized);
 
 #ifdef WITH_FFMPEG
   free_anim_ffmpeg(anim);
-#endif
-
-  anim->curtype = imb_get_anim_type(anim->filepath);
-
-  switch (anim->curtype) {
-    case ANIM_SEQUENCE: {
-      ImBuf *ibuf = IMB_loadiffname(anim->filepath, anim->ib_flags, anim->colorspace);
-      if (ibuf) {
-        STRNCPY(anim->filepath_first, anim->filepath);
-        anim->duration_in_frames = 1;
-        IMB_freeImBuf(ibuf);
-      }
-      else {
-        return false;
-      }
-      break;
-    }
-    case ANIM_MOVIE:
-      if (startmovie(anim)) {
-        return false;
-      }
-      break;
-#ifdef WITH_AVI
-    case ANIM_AVI:
-      if (startavi(anim)) {
-        printf("couldn't start avi\n");
-        return false;
-      }
-      break;
-#endif
-#ifdef WITH_FFMPEG
-    case ANIM_FFMPEG:
-      if (startffmpeg(anim)) {
-        return false;
-      }
-      break;
-#endif
+  if (startffmpeg(anim)) {
+    anim->state = ImBufAnim::State::Failed;
+    return false;
   }
+#endif
+  anim->state = ImBufAnim::State::Valid;
   return true;
 }
 
@@ -1560,7 +1230,7 @@ ImBuf *IMB_anim_previewframe(ImBufAnim *anim)
     IMB_metadata_set_field(ibuf->metadata, "Thumb::Video::Frames", value);
 
 #ifdef WITH_FFMPEG
-    if (anim->pFormatCtx && anim->curtype == ANIM_FFMPEG) {
+    if (anim->pFormatCtx) {
       AVStream *v_st = anim->pFormatCtx->streams[anim->videoStream];
       AVRational frame_rate = av_guess_frame_rate(anim->pFormatCtx, v_st, nullptr);
       if (frame_rate.num != 0) {
@@ -1583,15 +1253,12 @@ ImBuf *IMB_anim_absolute(ImBufAnim *anim,
                          IMB_Proxy_Size preview_size)
 {
   ImBuf *ibuf = nullptr;
-  int filter_y;
   if (anim == nullptr) {
     return nullptr;
   }
 
-  filter_y = (anim->ib_flags & IB_animdeinterlace);
-
   if (preview_size == IMB_PROXY_NONE) {
-    if (anim->curtype == ANIM_NONE) {
+    if (anim->state == ImBufAnim::State::Uninitialized) {
       if (!anim_getnew(anim)) {
         return nullptr;
       }
@@ -1614,51 +1281,16 @@ ImBuf *IMB_anim_absolute(ImBufAnim *anim,
     }
   }
 
-  switch (anim->curtype) {
-    case ANIM_SEQUENCE: {
-      constexpr size_t filepath_size = BOUNDED_ARRAY_TYPE_SIZE<decltype(anim->filepath_first)>();
-      char head[filepath_size], tail[filepath_size];
-      ushort digits;
-      const int pic = BLI_path_sequence_decode(
-                          anim->filepath_first, head, sizeof(head), tail, sizeof(tail), &digits) +
-                      position;
-      BLI_path_sequence_encode(anim->filepath, sizeof(anim->filepath), head, tail, digits, pic);
-      ibuf = IMB_loadiffname(anim->filepath, IB_rect, anim->colorspace);
-      if (ibuf) {
-        anim->cur_position = position;
-      }
-      break;
-    }
-    case ANIM_MOVIE:
-      ibuf = movie_fetchibuf(anim, position);
-      if (ibuf) {
-        anim->cur_position = position;
-        IMB_convert_rgba_to_abgr(ibuf);
-      }
-      break;
-#ifdef WITH_AVI
-    case ANIM_AVI:
-      ibuf = avi_fetchibuf(anim, position);
-      if (ibuf) {
-        anim->cur_position = position;
-      }
-      break;
-#endif
 #ifdef WITH_FFMPEG
-    case ANIM_FFMPEG:
-      ibuf = ffmpeg_fetchibuf(anim, position, tc);
-      if (ibuf) {
-        anim->cur_position = position;
-      }
-      filter_y = 0; /* done internally */
-      break;
-#endif
+  if (anim->state == ImBufAnim::State::Valid) {
+    ibuf = ffmpeg_fetchibuf(anim, position, tc);
+    if (ibuf) {
+      anim->cur_position = position;
+    }
   }
+#endif
 
   if (ibuf) {
-    if (filter_y) {
-      IMB_filtery(ibuf);
-    }
     SNPRINTF(ibuf->filepath, "%s.%04d", anim->filepath, anim->cur_position + 1);
   }
   return ibuf;

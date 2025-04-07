@@ -11,6 +11,8 @@
 #include "DNA_listBase.h"
 #include "DNA_space_types.h"
 
+#include "BLI_string_ref.hh"
+
 struct ARegion;
 struct ImBuf;
 struct Image;
@@ -119,36 +121,44 @@ bool ED_space_image_paint_curve(const bContext *C);
  */
 bool ED_space_image_check_show_maskedit(SpaceImage *sima, Object *obedit);
 
-/* Returns true when the following conditions are met:
+/**
+ * Returns true when the following conditions are met:
  * - Current space is Image Editor.
  * - The image editor is not a UV Editor.
  * - It is set to Mask mode.
  *
- * It is not required to have mask opened for editing. */
+ * It is not required to have mask opened for editing.
+ */
 bool ED_space_image_maskedit_poll(bContext *C);
 
-/* Returns true when the following conditions are met:
+/**
+ * Returns true when the following conditions are met:
  * - Current space is Image Editor.
  * - The image editor is not a UV Editor.
  * - It is set to Mask mode.
  * - Mask has visible and editable splines.
  *
- * It is not required to have mask opened for editing. */
+ * It is not required to have mask opened for editing.
+ */
 bool ED_space_image_maskedit_visible_splines_poll(bContext *C);
 
-/* Returns true when the following conditions are met:
- * - Current space is Image Editor.
- * - The image editor is not an UV Editor.
- * - It is set to Mask mode.
- * - The space has mask opened. */
-bool ED_space_image_maskedit_mask_poll(bContext *C);
-
-/* Returns true when the following conditions are met:
+/**
+ * Returns true when the following conditions are met:
  * - Current space is Image Editor.
  * - The image editor is not an UV Editor.
  * - It is set to Mask mode.
  * - The space has mask opened.
- * - Mask has visible and editable splines. */
+ */
+bool ED_space_image_maskedit_mask_poll(bContext *C);
+
+/**
+ * Returns true when the following conditions are met:
+ * - Current space is Image Editor.
+ * - The image editor is not an UV Editor.
+ * - It is set to Mask mode.
+ * - The space has mask opened.
+ * - Mask has visible and editable splines.
+ */
 bool ED_space_image_maskedit_mask_visible_splines_poll(bContext *C);
 
 bool ED_space_image_cursor_poll(bContext *C);
@@ -197,7 +207,9 @@ struct ImageFrameRange {
 /**
  * Used for both images and volume file loading.
  */
-ListBase ED_image_filesel_detect_sequences(Main *bmain, wmOperator *op, bool detect_udim);
+ListBase ED_image_filesel_detect_sequences(blender::StringRefNull root_path,
+                                           wmOperator *op,
+                                           bool detect_udim);
 
 bool ED_image_tools_paint_poll(bContext *C);
-void ED_paint_cursor_start(Paint *p, bool (*poll)(bContext *C));
+void ED_paint_cursor_start(Paint *paint, bool (*poll)(bContext *C));

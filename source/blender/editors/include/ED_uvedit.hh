@@ -29,6 +29,7 @@ struct bContext;
 struct bNode;
 struct bNodeTree;
 struct wmKeyConfig;
+struct wmTimer;
 
 /* `uvedit_ops.cc` */
 
@@ -82,8 +83,8 @@ bool ED_uvedit_test(Object *obedit);
 bool uvedit_face_visible_test_ex(const ToolSettings *ts, BMFace *efa);
 bool uvedit_face_select_test_ex(const ToolSettings *ts, BMFace *efa, BMUVOffsets offsets);
 
-bool uvedit_edge_select_test_ex(const ToolSettings *ts, BMLoop *l, BMUVOffsets offsets);
-bool uvedit_uv_select_test_ex(const ToolSettings *ts, BMLoop *l, BMUVOffsets offsets);
+bool uvedit_edge_select_test_ex(const ToolSettings *ts, const BMLoop *l, BMUVOffsets offsets);
+bool uvedit_uv_select_test_ex(const ToolSettings *ts, const BMLoop *l, BMUVOffsets offsets);
 
 bool uvedit_face_visible_test(const Scene *scene, BMFace *efa);
 bool uvedit_face_select_test(const Scene *scene, BMFace *efa, BMUVOffsets offsets);
@@ -260,9 +261,15 @@ void ED_uvedit_select_sync_flush(const ToolSettings *ts, BMEditMesh *em, bool se
 
 /* `uvedit_unwrap_ops.cc` */
 
-void ED_uvedit_live_unwrap_begin(Scene *scene, Object *obedit);
+/** Return true if the timer is managed by live-unwrap. */
+bool ED_uvedit_live_unwrap_timer_check(const wmTimer *timer);
+
+/**
+ * \param win_modal: Support interactive (modal) unwrapping that updates with a timer.
+ */
+void ED_uvedit_live_unwrap_begin(Scene *scene, Object *obedit, struct wmWindow *win_modal);
 void ED_uvedit_live_unwrap_re_solve();
-void ED_uvedit_live_unwrap_end(short cancel);
+void ED_uvedit_live_unwrap_end(bool cancel);
 
 void ED_uvedit_live_unwrap(const Scene *scene, blender::Span<Object *> objects);
 void ED_uvedit_add_simple_uvs(Main *bmain, const Scene *scene, Object *ob);

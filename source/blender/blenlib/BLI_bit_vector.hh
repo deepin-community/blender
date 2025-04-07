@@ -38,6 +38,7 @@
  */
 
 #include "BLI_allocator.hh"
+#include "BLI_bit_bool_conversion.hh"
 #include "BLI_bit_span.hh"
 #include "BLI_span.hh"
 
@@ -158,10 +159,8 @@ class BitVector {
   explicit BitVector(const Span<bool> values, Allocator allocator = {})
       : BitVector(NoExceptConstructor(), allocator)
   {
-    this->resize(values.size());
-    for (const int64_t i : this->index_range()) {
-      (*this)[i].set(values[i]);
-    }
+    this->resize(values.size(), false);
+    or_bools_into_bits(values, *this);
   }
 
   ~BitVector()
@@ -197,6 +196,14 @@ class BitVector {
   int64_t size() const
   {
     return size_in_bits_;
+  }
+
+  /**
+   * Number of bits that can be stored before the BitVector has to grow.
+   */
+  int64_t capacity() const
+  {
+    return capacity_in_bits_;
   }
 
   bool is_empty() const
@@ -236,7 +243,7 @@ class BitVector {
 
   IndexRange index_range() const
   {
-    return {0, size_in_bits_};
+    return IndexRange(size_in_bits_);
   }
 
   /**
@@ -283,7 +290,7 @@ class BitVector {
     }
     size_in_bits_ = new_size_in_bits;
     if (old_size_in_bits < new_size_in_bits) {
-      MutableBitSpan(data_, IndexRange(old_size_in_bits, new_size_in_bits - old_size_in_bits))
+      MutableBitSpan(data_, IndexRange::from_begin_end(old_size_in_bits, new_size_in_bits))
           .set_all(value);
     }
   }

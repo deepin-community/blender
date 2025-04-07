@@ -6,6 +6,8 @@
  * \ingroup wm
  */
 
+#include <new>
+
 #include "MEM_guardedalloc.h"
 
 #include "BLI_listbase.h"
@@ -13,14 +15,14 @@
 
 #include "BKE_context.hh"
 
-#include "GPU_batch.h"
+#include "GPU_batch.hh"
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
-#include "BKE_global.h"
-#include "BKE_idprop.h"
+#include "BKE_global.hh"
+#include "BKE_idprop.hh"
 #include "BKE_main.hh"
 
 #include "WM_api.hh"
@@ -30,16 +32,11 @@
 #include "ED_screen.hh"
 #include "ED_view3d.hh"
 
-#include "UI_interface.hh"
-
 #ifdef WITH_PYTHON
-#  include "BPY_extern.h"
+#  include "BPY_extern.hh"
 #endif
 
-/* only for own init/exit calls (wm_gizmotype_init/wm_gizmotype_free) */
-#include "wm.hh"
-
-/* own includes */
+/* Own includes. */
 #include "wm_gizmo_intern.hh"
 #include "wm_gizmo_wmapi.hh"
 
@@ -53,18 +50,20 @@ static wmGizmo *wm_gizmo_create(const wmGizmoType *gzt, PointerRNA *properties)
   BLI_assert(gzt != nullptr);
   BLI_assert(gzt->struct_size >= sizeof(wmGizmo));
 
+  /* FIXME: Old C-style over-allocation is not trivial to port to C++, so for now keep it that way
+   * and use a placement new for C++ construction. */
   wmGizmo *gz = static_cast<wmGizmo *>(MEM_callocN(
       gzt->struct_size + (sizeof(wmGizmoProperty) * gzt->target_property_defs_len), __func__));
+  new (gz) wmGizmo();
   gz->type = gzt;
 
-  /* initialize properties, either copy or create */
-  gz->ptr = static_cast<PointerRNA *>(MEM_callocN(sizeof(PointerRNA), "wmGizmoPtrRNA"));
+  /* Initialize properties, either copy or create. */
+  gz->ptr = MEM_new<PointerRNA>("wmGizmoPtrRNA");
   if (properties && properties->data) {
     gz->properties = IDP_CopyProperty(static_cast<const IDProperty *>(properties->data));
   }
   else {
-    IDPropertyTemplate val = {0};
-    gz->properties = IDP_New(IDP_GROUP, &val, "wmGizmoProperties");
+    gz->properties = blender::bke::idprop::create_group("wmGizmoProperties").release();
   }
   *gz->ptr = RNA_pointer_create(static_cast<ID *>(G_MAIN->wm.first), gzt->srna, gz->properties);
 
@@ -108,7 +107,7 @@ static void gizmo_init(wmGizmo *gz)
   gz->scale_basis = 1.0f;
   gz->line_width = 1.0f;
 
-  /* defaults */
+  /* Defaults. */
   copy_v4_v4(gz->color, color_default);
   copy_v4_v4(gz->color_hi, color_default);
 }
@@ -132,22 +131,19 @@ void WM_gizmo_free(wmGizmo *gz)
 
 #ifdef WITH_PYTHON
   if (gz->py_instance) {
-    /* do this first in case there are any __del__ functions or
-     * similar that use properties */
+    /* Do this first in case there are any `__del__` functions or
+     * similar that use properties. */
     BPY_DECREF_RNA_INVALIDATE(gz->py_instance);
   }
 #endif
 
-  if (gz->op_data) {
-    for (int i = 0; i < gz->op_data_len; i++) {
-      WM_operator_properties_free(&gz->op_data[i].ptr);
-    }
-    MEM_freeN(gz->op_data);
+  for (wmGizmoOpElem &gzop : gz->op_data) {
+    WM_operator_properties_free(&gzop.ptr);
   }
 
   if (gz->ptr != nullptr) {
     WM_gizmo_properties_free(gz->ptr);
-    MEM_freeN(gz->ptr);
+    MEM_delete(gz->ptr);
   }
 
   if (gz->type->target_property_defs_len != 0) {
@@ -160,6 +156,9 @@ void WM_gizmo_free(wmGizmo *gz)
     }
   }
 
+  /* Explicit calling of the destructor is needed here because allocation still happens 'the C
+   * way', see FIXME note in #wm_gizmo_create. */
+  gz->~wmGizmo();
   MEM_freeN(gz);
 }
 
@@ -195,7 +194,7 @@ void WM_gizmo_unlink(ListBase *gizmolist, wmGizmoMap *gzmap, wmGizmo *gz, bConte
 
 wmGizmoOpElem *WM_gizmo_operator_get(wmGizmo *gz, int part_index)
 {
-  if (gz->op_data && ((part_index >= 0) && (part_index < gz->op_data_len))) {
+  if ((part_index >= 0) && (part_index < gz->op_data.size())) {
     return &gz->op_data[part_index];
   }
   return nullptr;
@@ -207,25 +206,22 @@ PointerRNA *WM_gizmo_operator_set(wmGizmo *gz,
                                   IDProperty *properties)
 {
   BLI_assert(part_index < 255);
-  /* We could pre-allocate these but using multiple is such a rare thing. */
-  if (part_index >= gz->op_data_len) {
-    gz->op_data_len = part_index + 1;
-    gz->op_data = static_cast<wmGizmoOpElem *>(
-        MEM_recallocN(gz->op_data, sizeof(*gz->op_data) * gz->op_data_len));
+  if (part_index >= gz->op_data.size()) {
+    gz->op_data.resize(part_index + 1);
   }
-  wmGizmoOpElem *gzop = &gz->op_data[part_index];
-  gzop->type = ot;
+  wmGizmoOpElem &gzop = gz->op_data[part_index];
+  gzop.type = ot;
 
-  if (gzop->ptr.data) {
-    WM_operator_properties_free(&gzop->ptr);
+  if (gzop.ptr.data) {
+    WM_operator_properties_free(&gzop.ptr);
   }
-  WM_operator_properties_create_ptr(&gzop->ptr, ot);
+  WM_operator_properties_create_ptr(&gzop.ptr, ot);
 
   if (properties) {
-    gzop->ptr.data = properties;
+    gzop.ptr.data = properties;
   }
 
-  return &gzop->ptr;
+  return &gzop.ptr;
 }
 
 int WM_gizmo_operator_invoke(bContext *C, wmGizmo *gz, wmGizmoOpElem *gzop, const wmEvent *event)
@@ -236,8 +232,7 @@ int WM_gizmo_operator_invoke(bContext *C, wmGizmo *gz, wmGizmoOpElem *gzop, cons
     bToolRef *tref = WM_toolsystem_ref_from_context(C);
     if (tref && WM_toolsystem_ref_properties_get_from_operator(tref, gzop->type, &tref_ptr)) {
       if (gzop->ptr.data == nullptr) {
-        IDPropertyTemplate val = {0};
-        gzop->ptr.data = IDP_New(IDP_GROUP, &val, "wmOperatorProperties");
+        gzop->ptr.data = blender::bke::idprop::create_group("wmOperatorProperties").release();
       }
       IDP_MergeGroup(static_cast<IDProperty *>(gzop->ptr.data),
                      static_cast<const IDProperty *>(tref_ptr.data),
@@ -250,7 +245,7 @@ int WM_gizmo_operator_invoke(bContext *C, wmGizmo *gz, wmGizmoOpElem *gzop, cons
 static void wm_gizmo_set_matrix_rotation_from_z_axis__internal(float matrix[4][4],
                                                                const float z_axis[3])
 {
-/* old code, seems we can use simpler method */
+/* Old code, seems we can use simpler method. */
 #if 0
   const float z_global[3] = {0.0f, 0.0f, 1.0f};
   float rot[3][3];
@@ -383,7 +378,7 @@ bool wm_gizmo_select_set_ex(
   }
 
   /* In the case of unlinking we only want to remove from the array
-   * and not write to the external state */
+   * and not write to the external state. */
   if (use_callback && changed) {
     if (gz->type->select_refresh) {
       gz->type->select_refresh(gz);
@@ -480,7 +475,7 @@ void wm_gizmo_calculate_scale(wmGizmo *gz, const bContext *C)
 
 static void gizmo_update_prop_data(wmGizmo *gz)
 {
-  /* gizmo property might have been changed, so update gizmo */
+  /* Gizmo property might have been changed, so update gizmo. */
   if (gz->type->property_update) {
     wmGizmoProperty *gz_prop_array = WM_gizmo_target_property_array(gz);
     for (int i = 0; i < gz->type->target_property_defs_len; i++) {
@@ -508,13 +503,13 @@ int wm_gizmo_is_visible(wmGizmo *gz)
   if ((gz->state & WM_GIZMO_STATE_MODAL) &&
       !(gz->flag & (WM_GIZMO_DRAW_MODAL | WM_GIZMO_DRAW_VALUE)))
   {
-    /* don't draw while modal (dragging) */
+    /* Don't draw while modal (dragging). */
     return 0;
   }
   if ((gz->flag & WM_GIZMO_DRAW_HOVER) && !(gz->state & WM_GIZMO_STATE_HIGHLIGHT) &&
-      !(gz->state & WM_GIZMO_STATE_SELECT)) /* still draw selected gizmos */
+      !(gz->state & WM_GIZMO_STATE_SELECT)) /* Still draw selected gizmos. */
   {
-    /* update but don't draw */
+    /* Update but don't draw. */
     return WM_GIZMO_IS_VISIBLE_UPDATE;
   }
 
@@ -608,12 +603,11 @@ void WM_gizmo_properties_create(PointerRNA *ptr, const char *gtstring)
 void WM_gizmo_properties_alloc(PointerRNA **ptr, IDProperty **properties, const char *gtstring)
 {
   if (*properties == nullptr) {
-    IDPropertyTemplate val = {0};
-    *properties = IDP_New(IDP_GROUP, &val, "wmOpItemProp");
+    *properties = blender::bke::idprop::create_group("wmOpItemProp").release();
   }
 
   if (*ptr == nullptr) {
-    *ptr = static_cast<PointerRNA *>(MEM_callocN(sizeof(PointerRNA), "wmOpItemPtr"));
+    *ptr = MEM_new<PointerRNA>("wmOpItemPtr");
     WM_gizmo_properties_create(*ptr, gtstring);
   }
 
@@ -635,7 +629,7 @@ void WM_gizmo_properties_sanitize(PointerRNA *ptr, const bool no_context)
       case PROP_POINTER: {
         StructRNA *ptype = RNA_property_pointer_type(ptr, prop);
 
-        /* recurse into gizmo properties */
+        /* Recurse into gizmo properties. */
         if (RNA_struct_is_a(ptype, &RNA_GizmoProperties)) {
           PointerRNA opptr = RNA_property_pointer_get(ptr, prop);
           WM_gizmo_properties_sanitize(&opptr, no_context);
@@ -709,7 +703,7 @@ void WM_gizmo_properties_free(PointerRNA *ptr)
 
   if (properties) {
     IDP_FreeProperty(properties);
-    ptr->data = nullptr; /* just in case */
+    ptr->data = nullptr; /* Just in case. */
   }
 }
 

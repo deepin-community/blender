@@ -4,125 +4,73 @@
 
 #pragma once
 
+#include "BLI_math_vector_types.hh"
+
 #include "COM_MultiThreadedOperation.h"
 
 namespace blender::compositor {
 
-/**
- * \brief The #BokehImageOperation class is an operation that creates an image useful to mimic the
- * internals of a camera.
- *
- * features:
- *  - number of flaps
- *  - angle offset of the flaps
- *  - rounding of the flaps (also used to make a circular lens)
- *  - simulate catadioptric
- *  - simulate lens-shift
- *
- * Per pixel the algorithm determines the edge of the bokeh on the same line as the center of the
- * image and the pixel is evaluating.
- *
- * The edge is detected by finding the closest point on the direct line between the two nearest
- * flap-corners. this edge is interpolated with a full circle. Result of this edge detection is
- * stored as the distance between the center of the image and the edge.
- *
- * catadioptric lenses are simulated to interpolate between the center of the image and the
- * distance of the edge. We now have three distances:
- * - Distance between the center of the image and the pixel to be evaluated.
- * - Distance between the center of the image and the outer-edge.
- * - Distance between the center of the image and the inner-edge.
- *
- * With a simple compare it can be detected if the evaluated pixel is between the outer and inner
- * edge.
- */
 class BokehImageOperation : public MultiThreadedOperation {
  private:
-  /**
-   * \brief Settings of the bokeh image
-   */
   const NodeBokehImage *data_;
 
-  /**
-   * \brief precalculate center of the image
-   */
-  float center_[2];
+  int resolution_ = COM_BLUR_BOKEH_PIXELS;
 
-  /**
-   * \brief 1.0-rounding
-   */
-  float inverse_rounding_;
+  float exterior_angle_;
+  float rotation_;
+  float roundness_;
+  float catadioptric_;
+  float lens_shift_;
 
-  /**
-   * \brief distance of a full circle lens
-   */
-  float circular_distance_;
-
-  /**
-   * \brief radius when the first flap starts
-   */
-  float flap_rad_;
-
-  /**
-   * \brief radians of a single flap
-   */
-  float flap_rad_add_;
-
-  /**
-   * \brief should the data_ field by deleted when this operation is finished
-   */
+  /* See the delete_data_on_finish method. */
   bool delete_data_;
 
   /**
-   * \brief determine the coordinate of a flap corner.
-   *
-   * \param r: result in bokeh-image space are stored [x,y]
-   * \param flap_number: the flap number to calculate
-   * \param distance: the lens distance is used to simulate lens shifts
+   * Get the 2D vertex position of the vertex with the given index in the regular polygon
+   * representing this bokeh. The polygon is rotated by the rotation amount and have a unit
+   * circumradius. The regular polygon is one whose vertices' exterior angles are given by
+   * exterior_angle. See the bokeh function for more information.
    */
-  void detemine_start_point_of_flap(float r[2], int flap_number, float distance);
-
+  float2 get_regular_polygon_vertex_position(int vertex_index);
   /**
-   * \brief Determine if a coordinate is inside the bokeh image
-   *
-   * \param distance: the distance that will be used.
-   * This parameter is modified a bit to mimic lens shifts.
-   * \param x: the x coordinate of the pixel to evaluate
-   * \param y: the y coordinate of the pixel to evaluate
-   * \return float range 0..1 0 is completely outside
+   * Find the closest point to the given point on the given line. This assumes the length of the
+   * given line is not zero.
    */
-  float is_inside_bokeh(float distance, float x, float y);
+  float2 closest_point_on_line(float2 point, float2 line_start, float2 line_end);
+  /**
+   * Compute the value of the bokeh at the given point. The computed bokeh is essentially a regular
+   * polygon centered in space having the given circumradius. The regular polygon is one whose
+   * vertices' exterior angles are given by "exterior_angle", which relates to the number of
+   * vertices n through the equation "exterior angle = 2 pi / n". The regular polygon may
+   * additionally morph into a shape with the given properties:
+   *
+   * - The regular polygon may have a circular hole in its center whose radius is controlled by the
+   *   "catadioptric" value.
+   * - The regular polygon is rotated by the "rotation" value.
+   * - The regular polygon can morph into a circle controlled by the "roundness" value,
+   *   such that it becomes a full circle at unit roundness.
+   *
+   * The function returns 0 when the point lies inside the regular polygon and 1 otherwise.
+   * However, at the edges, it returns a narrow band gradient as a form of anti-aliasing.
+   */
+  float bokeh(float2 point, float circumradius);
 
  public:
   BokehImageOperation();
 
-  /**
-   * \brief The inner loop of this operation.
-   */
-  void execute_pixel_sampled(float output[4], float x, float y, PixelSampler sampler) override;
-
-  /**
-   * \brief Initialize the execution
-   */
   void init_execution() override;
-
-  /**
-   * \brief De-initialize the execution
-   */
   void deinit_execution() override;
 
-  /**
-   * \brief determine the resolution of this operation. currently fixed at [COM_BLUR_BOKEH_PIXELS,
-   * COM_BLUR_BOKEH_PIXELS] \param resolution: \param preferred_resolution:
-   */
   void determine_canvas(const rcti &preferred_area, rcti &r_area) override;
 
-  /**
-   * \brief set the node data
-   * \param data:
-   */
   void set_data(const NodeBokehImage *data)
   {
     data_ = data;
+  }
+
+  void set_resolution(int resolution)
+  {
+    resolution_ = resolution;
   }
 
   /**

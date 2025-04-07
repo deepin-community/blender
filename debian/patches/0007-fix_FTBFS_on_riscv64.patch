@@ -1,0 +1,147 @@
+From: Raphael Langerhorst <raphael@gracetech.at>
+Date: Sun, 2 Feb 2025 15:57:13 +0100
+Subject: fix_FTBFS_on_riscv64
+
+---
+ build_files/utils/make_update.py                   |  2 --
+ intern/libmv/libmv/build/build_config.h            | 23 ++++++++++++++++
+ source/blender/blenlib/BLI_build_config.h          | 32 ++++++++++++++++++++++
+ .../blender/blenlib/tests/BLI_build_config_test.cc |  2 +-
+ 4 files changed, 56 insertions(+), 3 deletions(-)
+
+diff --git a/build_files/utils/make_update.py b/build_files/utils/make_update.py
+index 21e1c07..f3dda41 100755
+--- a/build_files/utils/make_update.py
++++ b/build_files/utils/make_update.py
+@@ -111,8 +111,6 @@ def get_effective_architecture(args: argparse.Namespace) -> str:
+     if architecture == "aarch64":
+         architecture = "arm64"
+ 
+-    assert (architecture in {"x64", "arm64"})
+-
+     assert isinstance(architecture, str)
+     return architecture
+ 
+diff --git a/intern/libmv/libmv/build/build_config.h b/intern/libmv/libmv/build/build_config.h
+index 1d87660..09e67e2 100644
+--- a/intern/libmv/libmv/build/build_config.h
++++ b/intern/libmv/libmv/build/build_config.h
+@@ -345,6 +345,23 @@
+ #    define ARCH_CPU_32_BITS 1
+ #    define ARCH_CPU_BIG_ENDIAN 1
+ #  endif
++#elif defined(__riscv)
++#  define ARCH_CPU_RISCV_FAMILY 1
++#  if defined(__LP128__)
++#    define ARCH_CPU_RISCV128 1
++#    define ARCH_CPU_128_BITS 1
++#  elif defined(__LP64__)
++#    define ARCH_CPU_RISCV64 1
++#    define ARCH_CPU_64_BITS 1
++#  else
++#    define ARCH_CPU_RISCV32 1
++#    define ARCH_CPU_32_BITS 1
++#  endif
++#  if (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
++#    define ARCH_CPU_LITTLE_ENDIAN 1
++#  else
++#    define ARCH_CPU_BIG_ENDIAN 1
++#  endif
+ #else
+ #  error Please add support for your architecture in build/build_config.h
+ #endif
+@@ -362,6 +379,9 @@
+ #if !defined(ARCH_CPU_64_BITS)
+ #  define ARCH_CPU_64_BITS 0
+ #endif
++#if !defined(ARCH_CPU_128_BITS)
++#  define ARCH_CPU_128_BITS 0
++#endif
+ 
+ #if !defined(ARCH_CPU_X86_FAMILY)
+ #  define ARCH_CPU_X86_FAMILY 0
+@@ -378,5 +398,8 @@
+ #if !defined(ARCH_CPU_S390_FAMILY)
+ #  define ARCH_CPU_S390_FAMILY 0
+ #endif
++#if !defined(ARCH_CPU_RISCV_FAMILY)
++#  define ARCH_CPU_RISCV_FAMILY 0
++#endif
+ 
+ #endif  // LIBMV_BUILD_BUILD_CONFIG_H_
+diff --git a/source/blender/blenlib/BLI_build_config.h b/source/blender/blenlib/BLI_build_config.h
+index 232c2fb..c45d5b0 100644
+--- a/source/blender/blenlib/BLI_build_config.h
++++ b/source/blender/blenlib/BLI_build_config.h
+@@ -337,6 +337,23 @@
+ #    define ARCH_CPU_32_BITS 1
+ #    define ARCH_CPU_BIG_ENDIAN 1
+ #  endif
++#elif defined(__riscv)
++#  define ARCH_CPU_RISCV_FAMILY 1
++#  if defined(__LP128__)
++#    define ARCH_CPU_RISCV128 1
++#    define ARCH_CPU_128_BITS 1
++#  elif defined(__LP64__)
++#    define ARCH_CPU_RISCV64 1
++#    define ARCH_CPU_64_BITS 1
++#  else
++#    define ARCH_CPU_RISCV32 1
++#    define ARCH_CPU_32_BITS 1
++#  endif
++#  if (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
++#    define ARCH_CPU_LITTLE_ENDIAN 1
++#  else
++#    define ARCH_CPU_BIG_ENDIAN 1
++#  endif
+ #else
+ #  error Please add support for your architecture in BLI_build_config.h
+ #endif
+@@ -357,6 +374,9 @@
+ #if !defined(ARCH_CPU_64_BITS)
+ #  define ARCH_CPU_64_BITS 0
+ #endif
++#if !defined(ARCH_CPU_128_BITS)
++#  define ARCH_CPU_128_BITS 0
++#endif
+ 
+ #if !defined(ARCH_CPU_X86_FAMILY)
+ #  define ARCH_CPU_X86_FAMILY 0
+@@ -373,6 +393,9 @@
+ #if !defined(ARCH_CPU_S390_FAMILY)
+ #  define ARCH_CPU_S390_FAMILY 0
+ #endif
++#if !defined(ARCH_CPU_RISCV_FAMILY)
++#  define ARCH_CPU_RISCV_FAMILY 0
++#endif
+ 
+ #if !defined(ARCH_CPU_ARM64)
+ #  define ARCH_CPU_ARM64 0
+@@ -407,5 +430,14 @@
+ #if !defined(ARCH_CPU_X86_64)
+ #  define ARCH_CPU_X86_64 0
+ #endif
++#if !defined(ARCH_CPU_RISCV32)
++#  define ARCH_CPU_RISCV32 0
++#endif
++#if !defined(ARCH_CPU_RISCV64)
++#  define ARCH_CPU_RISCV64 0
++#endif
++#if !defined(ARCH_CPU_RISCV128)
++#  define ARCH_CPU_RISCV128 0
++#endif
+ 
+ /** \} */
+diff --git a/source/blender/blenlib/tests/BLI_build_config_test.cc b/source/blender/blenlib/tests/BLI_build_config_test.cc
+index 63eea2a..2594967 100644
+--- a/source/blender/blenlib/tests/BLI_build_config_test.cc
++++ b/source/blender/blenlib/tests/BLI_build_config_test.cc
+@@ -13,7 +13,7 @@ namespace blender::tests {
+  * build_config implementation. */
+ TEST(BLI_build_config, Basic)
+ {
+-  static_assert(ARCH_CPU_31_BITS || ARCH_CPU_32_BITS || ARCH_CPU_64_BITS);
++  static_assert(ARCH_CPU_31_BITS || ARCH_CPU_32_BITS || ARCH_CPU_64_BITS || ARCH_CPU_128_BITS);
+ }
+ 
+ TEST(BLI_build_config, Endian)

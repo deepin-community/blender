@@ -11,7 +11,6 @@
 #include "MEM_guardedalloc.h"
 
 #include "DNA_listBase.h"
-#include "DNA_scene_types.h"
 
 #include "BLI_listbase.h"
 #include "BLI_math_matrix.h"
@@ -22,6 +21,10 @@
 #include "BKE_mesh.hh"
 
 #include "bmesh.hh"
+
+using blender::Array;
+using blender::float3;
+using blender::MutableSpan;
 
 const BMAllocTemplate bm_mesh_allocsize_default = {512, 1024, 2048, 512};
 const BMAllocTemplate bm_mesh_chunksize_default = {512, 1024, 2048, 512};
@@ -240,6 +243,7 @@ void BM_mesh_data_free(BMesh *bm)
 void BM_mesh_clear(BMesh *bm)
 {
   const bool use_toolflags = bm->use_toolflags;
+  void *py_handle = bm->py_handle;
 
   /* free old mesh */
   BM_mesh_data_free(bm);
@@ -249,6 +253,8 @@ void BM_mesh_clear(BMesh *bm)
   bm_mempool_init(bm, &bm_mesh_allocsize_default, use_toolflags);
 
   bm->use_toolflags = use_toolflags;
+  bm->py_handle = py_handle;
+
   bm->toolflag_index = 0;
   bm->totflags = 0;
 
@@ -1329,23 +1335,31 @@ void BM_mesh_toolflags_set(BMesh *bm, bool use_toolflags)
 /** \name BMesh Coordinate Access
  * \{ */
 
-void BM_mesh_vert_coords_get(BMesh *bm, float (*vert_coords)[3])
+void BM_mesh_vert_coords_get(BMesh *bm, MutableSpan<float3> positions)
 {
   BMIter iter;
   BMVert *v;
   int i;
   BM_ITER_MESH_INDEX (v, &iter, bm, BM_VERTS_OF_MESH, i) {
-    copy_v3_v3(vert_coords[i], v->co);
+    positions[i] = v->co;
   }
 }
 
-float (*BM_mesh_vert_coords_alloc(BMesh *bm, int *r_vert_len))[3]
+void BM_mesh_vert_normals_get(BMesh *bm, MutableSpan<float3> normals)
 {
-  float(*vert_coords)[3] = static_cast<float(*)[3]>(
-      MEM_mallocN(bm->totvert * sizeof(*vert_coords), __func__));
-  BM_mesh_vert_coords_get(bm, vert_coords);
-  *r_vert_len = bm->totvert;
-  return vert_coords;
+  BMIter iter;
+  BMVert *v;
+  int i;
+  BM_ITER_MESH_INDEX (v, &iter, bm, BM_VERTS_OF_MESH, i) {
+    normals[i] = v->no;
+  }
+}
+
+Array<float3> BM_mesh_vert_coords_alloc(BMesh *bm)
+{
+  Array<float3> positions(bm->totvert);
+  BM_mesh_vert_coords_get(bm, positions);
+  return positions;
 }
 
 void BM_mesh_vert_coords_apply(BMesh *bm, const float (*vert_coords)[3])

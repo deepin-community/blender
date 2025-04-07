@@ -10,7 +10,7 @@
 
 #include "BLI_bitmap.h"
 
-#include "GPU_capabilities.h"
+#include "GPU_capabilities.hh"
 
 #include "mtl_common.hh"
 #include "mtl_debug.hh"
@@ -31,7 +31,7 @@ MTLShaderInterface::MTLShaderInterface(const char *name)
   inputs_ = nullptr;
 
   if (name != nullptr) {
-    strcpy(this->name, name);
+    STRNCPY(this->name, name);
   }
 
   /* Ensure #ShaderInterface parameters are cleared. */
@@ -191,7 +191,7 @@ void MTLShaderInterface::add_uniform(uint32_t name_offset, eMTLDataType type, in
   /* Determine size and offset alignment -- C++ struct alignment rules: Base address of value must
    * match alignment of type. GLSL follows minimum type alignment of 4. */
   int data_type_size = mtl_get_data_type_size(type) * array_len;
-  int data_type_alignment = max_ii(mtl_get_data_type_alignment(type), 4);
+  int data_type_alignment = mtl_get_data_type_alignment(type);
   int current_offset = push_constant_block_.current_offset;
   if ((current_offset % data_type_alignment) != 0) {
     current_offset += data_type_alignment - (current_offset % data_type_alignment);
@@ -307,7 +307,7 @@ void MTLShaderInterface::map_builtins()
 }
 
 /* Populate #ShaderInput struct based on interface. */
-void MTLShaderInterface::prepare_common_shader_inputs()
+void MTLShaderInterface::prepare_common_shader_inputs(const shader::ShaderCreateInfo *info)
 {
   /* `ShaderInput inputs_` maps a uniform name to an external
    * uniform location, which is used as an array index to look-up
@@ -416,6 +416,17 @@ void MTLShaderInterface::prepare_common_shader_inputs()
     current_input->location = shd_ssbo.location;
     current_input->binding = shd_ssbo.location;
     current_input++;
+  }
+
+  if (info != nullptr) {
+    for (const shader::ShaderCreateInfo::Resource &res : info->geometry_resources_) {
+      if (res.bind_type == shader::ShaderCreateInfo::Resource::BindType::STORAGE_BUFFER) {
+        ssbo_attr_mask_ |= (1 << res.slot);
+      }
+      else {
+        BLI_assert_msg(0, "Resource type is not supported for Geometry frequency");
+      }
+    }
   }
 
   /* Specialization Constants. */

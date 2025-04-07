@@ -22,6 +22,10 @@
 #  include "GHOST_ContextVK.hh"
 #endif
 
+#ifdef WIN32
+#  include "BLI_path_utils.hh"
+#endif
+
 #include <Dwmapi.h>
 
 #include <assert.h>
@@ -40,7 +44,7 @@
 const wchar_t *GHOST_WindowWin32::s_windowClassName = L"GHOST_WindowClass";
 const int GHOST_WindowWin32::s_maxTitleLength = 128;
 
-/* force NVidia Optimus to used dedicated graphics */
+/* force NVidia OPTIMUS to used dedicated graphics */
 extern "C" {
 __declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
 }
@@ -57,7 +61,8 @@ GHOST_WindowWin32::GHOST_WindowWin32(GHOST_SystemWin32 *system,
                                      bool alphaBackground,
                                      GHOST_WindowWin32 *parentwindow,
                                      bool is_debug,
-                                     bool dialog)
+                                     bool dialog,
+                                     const GHOST_GPUDevice &preferred_device)
     : GHOST_Window(width, height, state, wantStereoVisual, false),
       m_mousePresent(false),
       m_inLiveResize(false),
@@ -66,6 +71,7 @@ GHOST_WindowWin32::GHOST_WindowWin32(GHOST_SystemWin32 *system,
       m_hWnd(0),
       m_hDC(0),
       m_isDialog(dialog),
+      m_preferred_device(preferred_device),
       m_hasMouseCaptured(false),
       m_hasGrabMouse(false),
       m_nPressedButtons(0),
@@ -127,15 +133,31 @@ GHOST_WindowWin32::GHOST_WindowWin32(GHOST_SystemWin32 *system,
 
   if (!setDrawingContextType(type)) {
     const char *title = "Blender - Unsupported Graphics Card Configuration";
-    const char *text =
-        "A graphics card and driver with support for OpenGL 4.3 or higher is "
-        "required.\n\nInstalling the latest driver for your graphics card might resolve the "
-        "issue.";
-    if (GetSystemMetrics(SM_CMONITORS) > 1) {
+    const char *text = "";
+#if defined(WIN32)
+    if (strncmp(BLI_getenv("PROCESSOR_IDENTIFIER"), "ARM", 3) == 0 &&
+        strstr(BLI_getenv("PROCESSOR_IDENTIFIER"), "Qualcomm") != NULL)
+    {
+      text =
+          "A driver with support for OpenGL 4.3 or higher is required.\n\n"
+          "Qualcomm devices require the \"OpenCL™, OpenGL®, and Vulkan® Compatibility Pack\" "
+          "from the Microsoft Store.\n\n"
+          "Devices using processors older than a Qualcomm Snapdragon 8cx Gen3 are incompatible, "
+          "but may be able to run an emulated x64 copy of Blender, such as a 3.x LTS release.";
+    }
+    else
+#endif
+    {
       text =
           "A graphics card and driver with support for OpenGL 4.3 or higher is "
-          "required.\n\nPlugging all monitors into your primary graphics card might resolve "
-          "this issue. Installing the latest driver for your graphics card could also help.";
+          "required.\n\nInstalling the latest driver for your graphics card might resolve the "
+          "issue.";
+      if (GetSystemMetrics(SM_CMONITORS) > 1) {
+        text =
+            "A graphics card and driver with support for OpenGL 4.3 or higher is "
+            "required.\n\nPlugging all monitors into your primary graphics card might resolve "
+            "this issue. Installing the latest driver for your graphics card could also help.";
+      }
     }
     MessageBox(m_hWnd, text, title, MB_OK | MB_ICONERROR);
     ::ReleaseDC(m_hWnd, m_hDC);
@@ -204,9 +226,6 @@ GHOST_WindowWin32::GHOST_WindowWin32(GHOST_SystemWin32 *system,
     DeleteObject(bb.hRgnBlur);
   }
 #endif
-
-  /* Force an initial paint of the window. */
-  ::UpdateWindow(m_hWnd);
 
   /* Initialize WINTAB. */
   if (system->getTabletAPI() != GHOST_kTabletWinPointer) {
@@ -603,7 +622,8 @@ GHOST_Context *GHOST_WindowWin32::newDrawingContext(GHOST_TDrawingContextType ty
   switch (type) {
 #ifdef WITH_VULKAN_BACKEND
     case GHOST_kDrawingContextTypeVulkan: {
-      GHOST_Context *context = new GHOST_ContextVK(false, m_hWnd, 1, 2, m_debug_context);
+      GHOST_Context *context = new GHOST_ContextVK(
+          false, m_hWnd, 1, 2, m_debug_context, m_preferred_device);
       if (context->initializeDrawingContext()) {
         return context;
       }
@@ -741,7 +761,16 @@ HCURSOR GHOST_WindowWin32::getStandardCursor(GHOST_TStandardCursor shape) const
       cursor = ::LoadImage(module, "zoomout_cursor", IMAGE_CURSOR, cx, cy, flags);
       break;
     case GHOST_kStandardCursorMove:
+      cursor = ::LoadImage(nullptr, IDC_SIZEALL, IMAGE_CURSOR, cx, cy, flags);
+      break;
+    case GHOST_kStandardCursorHandOpen:
       cursor = ::LoadImage(module, "handopen_cursor", IMAGE_CURSOR, cx, cy, flags);
+      break;
+    case GHOST_kStandardCursorHandClosed:
+      cursor = ::LoadImage(module, "handclosed_cursor", IMAGE_CURSOR, cx, cy, flags);
+      break;
+    case GHOST_kStandardCursorHandPoint:
+      cursor = ::LoadImage(module, "handpoint_cursor", IMAGE_CURSOR, cx, cy, flags);
       break;
     case GHOST_kStandardCursorNSEWScroll:
       cursor = ::LoadImage(module, "scrollnsew_cursor", IMAGE_CURSOR, cx, cy, flags);
@@ -806,6 +835,16 @@ HCURSOR GHOST_WindowWin32::getStandardCursor(GHOST_TStandardCursor shape) const
     case GHOST_kStandardCursorStop:
       cursor = ::LoadImage(module, "forbidden_cursor", IMAGE_CURSOR, cx, cy, flags);
       break; /* Slashed circle */
+    case GHOST_kStandardCursorLeftHandle:
+      cursor = ::LoadImage(module, "handle_left_cursor", IMAGE_CURSOR, cx, cy, flags);
+      break;
+    case GHOST_kStandardCursorRightHandle:
+      cursor = ::LoadImage(module, "handle_right_cursor", IMAGE_CURSOR, cx, cy, flags);
+      break;
+    case GHOST_kStandardCursorBothHandles:
+      cursor = ::LoadImage(module, "handle_both_cursor", IMAGE_CURSOR, cx, cy, flags);
+      break;
+
     case GHOST_kStandardCursorDefault:
       cursor = nullptr;
       break;

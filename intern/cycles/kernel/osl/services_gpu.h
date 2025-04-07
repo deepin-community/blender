@@ -48,6 +48,8 @@ ccl_device_constant DeviceString u_object_color = 12695623857059169556ull;
 ccl_device_constant DeviceString u_object_alpha = 11165053919428293151ull;
 /* "object:index" */
 ccl_device_constant DeviceString u_object_index = 6588325838217472556ull;
+/* "object:is_light" */
+ccl_device_constant DeviceString u_object_is_light = 13979755312845091842ull;
 /* "geom:dupli_generated" */
 ccl_device_constant DeviceString u_geom_dupli_generated = 6715607178003388908ull;
 /* "geom:dupli_uv" */
@@ -317,13 +319,16 @@ ccl_device_extern void osl_blackbody_vf(ccl_private ShaderGlobals *sg,
   *result = color_rgb;
 }
 
-#if 0
 ccl_device_extern void osl_wavelength_color_vf(ccl_private ShaderGlobals *sg,
-                                                   ccl_private float3 *result,
-                                                   float wavelength)
+                                               ccl_private float3 *result,
+                                               float lambda_nm)
 {
+  float3 color = xyz_to_rgb(nullptr, svm_math_wavelength_color_xyz(lambda_nm));
+  color *= 1.0f / 2.52f;  // Empirical scale from lg to make all comps <= 1
+
+  /* Clamp to zero if values are smaller */
+  *result = max(color, make_float3(0.0f, 0.0f, 0.0f));
 }
-#endif
 
 ccl_device_extern void osl_luminance_fv(ccl_private ShaderGlobals *sg,
                                         ccl_private float *result,
@@ -1117,6 +1122,10 @@ ccl_device_inline bool get_object_standard_attribute(KernelGlobals kg,
     float f = object_pass_id(kg, sd->object);
     return set_attribute_float(f, type, derivatives, val);
   }
+  else if (name == DeviceStrings::u_object_is_light) {
+    float f = ((sd->type & PRIMITIVE_LAMP) != 0);
+    return set_attribute_float(f, type, derivatives, val);
+  }
   else if (name == DeviceStrings::u_geom_dupli_generated) {
     float3 f = object_dupli_generated(kg, sd->object);
     return set_attribute_float3(f, type, derivatives, val);
@@ -1553,7 +1562,7 @@ OSL_NOISE_IMPL(osl_snoise, snoise)
 
 /* Texturing */
 
-#include "kernel/svm/ies.h"
+#include "kernel/util/ies.h"
 
 ccl_device_extern ccl_private OSLTextureOptions *osl_get_texture_options(
     ccl_private ShaderGlobals *sg)
@@ -2223,6 +2232,10 @@ OSL_OP_IMPL_XX(osl_abs, fabsf)
 OSL_OP_IMPL_II(osl_fabs, abs)
 OSL_OP_IMPL_XX(osl_fabs, fabsf)
 OSL_OP_IMPL_XXX(osl_fmod, safe_modulo)
+OSL_OP_IMPL_VVF_(osl_fmod, safe_modulo)
+OSL_OP_IMPL_DVVDF_(osl_fmod, safe_modulo)
+OSL_OP_IMPL_DVDVF_(osl_fmod, safe_modulo)
+OSL_OP_IMPL_DVDVDF_(osl_fmod, safe_modulo)
 
 OSL_OP_IMPL_FFFF(osl_smoothstep, smoothstep)
 OSL_OP_IMPL_DFFFDF(osl_smoothstep, smoothstep)

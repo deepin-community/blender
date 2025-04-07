@@ -10,6 +10,8 @@
 
 CCL_NAMESPACE_BEGIN
 
+#ifdef __SUBSURFACE__
+
 /* Random walk subsurface scattering.
  *
  * "Practical and Controllable Subsurface Scattering for Production Path
@@ -160,7 +162,7 @@ ccl_device_forceinline Spectrum subsurface_random_walk_pdf(Spectrum sigma_t,
 
 /* Define the below variable to get the similarity code active,
  * and the value represents the cutoff level */
-#define SUBSURFACE_RANDOM_WALK_SIMILARITY_LEVEL 9
+#  define SUBSURFACE_RANDOM_WALK_SIMILARITY_LEVEL 9
 
 ccl_device_inline bool subsurface_random_walk(KernelGlobals kg,
                                               IntegratorState state,
@@ -222,7 +224,7 @@ ccl_device_inline bool subsurface_random_walk(KernelGlobals kg,
   const float phase_log = logf((diffusion_length + 1.0f) / (diffusion_length - 1.0f));
 
   /* Modify state for RNGs, decorrelated from other paths. */
-  rng_state.rng_hash = hash_hp_seeded_uint(rng_state.rng_hash + rng_state.rng_offset, 0xdeadbeef);
+  path_state_rng_scramble(&rng_state, 0xdeadbeef);
 
   /* Random walk until we hit the surface again. */
   bool hit = false;
@@ -233,20 +235,20 @@ ccl_device_inline bool subsurface_random_walk(KernelGlobals kg,
   /* Our heuristic, a compromise between guiding and classic. */
   const float guided_fraction = 1.0f - fmaxf(0.5f, powf(fabsf(anisotropy), 0.125f));
 
-#ifdef SUBSURFACE_RANDOM_WALK_SIMILARITY_LEVEL
+#  ifdef SUBSURFACE_RANDOM_WALK_SIMILARITY_LEVEL
   Spectrum sigma_s_star = sigma_s * (1.0f - anisotropy);
   Spectrum sigma_t_star = sigma_t - sigma_s + sigma_s_star;
   Spectrum sigma_t_org = sigma_t;
   Spectrum sigma_s_org = sigma_s;
   const float anisotropy_org = anisotropy;
   const float guided_fraction_org = guided_fraction;
-#endif
+#  endif
 
   for (int bounce = 0; bounce < BSSRDF_MAX_BOUNCES; bounce++) {
     /* Advance random number offset. */
     rng_state.rng_offset += PRNG_BOUNCE_NUM;
 
-#ifdef SUBSURFACE_RANDOM_WALK_SIMILARITY_LEVEL
+#  ifdef SUBSURFACE_RANDOM_WALK_SIMILARITY_LEVEL
     // shadow with local variables according to depth
     float anisotropy, guided_fraction;
     Spectrum sigma_s, sigma_t;
@@ -262,12 +264,12 @@ ccl_device_inline bool subsurface_random_walk(KernelGlobals kg,
       sigma_t = sigma_t_star;
       sigma_s = sigma_s_star;
     }
-#endif
+#  endif
 
     /* Sample color channel, use MIS with balance heuristic. */
-    float rphase = path_state_rng_1D(kg, &rng_state, PRNG_SUBSURFACE_PHASE_CHANNEL);
+    float rchannel = path_state_rng_1D(kg, &rng_state, PRNG_SUBSURFACE_COLOR_CHANNEL);
     Spectrum channel_pdf;
-    int channel = volume_sample_channel(alpha, throughput, rphase, &channel_pdf);
+    int channel = volume_sample_channel(alpha, throughput, &rchannel, &channel_pdf);
     float sample_sigma_t = volume_channel_get(sigma_t, channel);
     float randt = path_state_rng_1D(kg, &rng_state, PRNG_SUBSURFACE_SCATTER_DISTANCE);
 
@@ -313,11 +315,11 @@ ccl_device_inline bool subsurface_random_walk(KernelGlobals kg,
           cos_theta = -cos_theta;
         }
         float3 newD = direction_from_cosine(N, cos_theta, rand_scatter.y);
-        hg_pdf = single_peaked_henyey_greenstein(dot(ray.D, newD), anisotropy);
+        hg_pdf = phase_henyey_greenstein(dot(ray.D, newD), anisotropy);
         ray.D = newD;
       }
       else {
-        float3 newD = henyey_greenstrein_sample(ray.D, anisotropy, rand_scatter, &hg_pdf);
+        float3 newD = phase_henyey_greenstein_sample(ray.D, anisotropy, rand_scatter, &hg_pdf);
         cos_theta = dot(newD, N);
         ray.D = newD;
       }
@@ -359,7 +361,7 @@ ccl_device_inline bool subsurface_random_walk(KernelGlobals kg,
       ray.self.object = OBJECT_NONE;
       ray.self.prim = PRIM_NONE;
     }
-    scene_intersect_local(kg, &ray, &ss_isect, object, NULL, 1);
+    scene_intersect_local<true>(kg, &ray, &ss_isect, object, NULL, 1);
     hit = (ss_isect.num_hits > 0);
 
     if (hit) {
@@ -441,5 +443,7 @@ ccl_device_inline bool subsurface_random_walk(KernelGlobals kg,
 
   return hit;
 }
+
+#endif /* __SUBSURFACE__ */
 
 CCL_NAMESPACE_END

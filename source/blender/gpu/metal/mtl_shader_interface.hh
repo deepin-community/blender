@@ -16,9 +16,9 @@
 #include "mtl_capabilities.hh"
 #include "mtl_shader_interface_type.hh"
 
-#include "GPU_common.h"
-#include "GPU_common_types.h"
-#include "GPU_texture.h"
+#include "GPU_common.hh"
+#include "GPU_common_types.hh"
+#include "GPU_texture.hh"
 #include "gpu_texture_private.hh"
 #include <Metal/Metal.h>
 #include <functional>
@@ -259,7 +259,7 @@ class MTLShaderInterface : public ShaderInterface {
                               uint32_t argument_buffer_bind_index_compute);
 
   /* Prepare #ShaderInput interface for binding resolution. */
-  void prepare_common_shader_inputs();
+  void prepare_common_shader_inputs(const shader::ShaderCreateInfo *info = nullptr);
 
   /* Fetch Uniforms. */
   const MTLShaderUniform &get_uniform(uint index) const;

@@ -17,7 +17,7 @@
 #include "gpu_texture_private.hh"
 
 #include "BLI_map.hh"
-#include "GPU_texture.h"
+#include "GPU_texture.hh"
 #include <mutex>
 #include <thread>
 
@@ -250,6 +250,9 @@ class MTLTexture : public Texture {
   int mtl_max_mips_ = 1;
   bool has_generated_mips_ = false;
 
+  /* We may modify the requested usage flags so store them separately. */
+  eGPUTextureUsage internal_gpu_image_usage_flags_;
+
   /* VBO. */
   MTLVertBuf *vert_buffer_;
   id<MTLBuffer> vert_buffer_mtl_;
@@ -291,6 +294,14 @@ class MTLTexture : public Texture {
     return name_;
   }
 
+  bool has_custom_swizzle()
+  {
+    return (mtl_swizzle_mask_.red != MTLTextureSwizzleRed ||
+            mtl_swizzle_mask_.green != MTLTextureSwizzleGreen ||
+            mtl_swizzle_mask_.blue != MTLTextureSwizzleBlue ||
+            mtl_swizzle_mask_.alpha != MTLTextureSwizzleAlpha);
+  }
+
   id<MTLBuffer> get_vertex_buffer() const
   {
     if (resource_mode_ == MTL_TEXTURE_MODE_VBO) {
@@ -308,7 +319,7 @@ class MTLTexture : public Texture {
 
  protected:
   bool init_internal() override;
-  bool init_internal(GPUVertBuf *vbo) override;
+  bool init_internal(VertBuf *vbo) override;
   bool init_internal(GPUTexture *src,
                      int mip_offset,
                      int layer_offset,
@@ -473,7 +484,7 @@ class MTLPixelBuffer : public PixelBuffer {
   id<MTLBuffer> buffer_ = nil;
 
  public:
-  MTLPixelBuffer(uint size);
+  MTLPixelBuffer(size_t size);
   ~MTLPixelBuffer();
 
   void *map() override;

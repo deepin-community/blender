@@ -23,22 +23,21 @@
 #include "DNA_userdef_types.h"
 
 #include "BKE_context.hh"
-#include "BKE_fcurve.h"
-#include "BKE_global.h"
+#include "BKE_fcurve.hh"
+#include "BKE_global.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
-#include "BKE_packedFile.h"
-#include "BKE_report.h"
-#include "BKE_scene.h"
+#include "BKE_packedFile.hh"
+#include "BKE_report.hh"
+#include "BKE_scene.hh"
 #include "BKE_sound.h"
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "SEQ_iterator.hh"
-#include "SEQ_utils.hh"
 
 #include "UI_interface.hh"
 
@@ -195,7 +194,7 @@ static void sound_update_animation_flags(Scene *scene);
 
 static bool sound_update_animation_flags_fn(Sequence *seq, void *user_data)
 {
-  FCurve *fcu;
+  const FCurve *fcu;
   Scene *scene = (Scene *)user_data;
   bool driven;
 
@@ -235,13 +234,13 @@ static bool sound_update_animation_flags_fn(Sequence *seq, void *user_data)
 
 static void sound_update_animation_flags(Scene *scene)
 {
-  FCurve *fcu;
+  const FCurve *fcu;
   bool driven;
 
-  if (scene->id.tag & LIB_TAG_DOIT) {
+  if (scene->id.tag & ID_TAG_DOIT) {
     return;
   }
-  scene->id.tag |= LIB_TAG_DOIT;
+  scene->id.tag |= ID_TAG_DOIT;
 
   if (scene->ed != nullptr) {
     SEQ_for_each_callback(&scene->ed->seqbase, sound_update_animation_flags_fn, scene);
@@ -260,7 +259,7 @@ static int sound_update_animation_flags_exec(bContext *C, wmOperator * /*op*/)
 {
   Scene *scene = CTX_data_scene(C);
 
-  BKE_main_id_tag_idcode(CTX_data_main(C), ID_SCE, LIB_TAG_DOIT, false);
+  BKE_main_id_tag_idcode(CTX_data_main(C), ID_SCE, ID_TAG_DOIT, false);
   sound_update_animation_flags(CTX_data_scene(C));
   DEG_id_tag_update(&scene->id, ID_RECALC_SEQUENCER_STRIPS);
   return OPERATOR_FINISHED;
@@ -302,6 +301,8 @@ static int sound_bake_animation_exec(bContext *C, wmOperator * /*op*/)
 
   for (cfra = (scene->r.sfra > 0) ? (scene->r.sfra - 1) : 0; cfra <= scene->r.efra + 1; cfra++) {
     scene->r.cfra = cfra;
+    /* Make sure the camera is updated, since it will affect stereo/surround output. */
+    BKE_scene_camera_switch_update(scene);
     BKE_scene_graph_update_for_newframe(depsgraph);
   }
 
@@ -352,8 +353,8 @@ static int sound_mixdown_exec(bContext *C, wmOperator *op)
   container = AUD_Container(RNA_enum_get(op->ptr, "container"));
   codec = AUD_Codec(RNA_enum_get(op->ptr, "codec"));
   split = RNA_boolean_get(op->ptr, "split_channels");
-  specs.channels = AUD_Channels(scene_eval->r.ffcodecdata.audio_channels);
-  specs.rate = scene_eval->r.ffcodecdata.audio_mixrate;
+  specs.channels = AUD_Channels(RNA_enum_get(op->ptr, "channels"));
+  specs.rate = RNA_int_get(op->ptr, "mixrate");
 
   BLI_path_abs(filepath, BKE_main_blendfile_path(bmain));
 
@@ -371,6 +372,7 @@ static int sound_mixdown_exec(bContext *C, wmOperator *op)
                                      container,
                                      codec,
                                      bitrate,
+                                     AUD_RESAMPLE_QUALITY_MEDIUM,
                                      nullptr,
                                      nullptr,
                                      error_message,
@@ -386,6 +388,7 @@ static int sound_mixdown_exec(bContext *C, wmOperator *op)
                          container,
                          codec,
                          bitrate,
+                         AUD_RESAMPLE_QUALITY_MEDIUM,
                          nullptr,
                          nullptr,
                          error_message,
@@ -408,16 +411,16 @@ static int sound_mixdown_exec(bContext *C, wmOperator *op)
 #ifdef WITH_AUDASPACE
 static const EnumPropertyItem container_items[] = {
 #  ifdef WITH_FFMPEG
-    {AUD_CONTAINER_AC3, "AC3", 0, "ac3", "Dolby Digital ATRAC 3"},
+    {AUD_CONTAINER_AC3, "AC3", 0, "AC3", "Dolby Digital ATRAC 3"},
 #  endif
-    {AUD_CONTAINER_FLAC, "FLAC", 0, "flac", "Free Lossless Audio Codec"},
+    {AUD_CONTAINER_FLAC, "FLAC", 0, "FLAC", "Free Lossless Audio Codec"},
 #  ifdef WITH_FFMPEG
-    {AUD_CONTAINER_MATROSKA, "MATROSKA", 0, "mkv", "Matroska"},
-    {AUD_CONTAINER_MP2, "MP2", 0, "mp2", "MPEG-1 Audio Layer II"},
-    {AUD_CONTAINER_MP3, "MP3", 0, "mp3", "MPEG-2 Audio Layer III"},
+    {AUD_CONTAINER_MATROSKA, "MATROSKA", 0, "MKV", "Matroska"},
+    {AUD_CONTAINER_MP2, "MP2", 0, "MP2", "MPEG-1 Audio Layer II"},
+    {AUD_CONTAINER_MP3, "MP3", 0, "MP3", "MPEG-2 Audio Layer III"},
 #  endif
-    {AUD_CONTAINER_OGG, "OGG", 0, "ogg", "Xiph.Org Ogg Container"},
-    {AUD_CONTAINER_WAV, "WAV", 0, "wav", "Waveform Audio File Format"},
+    {AUD_CONTAINER_OGG, "OGG", 0, "OGG", "Xiph.Org Ogg Container"},
+    {AUD_CONTAINER_WAV, "WAV", 0, "WAV", "Waveform Audio File Format"},
     {0, nullptr, 0, nullptr, nullptr},
 };
 
@@ -687,6 +690,17 @@ static void SOUND_OT_mixdown(wmOperatorType *ot)
       {0, nullptr, 0, nullptr, nullptr},
   };
 
+  static const EnumPropertyItem channel_items[] = {
+      {AUD_CHANNELS_MONO, "MONO", 0, "Mono", "Single audio channel"},
+      {AUD_CHANNELS_STEREO, "STEREO", 0, "Stereo", "Stereo audio channels"},
+      {AUD_CHANNELS_STEREO_LFE, "STEREO_LFE", 0, "Stereo LFE", "Stereo with LFE channel"},
+      {AUD_CHANNELS_SURROUND4, "SURROUND4", 0, "4 Channels", "4 channel surround sound"},
+      {AUD_CHANNELS_SURROUND5, "SURROUND5", 0, "5 Channels", "5 channel surround sound"},
+      {AUD_CHANNELS_SURROUND51, "SURROUND51", 0, "5.1 Surround", "5.1 surround sound"},
+      {AUD_CHANNELS_SURROUND61, "SURROUND61", 0, "6.1 Surround", "6.1 surround sound"},
+      {AUD_CHANNELS_SURROUND71, "SURROUND71", 0, "7.1 Surround", "7.1 surround sound"},
+      {0, nullptr, 0, nullptr, nullptr}};
+
 #endif /* WITH_AUDASPACE */
 
   /* identifiers */
@@ -727,7 +741,18 @@ static void SOUND_OT_mixdown(wmOperatorType *ot)
   RNA_def_enum(
       ot->srna, "container", container_items, AUD_CONTAINER_FLAC, "Container", "File format");
   RNA_def_enum(ot->srna, "codec", codec_items, AUD_CODEC_FLAC, "Codec", "Audio Codec");
+  RNA_def_enum(
+      ot->srna, "channels", channel_items, AUD_CHANNELS_STEREO, "Channels", "Audio channel count");
   RNA_def_enum(ot->srna, "format", format_items, AUD_FORMAT_S16, "Format", "Sample format");
+  RNA_def_int(ot->srna,
+              "mixrate",
+              48000,
+              8000,
+              192000,
+              "Samplerate",
+              "Samplerate in samples/s",
+              8000,
+              192000);
   RNA_def_int(ot->srna, "bitrate", 192, 32, 512, "Bitrate", "Bitrate in kbit/s", 32, 512);
   RNA_def_boolean(ot->srna,
                   "split_channels",
@@ -809,6 +834,11 @@ static int sound_unpack_exec(bContext *C, wmOperator *op)
     return OPERATOR_CANCELLED;
   }
 
+  if (!ID_IS_EDITABLE(&sound->id)) {
+    BKE_report(op->reports, RPT_ERROR, "Sound is not editable");
+    return OPERATOR_CANCELLED;
+  }
+
   if (G.fileflags & G_FILE_AUTOPACK) {
     BKE_report(op->reports,
                RPT_WARNING,
@@ -836,6 +866,11 @@ static int sound_unpack_invoke(bContext *C, wmOperator *op, const wmEvent * /*ev
   sound = ed->act_seq->sound;
 
   if (!sound || !sound->packedfile) {
+    return OPERATOR_CANCELLED;
+  }
+
+  if (!ID_IS_EDITABLE(&sound->id)) {
+    BKE_report(op->reports, RPT_ERROR, "Sound is not editable");
     return OPERATOR_CANCELLED;
   }
 

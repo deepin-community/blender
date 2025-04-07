@@ -8,8 +8,6 @@
 
 #include "DNA_node_types.h"
 
-#include "BKE_context.hh"
-
 #include "ED_node.hh" /* own include */
 #include "ED_screen.hh"
 
@@ -65,6 +63,8 @@ void node_operatortypes()
   WM_operatortype_append(NODE_OT_group_separate);
   WM_operatortype_append(NODE_OT_group_edit);
 
+  WM_operatortype_append(NODE_OT_default_group_width_set);
+
   WM_operatortype_append(NODE_OT_link_viewer);
 
   WM_operatortype_append(NODE_OT_insert_offset);
@@ -104,10 +104,15 @@ void node_operatortypes()
   WM_operatortype_append(NODE_OT_viewer_border);
   WM_operatortype_append(NODE_OT_clear_viewer_border);
 
-  WM_operatortype_append(NODE_OT_switch_view_update);
-
   WM_operatortype_append(NODE_OT_cryptomatte_layer_add);
   WM_operatortype_append(NODE_OT_cryptomatte_layer_remove);
+
+  NODE_TYPES_BEGIN (ntype) {
+    if (ntype->register_operators) {
+      ntype->register_operators();
+    }
+  }
+  NODE_TYPES_END;
 }
 
 void node_keymap(wmKeyConfig *keyconf)

@@ -10,36 +10,27 @@
 
 #include "BLI_utildefines.h"
 
-#include "BLT_translation.h"
+#include "BLT_translation.hh"
 
 #include "DNA_defaults.h"
 #include "DNA_mesh_types.h"
 #include "DNA_object_types.h"
-#include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 
-#include "BKE_context.hh"
 #include "BKE_curve.hh"
 #include "BKE_deform.hh"
-#include "BKE_editmesh.hh"
-#include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_mesh.hh"
-#include "BKE_mesh_wrapper.hh"
 #include "BKE_modifier.hh"
-#include "BKE_screen.hh"
 
 #include "UI_interface.hh"
 #include "UI_resources.hh"
 
-#include "RNA_access.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_build.hh"
-#include "DEG_depsgraph_query.hh"
 
-#include "MOD_modifiertypes.hh"
 #include "MOD_ui_common.hh"
 #include "MOD_util.hh"
 
@@ -112,7 +103,7 @@ static void deform_verts(ModifierData *md,
 
   /* Silly that defaxis and BKE_curve_deform_coords are off by 1
    * but leave for now to save having to call do_versions */
-
+  const int defaxis = std::clamp(cmd->defaxis - 1, 0, 5);
   BKE_curve_deform_coords(cmd->object,
                           ctx->object,
                           reinterpret_cast<float(*)[3]>(positions.data()),
@@ -120,12 +111,12 @@ static void deform_verts(ModifierData *md,
                           dvert,
                           defgrp_index,
                           cmd->flag,
-                          cmd->defaxis - 1);
+                          defaxis);
 }
 
 static void deform_verts_EM(ModifierData *md,
                             const ModifierEvalContext *ctx,
-                            BMEditMesh *em,
+                            const BMEditMesh *em,
                             Mesh *mesh,
                             blender::MutableSpan<blender::float3> positions)
 {
@@ -145,6 +136,7 @@ static void deform_verts_EM(ModifierData *md,
     }
   }
 
+  const int defaxis = std::clamp(cmd->defaxis - 1, 0, 5);
   if (use_dverts) {
     BKE_curve_deform_coords_with_editmesh(cmd->object,
                                           ctx->object,
@@ -152,7 +144,7 @@ static void deform_verts_EM(ModifierData *md,
                                           positions.size(),
                                           defgrp_index,
                                           cmd->flag,
-                                          cmd->defaxis - 1,
+                                          defaxis,
                                           em);
   }
   else {
@@ -163,7 +155,7 @@ static void deform_verts_EM(ModifierData *md,
                             nullptr,
                             defgrp_index,
                             cmd->flag,
-                            cmd->defaxis - 1);
+                            defaxis);
   }
 }
 

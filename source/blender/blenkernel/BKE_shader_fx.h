@@ -16,7 +16,6 @@ extern "C" {
 
 struct ARegionType;
 struct BlendDataReader;
-struct BlendLibReader;
 struct BlendWriter;
 struct ID;
 struct ListBase;
@@ -157,7 +156,7 @@ void BKE_shaderfx_free(struct ShaderFxData *fx);
 /**
  * Check unique name.
  */
-void BKE_shaderfx_unique_name(struct ListBase *shaderfx, struct ShaderFxData *fx);
+void BKE_shaderfx_unique_name(struct ListBase *shaders, struct ShaderFxData *fx);
 bool BKE_shaderfx_depends_ontime(struct ShaderFxData *fx);
 /**
  * Check whether given shaderfx is not local (i.e. from linked data) when the object is a library

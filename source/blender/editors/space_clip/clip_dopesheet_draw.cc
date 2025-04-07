@@ -27,12 +27,12 @@
 #include "BLF_api.hh"
 
 #include "RNA_access.hh"
-#include "RNA_prototypes.h"
+#include "RNA_prototypes.hh"
 
-#include "GPU_immediate.h"
-#include "GPU_state.h"
+#include "GPU_immediate.hh"
+#include "GPU_state.hh"
 
-#include "clip_intern.h" /* own include */
+#include "clip_intern.hh" /* own include */
 
 static void track_channel_color(MovieTrackingTrack *track,
                                 const float default_color[3],

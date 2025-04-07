@@ -21,7 +21,7 @@ static bool get_matcap_tx(Texture &matcap_tx, StudioLight &studio_light)
   if (matcap_diffuse && matcap_diffuse->float_buffer.data) {
     int layers = 1;
     float *buffer = matcap_diffuse->float_buffer.data;
-    Vector<float> combined_buffer = {};
+    Vector<float> combined_buffer;
 
     if (matcap_specular && matcap_specular->float_buffer.data) {
       int size = matcap_diffuse->x * matcap_diffuse->y * 4;
@@ -55,7 +55,7 @@ static float4x4 get_world_shading_rotation_matrix(float studiolight_rot_z)
 }
 
 static LightData get_light_data_from_studio_solidlight(const SolidLight *sl,
-                                                       float4x4 world_shading_rotation)
+                                                       const float4x4 &world_shading_rotation)
 {
   LightData light = {};
   if (sl && sl->flag) {
@@ -174,6 +174,18 @@ void SceneResources::init(const SceneState &scene_state)
   }
 
   clip_planes_buf.push_update();
+
+  missing_tx.ensure_2d(
+      GPU_RGBA8, int2(1), GPU_TEXTURE_USAGE_SHADER_READ, float4(1.0f, 0.0f, 1.0f, 1.0f));
+  missing_texture.gpu.texture = missing_tx;
+  missing_texture.name = "Missing Texture";
+
+  dummy_texture_tx.ensure_2d(
+      GPU_RGBA8, int2(1), GPU_TEXTURE_USAGE_SHADER_READ, float4(0.0f, 0.0f, 0.0f, 0.0f));
+  dummy_tile_array_tx.ensure_2d_array(
+      GPU_RGBA8, int2(1), 1, GPU_TEXTURE_USAGE_SHADER_READ, float4(0.0f, 0.0f, 0.0f, 0.0f));
+  dummy_tile_data_tx.ensure_1d_array(
+      GPU_RGBA8, 1, 1, GPU_TEXTURE_USAGE_SHADER_READ, float4(0.0f, 0.0f, 0.0f, 0.0f));
 }
 
 }  // namespace blender::workbench

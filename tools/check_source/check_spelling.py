@@ -6,7 +6,7 @@
 """
 Script for checking source code spelling.
 
-   python3 tools/check_source/check_spelling.py some_soure_file.py
+   python3 tools/check_source/check_spelling.py some_source_file.py
 
 - Pass in a path for it to be checked recursively.
 - Pass in '--strings' to check strings instead of comments.
@@ -84,6 +84,8 @@ SOURCE_EXT = (
     "glsl",
     "osl",
     "py",
+    "txt",  # for `CMakeLists.txt`.
+    "cmake",
 )
 
 BASEDIR = os.path.abspath(os.path.dirname(__file__))
@@ -183,7 +185,7 @@ re_ignore = re.compile(
     r"<\w+@[\w\.\-]+>|"
 
     # Convention for TODO/FIXME messages: TODO(my name) OR FIXME(name+name) OR XXX(some-name) OR NOTE(name/other-name):
-    r"\b(TODO|FIXME|XXX|NOTE|WARNING)\(@?[\w\s\+\-/]+\)|"
+    r"\b(TODO|FIXME|XXX|NOTE|WARNING|WORKAROUND)\(@?[\w\s\+\-/]+\)|"
 
     # DOXYGEN style: <pre> ... </pre>
     r"<pre>.+</pre>|"
@@ -272,7 +274,7 @@ def words_from_text(text: str, check_type: str) -> List[Tuple[str, int]]:
             w_prev = w_lower
             w_prev_start = w_start
     else:
-        assert False
+        assert False, "unreachable"
 
     return words
 
@@ -308,7 +310,6 @@ class Comment:
 
 
 def extract_code_strings(filepath: str) -> Tuple[List[Comment], Set[str]]:
-    import pygments
     from pygments import lexers
     from pygments.token import Token
 
@@ -320,6 +321,8 @@ def extract_code_strings(filepath: str) -> Tuple[List[Comment], Set[str]]:
     #     return comments, code_words
     if filepath.endswith(".py"):
         lex = lexers.get_lexer_by_name("python")
+    elif filepath.endswith((".cmake", ".txt")):
+        lex = lexers.get_lexer_by_name("cmake")
     else:
         lex = lexers.get_lexer_by_name("c")
 
@@ -365,6 +368,35 @@ def extract_py_comments(filepath: str) -> Tuple[List[Comment], Set[str]]:
                 code_words.add(match.group(0))
 
         prev_toktype = toktype
+    return comments, code_words
+
+
+def extract_cmake_comments(filepath: str) -> Tuple[List[Comment], Set[str]]:
+    from pygments import lexers
+    from pygments.token import Token
+
+    lex = lexers.get_lexer_by_name("cmake")
+
+    with open(filepath, encoding='utf-8') as fh:
+        source = fh.read()
+
+    comments = []
+    code_words = set()
+
+    slineno = 0
+    for ty, ttext in lex.get_tokens(source):
+        if ty in {Token.Literal.String, Token.Literal.String.Double, Token.Literal.String.Single}:
+            # Disable because most CMake strings are references to paths/code."
+            if False:
+                comments.append(Comment(filepath, ttext, slineno, 'STRING'))
+        elif ty in {Token.Comment, Token.Comment.Single}:
+            comments.append(Comment(filepath, ttext, slineno, 'COMMENT'))
+        else:
+            for match in re_vars.finditer(ttext):
+                code_words.add(match.group(0))
+        # Ugh - not nice or fast.
+        slineno += ttext.count("\n")
+
     return comments, code_words
 
 
@@ -424,7 +456,7 @@ def extract_c_comments(filepath: str) -> Tuple[List[Comment], Set[str]]:
                 star_offsets.add(l.find("*", l_ofs_first))
                 l_ofs_first = 0
                 if len(star_offsets) > 1:
-                    print("%s:%d" % (filepath, line_index + text.count("\n", 0, i)))
+                    print("{:s}:{:d}".format(filepath, line_index + text.count("\n", 0, i)))
                     break
 
     if not PRINT_SPELLING:
@@ -493,7 +525,7 @@ def spell_check_report(filepath: str, check_type: str, report: Report) -> None:
         if suggest is None:
             _suggest_map[w_lower] = suggest = " ".join(dictionary_suggest(w))
 
-        print("%s:%d:%d: %s%s%s, suggest (%s)" % (
+        print("{:s}:{:d}:{:d}: {:s}{:s}{:s}, suggest ({:s})".format(
             filepath,
             slineno + 1,
             scol + 1,
@@ -503,7 +535,7 @@ def spell_check_report(filepath: str, check_type: str, report: Report) -> None:
             suggest,
         ))
     elif check_type == 'DUPLICATES':
-        print("%s:%d:%d: %s%s%s, duplicate" % (
+        print("{:s}:{:d}:{:d}: {:s}{:s}{:s}, duplicate".format(
             filepath,
             slineno + 1,
             scol + 1,
@@ -521,6 +553,8 @@ def spell_check_file(
     if extract_type == 'COMMENTS':
         if filepath.endswith(".py"):
             comment_list, code_words = extract_py_comments(filepath)
+        elif filepath.endswith((".cmake", ".txt")):
+            comment_list, code_words = extract_cmake_comments(filepath)
         else:
             comment_list, code_words = extract_c_comments(filepath)
     elif extract_type == 'STRINGS':
@@ -551,7 +585,7 @@ def spell_check_file(
                 # print(filepath + ":" + str(slineno + 1) + ":" + str(scol), w, "(duplicates)")
                 yield (w, slineno, scol)
     else:
-        assert False
+        assert False, "unreachable"
 
 
 def spell_check_file_recursive(

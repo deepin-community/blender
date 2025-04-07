@@ -10,7 +10,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.add_input<decl::Color>("Color").default_value({0.8f, 0.8f, 0.8f, 1.0f});
   b.add_input<decl::Vector>("Normal").hide_value();
-  b.add_input<decl::Float>("Weight").unavailable();
+  b.add_input<decl::Float>("Weight").available(false);
   b.add_output<decl::Shader>("BSDF");
 }
 
@@ -52,7 +52,7 @@ void register_node_type_sh_bsdf_translucent()
 {
   namespace file_ns = blender::nodes::node_shader_bsdf_translucent_cc;
 
-  static bNodeType ntype;
+  static blender::bke::bNodeType ntype;
 
   sh_node_type_base(&ntype, SH_NODE_BSDF_TRANSLUCENT, "Translucent BSDF", NODE_CLASS_SHADER);
   ntype.declare = file_ns::node_declare;
@@ -60,5 +60,5 @@ void register_node_type_sh_bsdf_translucent()
   ntype.gpu_fn = file_ns::node_shader_gpu_bsdf_translucent;
   ntype.materialx_fn = file_ns::node_shader_materialx;
 
-  nodeRegisterType(&ntype);
+  blender::bke::node_register_type(&ntype);
 }
