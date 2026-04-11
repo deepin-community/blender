@@ -4,8 +4,6 @@
 
 #include "BKE_mesh.hh"
 
-#include "BLI_task.hh"
-
 #include "node_geometry_util.hh"
 
 namespace blender::nodes::node_geo_mesh_topology_edges_of_corner_cc {
@@ -13,8 +11,9 @@ namespace blender::nodes::node_geo_mesh_topology_edges_of_corner_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.add_input<decl::Int>("Corner Index")
-      .implicit_field(implicit_field_inputs::index)
-      .description("The corner to retrieve data from. Defaults to the corner from the context");
+      .implicit_field(NODE_DEFAULT_INPUT_INDEX_FIELD)
+      .description("The corner to retrieve data from. Defaults to the corner from the context")
+      .structure_type(StructureType::Field);
   b.add_output<decl::Int>("Next Edge Index")
       .field_source_reference_all()
       .description(
@@ -39,7 +38,7 @@ class CornerNextEdgeFieldInput final : public bke::MeshFieldInput {
     if (domain != AttrDomain::Corner) {
       return {};
     }
-    return VArray<int>::ForSpan(mesh.corner_edges());
+    return VArray<int>::from_span(mesh.corner_edges());
   }
 
   uint64_t hash() const final
@@ -75,7 +74,7 @@ class CornerPreviousEdgeFieldInput final : public bke::MeshFieldInput {
     const OffsetIndices faces = mesh.faces();
     const Span<int> corner_edges = mesh.corner_edges();
     const Span<int> corner_to_face = mesh.corner_to_face_map();
-    return VArray<int>::ForFunc(
+    return VArray<int>::from_func(
         corner_edges.size(), [faces, corner_edges, corner_to_face](const int corner) {
           return corner_edges[bke::mesh::face_corner_prev(faces[corner_to_face[corner]], corner)];
         });
@@ -119,11 +118,14 @@ static void node_geo_exec(GeoNodeExecParams params)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-  geo_node_type_base(
-      &ntype, GEO_NODE_MESH_TOPOLOGY_EDGES_OF_CORNER, "Edges of Corner", NODE_CLASS_INPUT);
+  geo_node_type_base(&ntype, "GeometryNodeEdgesOfCorner", GEO_NODE_MESH_TOPOLOGY_EDGES_OF_CORNER);
+  ntype.ui_name = "Edges of Corner";
+  ntype.ui_description = "Retrieve the edges on both sides of a face corner";
+  ntype.enum_name_legacy = "EDGES_OF_CORNER";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

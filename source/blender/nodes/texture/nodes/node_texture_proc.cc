@@ -6,8 +6,9 @@
  * \ingroup texnodes
  */
 
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_texture.h"
+#include "BLI_listbase.h"
 #include "BLI_math_vector.h"
 #include "DNA_material_types.h"
 #include "node_texture_util.hh"
@@ -27,10 +28,7 @@ static blender::bke::bNodeSocketTemplate outputs_color_only[] = {{SOCK_RGBA, N_(
 /* Inputs common to all, #defined because nodes will need their own inputs too */
 #define I 2 /* count */
 #define COMMON_INPUTS \
-  {SOCK_RGBA, "Color 1", 0.0f, 0.0f, 0.0f, 1.0f}, \
-  { \
-    SOCK_RGBA, "Color 2", 1.0f, 1.0f, 1.0f, 1.0f \
-  }
+  {SOCK_RGBA, "Color 1", 0.0f, 0.0f, 0.0f, 1.0f}, {SOCK_RGBA, "Color 2", 1.0f, 1.0f, 1.0f, 1.0f}
 
 /* Calls multitex and copies the result to the outputs.
  * Called by xxx_exec, which handles inputs. */
@@ -44,8 +42,7 @@ static void do_proc(float *result,
   TexResult texres;
   int textype;
 
-  textype = multitex_nodes(
-      tex, p->co, p->dxt, p->dyt, p->osatex, &texres, thread, 0, p->mtex, nullptr);
+  textype = multitex_nodes(tex, p->co, &texres, thread, 0, p->mtex, nullptr);
 
   if (textype & TEX_RGB) {
     copy_v4_v4(result, texres.trgba);
@@ -239,11 +236,11 @@ ProcDef(stucci);
 
 static void init(bNodeTree * /*ntree*/, bNode *node)
 {
-  Tex *tex = static_cast<Tex *>(MEM_callocN(sizeof(Tex), "Tex"));
+  Tex *tex = MEM_callocN<Tex>("Tex");
   node->storage = tex;
 
   BKE_texture_default(tex);
-  tex->type = node->type - TEX_NODE_PROC;
+  tex->type = node->type_legacy - TEX_NODE_PROC;
 
   if (tex->type == TEX_WOOD) {
     tex->stype = TEX_BANDNOISE;
@@ -251,29 +248,37 @@ static void init(bNodeTree * /*ntree*/, bNode *node)
 }
 
 /* Node type definitions */
-#define TexDef(TEXTYPE, outputs, name, Name) \
+#define TexDef(TEXTYPE, idname, outputs, name, Name, EnumNameLegacy) \
   void register_node_type_tex_proc_##name(void) \
   { \
     static blender::bke::bNodeType ntype; \
 \
-    tex_node_type_base(&ntype, TEX_NODE_PROC + TEXTYPE, Name, NODE_CLASS_TEXTURE); \
+    tex_node_type_base(&ntype, idname, TEX_NODE_PROC + TEXTYPE); \
+    ntype.ui_name = Name; \
+    ntype.enum_name_legacy = EnumNameLegacy; \
+    ntype.nclass = NODE_CLASS_TEXTURE; \
     blender::bke::node_type_socket_templates(&ntype, name##_inputs, outputs); \
-    blender::bke::node_type_size_preset(&ntype, blender::bke::eNodeSizePreset::Middle); \
+    blender::bke::node_type_size_preset(ntype, blender::bke::eNodeSizePreset::Middle); \
     ntype.initfunc = init; \
     blender::bke::node_type_storage( \
-        &ntype, "Tex", node_free_standard_storage, node_copy_standard_storage); \
+        ntype, "Tex", node_free_standard_storage, node_copy_standard_storage); \
     ntype.exec_fn = name##_exec; \
     ntype.flag |= NODE_PREVIEW; \
 \
-    blender::bke::node_register_type(&ntype); \
+    blender::bke::node_register_type(ntype); \
   }
 
 #define C outputs_color_only
 #define CV outputs_both
 
-TexDef(TEX_VORONOI, CV, voronoi, "Voronoi") TexDef(TEX_BLEND, C, blend, "Blend");
-TexDef(TEX_MAGIC, C, magic, "Magic") TexDef(TEX_MARBLE, CV, marble, "Marble");
-TexDef(TEX_CLOUDS, CV, clouds, "Clouds") TexDef(TEX_WOOD, CV, wood, "Wood");
-TexDef(TEX_MUSGRAVE, CV, musgrave, "Musgrave") TexDef(TEX_NOISE, C, noise, "Noise");
-TexDef(TEX_STUCCI, CV, stucci, "Stucci");
-TexDef(TEX_DISTNOISE, CV, distnoise, "Distorted Noise");
+TexDef(TEX_VORONOI, "TextureNodeTexVoronoi", CV, voronoi, "Voronoi", "TEX_VORONOI");
+TexDef(TEX_BLEND, "TextureNodeTexBlend", C, blend, "Blend", "TEX_BLEND");
+TexDef(TEX_MAGIC, "TextureNodeTexMagic", C, magic, "Magic", "TEX_MAGIC");
+TexDef(TEX_MARBLE, "TextureNodeTexMarble", CV, marble, "Marble", "TEX_MARBLE");
+TexDef(TEX_CLOUDS, "TextureNodeTexClouds", CV, clouds, "Clouds", "TEX_CLOUDS");
+TexDef(TEX_WOOD, "TextureNodeTexWood", CV, wood, "Wood", "TEX_WOOD");
+TexDef(TEX_MUSGRAVE, "TextureNodeTexMusgrave", CV, musgrave, "Musgrave", "TEX_MUSGRAVE");
+TexDef(TEX_NOISE, "TextureNodeTexNoise", C, noise, "Noise", "TEX_NOISE");
+TexDef(TEX_STUCCI, "TextureNodeTexStucci", CV, stucci, "Stucci", "TEX_STUCCI");
+TexDef(
+    TEX_DISTNOISE, "TextureNodeTexDistNoise", CV, distnoise, "Distorted Noise", "TEX_DISTNOISE");

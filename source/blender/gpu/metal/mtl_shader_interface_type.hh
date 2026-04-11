@@ -10,7 +10,7 @@
 #include "BLI_assert.h"
 #include "GPU_material.hh"
 
-enum eMTLDataType {
+enum MTLInterfaceDataType {
   MTL_DATATYPE_CHAR,
   MTL_DATATYPE_CHAR2,
   MTL_DATATYPE_CHAR3,
@@ -50,6 +50,8 @@ enum eMTLDataType {
   MTL_DATATYPE_FLOAT2,
   MTL_DATATYPE_FLOAT3,
   MTL_DATATYPE_FLOAT4,
+  MTL_DATATYPE_PACKED_FLOAT2,
+  MTL_DATATYPE_PACKED_FLOAT3,
 
   MTL_DATATYPE_LONG,
   MTL_DATATYPE_LONG2,
@@ -85,7 +87,7 @@ enum eMTLDataType {
   MTL_DATATYPE_INT1010102_NORM
 };
 
-inline uint mtl_get_data_type_size(eMTLDataType type)
+inline uint mtl_get_data_type_size(MTLInterfaceDataType type)
 {
   switch (type) {
     case MTL_DATATYPE_CHAR:
@@ -125,9 +127,11 @@ inline uint mtl_get_data_type_size(eMTLDataType type)
     case MTL_DATATYPE_LONG:
     case MTL_DATATYPE_ULONG:
     case MTL_DATATYPE_HALF2x2:
+    case MTL_DATATYPE_PACKED_FLOAT2:
       return 8;
 
     case MTL_DATATYPE_HALF3x2:
+    case MTL_DATATYPE_PACKED_FLOAT3:
       return 12;
 
     case MTL_DATATYPE_INT3:
@@ -172,7 +176,7 @@ inline uint mtl_get_data_type_size(eMTLDataType type)
   };
 }
 
-inline uint mtl_get_data_type_alignment(eMTLDataType type)
+inline uint mtl_get_data_type_alignment(MTLInterfaceDataType type)
 {
   switch (type) {
     case MTL_DATATYPE_CHAR:
@@ -211,6 +215,7 @@ inline uint mtl_get_data_type_alignment(eMTLDataType type)
     case MTL_DATATYPE_INT2:
     case MTL_DATATYPE_UINT2:
     case MTL_DATATYPE_FLOAT2:
+    case MTL_DATATYPE_PACKED_FLOAT2:
     case MTL_DATATYPE_LONG:
     case MTL_DATATYPE_ULONG:
     case MTL_DATATYPE_HALF2x3:
@@ -229,6 +234,7 @@ inline uint mtl_get_data_type_alignment(eMTLDataType type)
     case MTL_DATATYPE_UINT3:
     case MTL_DATATYPE_UINT4:
     case MTL_DATATYPE_FLOAT3:
+    case MTL_DATATYPE_PACKED_FLOAT3:
     case MTL_DATATYPE_FLOAT4:
     case MTL_DATATYPE_LONG2:
     case MTL_DATATYPE_ULONG2:
@@ -252,7 +258,7 @@ inline uint mtl_get_data_type_alignment(eMTLDataType type)
   };
 }
 
-inline eMTLDataType gpu_type_to_mtl_type(eGPUType type)
+inline MTLInterfaceDataType gpu_type_to_mtl_type(GPUType type)
 {
   switch (type) {
     case GPU_FLOAT:

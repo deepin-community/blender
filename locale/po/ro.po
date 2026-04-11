@@ -1,18 +1,18 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 4.3.0 Release Candidate (b'7dfe47164a63')\n"
+"Project-Id-Version: Blender 5.0.0 Beta (b'd29f9f6118e5')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2024-11-18 11:20+0000\n"
-"PO-Revision-Date: 2024-03-23 04:06+0000\n"
-"Last-Translator: Alexandru Buhnici <in@alexm.ro>\n"
+"POT-Creation-Date: 2025-11-10 09:45+0000\n"
+"PO-Revision-Date: 2025-09-04 22:59+0000\n"
+"Last-Translator: Dominic Iastrebschi <domjotebit@gmail.com>\n"
 "Language-Team: Romanian <https://translate.blender.org/projects/blender-ui/ui/ro/>\n"
 "Language: ro\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=n==1 ? 0 : (n==0 || (n%100 > 0 && n%100 < 20)) ? 1 : 2;\n"
-"X-Generator: Weblate 5.0.1"
+"X-Generator: Weblate 5.12.1"
 
 
 msgid "Shader AOV"
@@ -20,11 +20,11 @@ msgstr "Shader AOV"
 
 
 msgid "Valid"
-msgstr "Valid"
+msgstr "Valabil"
 
 
 msgid "Is the name of the AOV conflicting"
-msgstr "Este numele VIA-urilor în conflict"
+msgstr "Numele AOV este în conflict"
 
 
 msgid "Name"
@@ -59,20 +59,40 @@ msgid "Collection of AOVs"
 msgstr "Colecție de AOV-uri"
 
 
-msgid "Action F-Curves"
-msgstr "F-Curbe de Acțiune"
+msgid "Animation Channel Bag"
+msgstr "Canal de animație"
 
 
-msgid "Collection of action F-Curves"
-msgstr "Colecție de F-Curbe de acțiune"
+msgid "Collection of animation channels, typically associated with an action slot"
+msgstr "Colecție de canale de animație, de obicei asociate cu un slot de acțiune"
+
+
+msgid "F-Curves"
+msgstr "Curbe F"
+
+
+msgid "The individual F-Curves that animate the slot"
+msgstr "Curbele F individuale care animează slotul"
+
+
+msgid "F-Curve Groups"
+msgstr "Grupuri de curbele F"
+
+
+msgid "Slot"
+msgstr "Slot"
+
+
+msgid "For each action slot, a list of animation channels that are meant for that slot"
+msgstr "Pentru fiecare slot de acțiune, o listă a canalelor de animație care sunt destinate slotului respectiv"
 
 
 msgid "Action Group"
-msgstr "Grup de Acțiune"
+msgstr "Grup de acțiune"
 
 
 msgid "Groups of F-Curves"
-msgstr "Grup de F-Curbe"
+msgstr "Grup de curbe F"
 
 
 msgid "Channels"
@@ -80,11 +100,11 @@ msgstr "Canale"
 
 
 msgid "F-Curves in this group"
-msgstr "F-Curbe în acest grup"
+msgstr "Curbe F în acest grup"
 
 
 msgid "Color Set"
-msgstr "Setare Culoare"
+msgstr "Set de culori"
 
 
 msgid "Custom color set to use"
@@ -92,7 +112,7 @@ msgstr "Set de culori personalizat de folosit"
 
 
 msgid "Default Colors"
-msgstr "Culori Implicite"
+msgstr "Culori implicite"
 
 
 msgid "01 - Theme Color Set"
@@ -235,14 +255,6 @@ msgid "Pin in Graph Editor"
 msgstr "Fixare în Editorul de Grafice"
 
 
-msgid "Action Groups"
-msgstr "Grupuri de acțiune"
-
-
-msgid "Collection of action groups"
-msgstr "Colecție de grupuri de acțiune"
-
-
 msgid "Action Pose Markers"
 msgstr "Marcatori de poziție de acțiune"
 
@@ -265,6 +277,61 @@ msgstr "Indexul Marcatorului De Poziție Activ"
 
 msgid "Index of active pose marker"
 msgstr "Indexul marcatorului de poziție activ"
+
+
+msgctxt "ID"
+msgid "Action"
+msgstr "Acțiune"
+
+
+msgctxt "ID"
+msgid "Grease Pencil"
+msgstr "Creion de Grăsime"
+
+
+msgctxt "ID"
+msgid "Image"
+msgstr "Imagine"
+
+
+msgctxt "ID"
+msgid "Light"
+msgstr "Lumină"
+
+
+msgctxt "ID"
+msgid "Material"
+msgstr "Material"
+
+
+msgctxt "ID"
+msgid "Object"
+msgstr "Obiect"
+
+
+msgctxt "ID"
+msgid "Scene"
+msgstr "Scenă"
+
+
+msgctxt "ID"
+msgid "Texture"
+msgstr "Textură"
+
+
+msgctxt "ID"
+msgid "Window Manager"
+msgstr "Manager Ferestre"
+
+
+msgctxt "ID"
+msgid "Workspace"
+msgstr "Spațiu de lucru"
+
+
+msgctxt "ID"
+msgid "World"
+msgstr "Lume"
 
 
 msgid "Add-on"
@@ -361,14 +428,6 @@ msgstr "Distribuire memorie pe dispozitive"
 
 msgid "Make more room for large scenes to fit by distributing memory across interconnected devices (e.g. via NVLink) rather than duplicating it"
 msgstr "Faceți mai mult spațiu pentru a se potrivi scene mari distribuind memoria pe dispozitive interconectate (de ex. Prin NVLink), mai degrabă decât duplicând"
-
-
-msgid "HIP RT (Experimental)"
-msgstr "HIP RT (Experimental)"
-
-
-msgid "HIP RT enables AMD hardware ray tracing on RDNA2 and above, with shader fallback on older cards. This feature is experimental and some scenes may render incorrectly"
-msgstr "HIP RT permite ray tracing pe hardware AMD cu RDNA2 și versiunile superioare și cu shader fallback pe plăcile mai vechi. Această caracteristică este experimentală și este posibil ca unele scene să fie randate incorect"
 
 
 msgid "Embree on GPU"
@@ -719,6 +778,18 @@ msgid "Display Paths of poses within specified range"
 msgstr "Afișare Căi de poziții în intervalul specificat"
 
 
+msgid "Hide"
+msgstr "Ascundere"
+
+
+msgid "Frames"
+msgstr "Cadre"
+
+
+msgid "Info"
+msgstr "Informații"
+
+
 msgid "Any Type"
 msgstr "Orice Tip"
 
@@ -803,12 +874,8 @@ msgid "Video Sequencer"
 msgstr "Sequencer video"
 
 
-msgid "Video editing tools"
-msgstr "Unelte de editare video"
-
-
 msgid "Movie Clip Editor"
-msgstr "Editor Clip Video"
+msgstr "Editor de clipuri video"
 
 
 msgid "Motion tracking tools"
@@ -816,7 +883,7 @@ msgstr "Unelte pentru Urmărirea mișcării"
 
 
 msgid "Dope Sheet"
-msgstr "Dope sheet"
+msgstr "Foaia de expoziție"
 
 
 msgid "Adjust timing of keyframes"
@@ -824,7 +891,7 @@ msgstr "Reglați sincronizarea cadrelor cheie"
 
 
 msgid "Graph Editor"
-msgstr "Editor Grafice"
+msgstr "Editor de diagrame"
 
 
 msgid "Edit drivers and keyframe interpolation"
@@ -840,7 +907,7 @@ msgstr "Combinare și Acțiunile stratului"
 
 
 msgid "Text Editor"
-msgstr "Editor Text"
+msgstr "Editor de text"
 
 
 msgid "Edit scripts and in-file documentation"
@@ -853,10 +920,6 @@ msgstr "Consola Python"
 
 msgid "Interactive programmatic console for advanced editing and script development"
 msgstr "Consolă programatică interactivă pentru editare avansată și dezvoltare de scripturi"
-
-
-msgid "Info"
-msgstr "Info"
 
 
 msgid "Log of operations, warnings and error messages"
@@ -991,61 +1054,6 @@ msgid "Armatures active edit bone"
 msgstr "Osul activ de editare a Armăturii"
 
 
-msgctxt "ID"
-msgid "Action"
-msgstr "Acțiune"
-
-
-msgctxt "ID"
-msgid "Grease Pencil"
-msgstr "Creion de Grăsime"
-
-
-msgctxt "ID"
-msgid "Image"
-msgstr "Imagine"
-
-
-msgctxt "ID"
-msgid "Light"
-msgstr "Lumină"
-
-
-msgctxt "ID"
-msgid "Material"
-msgstr "Material"
-
-
-msgctxt "ID"
-msgid "Object"
-msgstr "Obiect"
-
-
-msgctxt "ID"
-msgid "Scene"
-msgstr "Scenă"
-
-
-msgctxt "ID"
-msgid "Texture"
-msgstr "Textură"
-
-
-msgctxt "ID"
-msgid "Window Manager"
-msgstr "Manager Ferestre"
-
-
-msgctxt "ID"
-msgid "Workspace"
-msgstr "Spațiu de lucru"
-
-
-msgctxt "ID"
-msgid "World"
-msgstr "Lume"
-
-
 msgid "Options"
 msgstr "Opțiuni"
 
@@ -1074,16 +1082,16 @@ msgid "Vector"
 msgstr "Vector"
 
 
-msgid "Byte Color"
-msgstr "Culoare Byte"
-
-
 msgid "String"
 msgstr "Șir"
 
 
 msgid "Text string"
 msgstr "Șir de text"
+
+
+msgid "Byte Color"
+msgstr "Culoare Byte"
 
 
 msgid "Domain"
@@ -1170,6 +1178,14 @@ msgid "Object to use as cage instead of calculating the cage from the active obj
 msgstr "Obiectul care va fi folosit ca o colivie în loc de calcularea cuștii din obiectul activ cu extrudarea coliviei"
 
 
+msgid "Object"
+msgstr "Obiect"
+
+
+msgid "Tangent"
+msgstr "Tangenta"
+
+
 msgid "File Path"
 msgstr "Calea Fișierului"
 
@@ -1242,16 +1258,8 @@ msgid "Choose normal space for baking"
 msgstr "Alegeți spațiul normal pentru copt"
 
 
-msgid "Object"
-msgstr "Obiect"
-
-
 msgid "Bake the normals in object space"
 msgstr "Coaceți normalele în spațiul obiectelor"
-
-
-msgid "Tangent"
-msgstr "Tangenta"
 
 
 msgid "Bake the normals in tangent space"
@@ -1420,10 +1428,6 @@ msgstr "Coordonatele celui de-al doilea handle"
 
 msgid "Handle 2 Type"
 msgstr "Tipul Handle 2"
-
-
-msgid "Hide"
-msgstr "Ascundere"
 
 
 msgid "Visibility status"
@@ -1734,44 +1738,20 @@ msgid "Textures"
 msgstr "Texturi"
 
 
-msgid "Curve"
-msgstr "Curbă"
-
-
-msgid "Image"
-msgstr "Imagine"
-
-
-msgid "Light"
-msgstr "Lumină"
-
-
-msgid "Material"
-msgstr "Material"
-
-
-msgid "Scene"
-msgstr "Scenă"
-
-
-msgid "Texture"
-msgstr "Textură"
-
-
-msgid "Window Manager"
-msgstr "Manager Ferestre"
-
-
-msgid "Workspace"
-msgstr "Spațiu de lucru"
-
-
-msgid "World"
-msgstr "Lume"
+msgid "Deflectors"
+msgstr "Deflectoare"
 
 
 msgid "Distance"
 msgstr "Distanță"
+
+
+msgid "B-Bone"
+msgstr "Os-B"
+
+
+msgid "Envelope"
+msgstr "Plic"
 
 
 msgid "Deform"
@@ -1792,8 +1772,8 @@ msgid "Mode"
 msgstr "Mod"
 
 
-msgid "Radius"
-msgstr "Rază"
+msgid "Material"
+msgstr "Material"
 
 
 msgid "Hue"
@@ -1824,6 +1804,10 @@ msgid "Collection of object paths"
 msgstr "Colecție de căi ale obiectelor"
 
 
+msgid "Image"
+msgstr "Imagine"
+
+
 msgid "Offset"
 msgstr "Decalaj"
 
@@ -1848,8 +1832,20 @@ msgid "Right"
 msgstr "Dreapta"
 
 
+msgid "Angular"
+msgstr "Unghiular"
+
+
+msgid "Curve"
+msgstr "Curbă"
+
+
 msgid "Gamma"
 msgstr "Gamma"
+
+
+msgid "View"
+msgstr "Vedere"
 
 
 msgid "Contrast"
@@ -1872,16 +1868,12 @@ msgid "Alpha"
 msgstr "Alpha"
 
 
+msgid "Camera"
+msgstr "Cameră"
+
+
 msgid "Bone"
 msgstr "Os"
-
-
-msgid "Python Constraint"
-msgstr "Restricție Python"
-
-
-msgid "Script"
-msgstr "Script"
 
 
 msgid "Auto Handle"
@@ -1896,8 +1888,8 @@ msgid "Depth"
 msgstr "Adâncime"
 
 
-msgid "View"
-msgstr "Vedere"
+msgid "Radius"
+msgstr "Rază"
 
 
 msgid "Viewport"
@@ -1906,6 +1898,10 @@ msgstr "Fereastra de Vizualizare"
 
 msgid "Render"
 msgstr "Render"
+
+
+msgid "Scene"
+msgstr "Scenă"
 
 
 msgid "Shading"
@@ -1918,6 +1914,10 @@ msgstr "Transformare"
 
 msgid "Shrink"
 msgstr "Micșorează"
+
+
+msgid "Texture"
+msgstr "Textură"
 
 
 msgid "Vertex"
@@ -1965,10 +1965,6 @@ msgid "Delete"
 msgstr "Ștergere"
 
 
-msgid "Frames"
-msgstr "Cadre"
-
-
 msgid "Window"
 msgstr "Fereastră"
 
@@ -1993,10 +1989,6 @@ msgid "Blue"
 msgstr "Albastru"
 
 
-msgid "Envelope"
-msgstr "Plic"
-
-
 msgid "Local"
 msgstr "Local"
 
@@ -2005,17 +1997,8 @@ msgid "Global"
 msgstr "Global"
 
 
-msgctxt "Curves"
-msgid "Curve Preset"
-msgstr "Preset Curbă"
-
-
 msgid "Blur"
 msgstr "Estompare"
-
-
-msgid "Space"
-msgstr "Spațiu"
 
 
 msgid "Sequence"
@@ -2043,6 +2026,10 @@ msgid "Light"
 msgstr "Lumină"
 
 
+msgid "Normalize"
+msgstr "Normalizare"
+
+
 msgid "Cube"
 msgstr "Cub"
 
@@ -2051,12 +2038,28 @@ msgid "Corner"
 msgstr "Colț"
 
 
+msgid "Attribute"
+msgstr "Atribut"
+
+
+msgid "Script"
+msgstr "Script"
+
+
 msgid "Edit"
 msgstr "Editare"
 
 
+msgid "Sculpt"
+msgstr "Sculptare"
+
+
 msgid "Tool"
-msgstr "Unealtă"
+msgstr "Instrument"
+
+
+msgid "Line Art"
+msgstr "Artă liniară"
 
 
 msgid "Object Mode"
@@ -2091,8 +2094,20 @@ msgid "Gain"
 msgstr "Creștere"
 
 
+msgid "Window Manager"
+msgstr "Manager Ferestre"
+
+
+msgid "Workspace"
+msgstr "Spațiu de lucru"
+
+
 msgid "Animation"
 msgstr "Animație"
+
+
+msgid "Simulation"
+msgstr "Simulare"
 
 
 msgid "Color Management"
@@ -2117,32 +2132,40 @@ msgid "Sampling"
 msgstr "Eșantionare"
 
 
-msgid "Add Image"
-msgstr "Adăugare Imagine"
+msgid "Convert"
+msgstr "Convertire"
 
 
 msgid "Apply"
 msgstr "Aplicare"
 
 
-msgid "Convert"
-msgstr "Convertire"
+msgid "Layout"
+msgstr "Aspect"
 
 
-msgid "Marker"
-msgstr "Marcator"
+msgid "Tracking"
+msgstr "Urmărire"
 
 
 msgid "UV"
 msgstr "UV"
 
 
+msgid "Light"
+msgstr "Lumină"
+
+
+msgid "Add Image"
+msgstr "Adăugare Imagine"
+
+
+msgid "Marker"
+msgstr "Marcator"
+
+
 msgid "Unwrap"
 msgstr "Desfacere"
-
-
-msgid "Layout"
-msgstr "Aspect"
 
 
 msgid "Add Modifier"
@@ -2157,9 +2180,8 @@ msgid "Physics"
 msgstr "Fizică"
 
 
-msgctxt "Operator"
-msgid "Scene"
-msgstr "Scenă"
+msgid "Blender"
+msgstr "Blender"
 
 
 msgid "System"
@@ -2174,8 +2196,16 @@ msgid "Polygon"
 msgstr "Poligon"
 
 
+msgid "Array"
+msgstr "Matrice"
+
+
 msgid "New"
 msgstr "Nou"
+
+
+msgid "Space"
+msgstr "Spațiu"
 
 
 msgid "Overwrite"
@@ -2186,24 +2216,12 @@ msgid "Copy"
 msgstr "Copiere"
 
 
-msgid "Normalize"
-msgstr "Normalizare"
+msgid "World"
+msgstr "Lume"
 
 
-msgid "Aspect Correction"
-msgstr "Corecție Aspect"
-
-
-msgid "Lift"
-msgstr "Ridicare"
-
-
-msgid "Composite"
-msgstr "Compozit"
-
-
-msgid "Combined"
-msgstr "Combinat"
+msgid "Starting"
+msgstr "Pornire"
 
 
 msgid "Rotate"
@@ -2245,16 +2263,6 @@ msgstr "Șterge Keyframe-urile"
 msgctxt "Operator"
 msgid "Insert Keyframes"
 msgstr "Inserează Keyframe-uri"
-
-
-msgctxt "Operator"
-msgid "Next Layer"
-msgstr "Stratul Următor"
-
-
-msgctxt "Operator"
-msgid "Previous Layer"
-msgstr "Startul Anterior"
 
 
 msgctxt "Operator"
@@ -2314,16 +2322,6 @@ msgid "(undocumented operator)"
 msgstr "(operator nedocumentat)"
 
 
-msgctxt "Curve"
-msgid "Mode"
-msgstr "Mod"
-
-
-msgctxt "Curve"
-msgid "Max"
-msgstr "Max"
-
-
 msgctxt "Operator"
 msgid "Add Marker"
 msgstr "Adăugare Marker"
@@ -2366,17 +2364,8 @@ msgid "Custom Properties"
 msgstr "Proprietăți Personalizate"
 
 
-msgctxt "Operator"
-msgid "Cancel File Load"
-msgstr "Anulați Încărcarea Fișierului"
-
-
 msgid "Open"
 msgstr "Deschidere"
-
-
-msgid "Remove"
-msgstr "Eliminare"
 
 
 msgid "Both"
@@ -2404,6 +2393,10 @@ msgstr "Adăugare Obiect"
 
 msgid "The maximum ray distance for matching points between the active and selected objects. If zero, there is no limit"
 msgstr "Distanța razei maxime pentru punctele potrivite între obiectele active și selectate. Dacă este zero, nu există limită"
+
+
+msgid "Combined"
+msgstr "Combinat"
 
 
 msgid "Object Data"
@@ -2447,9 +2440,23 @@ msgid "Weight Paint"
 msgstr "Pictare Greutate"
 
 
+msgid "Parents"
+msgstr "Părinți"
+
+
 msgctxt "Operator"
 msgid "Render"
 msgstr "Render"
+
+
+msgctxt "Curve"
+msgid "Mode"
+msgstr "Mod"
+
+
+msgctxt "Curve"
+msgid "Max"
+msgstr "Max"
 
 
 msgctxt "Scene"
@@ -2480,11 +2487,6 @@ msgstr "Scădere"
 msgctxt "Sequence"
 msgid "Multiply"
 msgstr "Înmulțire"
-
-
-msgctxt "Sequence"
-msgid "Transform"
-msgstr "Transformare"
 
 
 msgctxt "Sequence"
@@ -2570,6 +2572,10 @@ msgid "Rotate View"
 msgstr "Rotiți Vederea"
 
 
+msgid "Remove"
+msgstr "Eliminare"
+
+
 msgctxt "Operator"
 msgid "Link"
 msgstr "Legătură"
@@ -2583,10 +2589,6 @@ msgstr "Deschidere"
 msgctxt "Operator"
 msgid "New Window"
 msgstr "Fereastră Nouă"
-
-
-msgid "UV Sculpting"
-msgstr "Sculptare UV"
 
 
 msgid "Motion Tracking"
@@ -2660,10 +2662,6 @@ msgid "New Window"
 msgstr "Fereastră Nouă"
 
 
-msgid "Password"
-msgstr "Parolă"
-
-
 msgid "Viewport Samples"
 msgstr "Eșantioane în fereastra de vizualizare"
 
@@ -2672,12 +2670,29 @@ msgid "Use Viewport Denoising"
 msgstr "Folosiți Denoising în Fereastra de Vizualizare"
 
 
+msgid "Antialiasing"
+msgstr "Antidedublare"
+
+
 msgid "Trace Precision"
 msgstr "Precizia Urmei"
 
 
 msgid "Viewport Denoising"
 msgstr "Denoising în Fereastra de Vizualizare"
+
+
+msgctxt "MovieClip"
+msgid "View"
+msgstr "Vedere"
+
+
+msgid "Active Tool and Workspace settings"
+msgstr "Unealta Activă și Setările Spațiului de Lucru"
+
+
+msgid "Render Properties"
+msgstr "Propretățile de Render"
 
 
 msgctxt "Sequence"
@@ -2695,17 +2710,8 @@ msgid "Movie"
 msgstr "Film"
 
 
-msgctxt "MovieClip"
-msgid "View"
-msgstr "Vedere"
-
-
-msgid "Active Tool and Workspace settings"
-msgstr "Unealta Activă și Setările Spațiului de Lucru"
-
-
-msgid "Render Properties"
-msgstr "Propretățile de Render"
+msgid "Lift"
+msgstr "Ridicare"
 
 
 msgid "Summary"
@@ -2715,6 +2721,10 @@ msgstr "Rezumat"
 msgctxt "Unit"
 msgid "Nearest Marker"
 msgstr "Cel mai apropriat Marker"
+
+
+msgid "UV Sculpting"
+msgstr "Sculptare UV"
 
 
 msgid "Error Message"
@@ -2784,10 +2794,6 @@ msgid "Apply"
 msgstr "Aplicare"
 
 
-msgid "Tracking"
-msgstr "Urmărire"
-
-
 msgctxt "WindowManager"
 msgid "Add New"
 msgstr "Adăugați Nou"
@@ -2810,6 +2816,10 @@ msgstr "Adăugare Imagine"
 
 msgid "Not Set"
 msgstr "Nu setat"
+
+
+msgid "Auto Normalize"
+msgstr "Auto Normalizare"
 
 
 msgid "Draw:"
@@ -3036,14 +3046,6 @@ msgid "Locations"
 msgstr "Locații"
 
 
-msgid "Parents"
-msgstr "Părinți"
-
-
-msgid "Auto Normalize"
-msgstr "Auto Normalizare"
-
-
 msgid "Multi-Paint"
 msgstr "Multi-Pictură"
 
@@ -3088,6 +3090,10 @@ msgstr "Lipire Driver: niciun driver de lipit"
 
 msgid "Out"
 msgstr "Ieșire"
+
+
+msgid "Cancel"
+msgstr "Anulare"
 
 
 msgid "Cannot paint stroke"
@@ -3195,6 +3201,10 @@ msgid "%d items"
 msgstr "%d obiecte"
 
 
+msgid "Value:"
+msgstr "Valoare:"
+
+
 msgid "Hex"
 msgstr "Hex"
 
@@ -3203,16 +3213,16 @@ msgid "OK"
 msgstr "OK"
 
 
-msgid "Cancel"
-msgstr "Anulare"
-
-
 msgid "Movie"
 msgstr "Film"
 
 
-msgid "No Properties"
-msgstr "Fără proprietăți"
+msgid "Delete the active position"
+msgstr "Șterge poziția activă"
+
+
+msgid "Choose active color stop"
+msgstr "Alege stopul de culoare activ"
 
 
 msgid "Reset View"
@@ -3231,26 +3241,6 @@ msgid "Reset Curve"
 msgstr "Resetează Curba"
 
 
-msgid "Anim Player"
-msgstr "Anim Player"
-
-
-msgid "Display number of users of this data (click to make a single-user copy)"
-msgstr "Afișează numărul de utilizatori ai acestor date (faceți click pentru a face o copie pentru un singur utilizator)"
-
-
-msgid "Reset operator defaults"
-msgstr "Resetează valorile implicite ale operatorilor"
-
-
-msgid "Delete the active position"
-msgstr "Șterge poziția activă"
-
-
-msgid "Choose active color stop"
-msgstr "Alege stopul de culoare activ"
-
-
 msgid "Zoom in"
 msgstr "Mărire"
 
@@ -3259,24 +3249,12 @@ msgid "Zoom out"
 msgstr "Micșorare"
 
 
-msgid "Clipping Options"
-msgstr "Opțiuni de tăiere"
-
-
 msgid "Delete points"
 msgstr "Șterge punctele"
 
 
-msgid "Reset Black/White point and curves"
-msgstr "Resetează punctele și curbele Negru/Alb"
-
-
-msgid "Stop this job"
-msgstr "Oprește această treabă"
-
-
-msgid "Stop animation playback"
-msgstr "Oprește playback-ul animației"
+msgid "Display number of users of this data (click to make a single-user copy)"
+msgstr "Afișează numărul de utilizatori ai acestor date (faceți click pentru a face o copie pentru un singur utilizator)"
 
 
 msgid "Browse Scene to be linked"
@@ -3484,6 +3462,26 @@ msgid "New"
 msgstr "Nou"
 
 
+msgid "No Properties"
+msgstr "Fără proprietăți"
+
+
+msgid "Reset operator defaults"
+msgstr "Resetează valorile implicite ale operatorilor"
+
+
+msgid "Anim Player"
+msgstr "Anim Player"
+
+
+msgid "Stop this job"
+msgstr "Oprește această treabă"
+
+
+msgid "Stop animation playback"
+msgstr "Oprește playback-ul animației"
+
+
 msgctxt "Mesh"
 msgid "Cube"
 msgstr "Cub"
@@ -3581,10 +3579,6 @@ msgid "Driver Value:"
 msgstr "Valoare Driver:"
 
 
-msgid "Value:"
-msgstr "Valoare:"
-
-
 msgid "Delete target variable"
 msgstr "Șterge variabila țintă"
 
@@ -3597,6 +3591,10 @@ msgid "No F-Modifiers to paste"
 msgstr "Niciun F-Modificator de lipit"
 
 
+msgid "Composite"
+msgstr "Compozit"
+
+
 msgid "Select Slot"
 msgstr "Selectare Slot"
 
@@ -3607,10 +3605,6 @@ msgstr "Selectare Strat"
 
 msgid "Select Pass"
 msgstr "Selectare Pass"
-
-
-msgid "Can't Load Image"
-msgstr "Nu s-a putut încărca imaginea"
 
 
 msgid " RGBA float"
@@ -3665,20 +3659,8 @@ msgid "Mask not found"
 msgstr "Masca nu a fost găsită"
 
 
-msgid "Please select all related strips"
-msgstr "Te rog selectează toate benzile aferente"
-
-
-msgid "No valid inputs to swap"
-msgstr "Nu există intrări valide de schimbat"
-
-
 msgid "Please select two strips"
 msgstr "Te rog selectează două benzi"
-
-
-msgid "New effect needs more input strips"
-msgstr "Efectul nou are nevoie de mai multe benzi de intrare"
 
 
 msgid "See '%s' in the text editor"
@@ -3729,16 +3711,16 @@ msgid "Mean Crease:"
 msgstr "Cută medie:"
 
 
-msgid "Mean Weight:"
-msgstr "Greutate Medie:"
-
-
 msgid "Mean Radius:"
 msgstr "Rază Medie:"
 
 
 msgid "Mean Tilt:"
 msgstr "Aplecare Medie:"
+
+
+msgid "Mean Weight:"
+msgstr "Greutate Medie:"
 
 
 msgid "4L"
@@ -3778,10 +3760,6 @@ msgid "Modify"
 msgstr "Modificare"
 
 
-msgid "Color Space:"
-msgstr "Spațiu Culoare:"
-
-
 msgid "Master"
 msgstr "Maestru"
 
@@ -3796,30 +3774,6 @@ msgstr "Tonuri Mijlocii"
 
 msgid "Bokeh Type:"
 msgstr "Tip Bokeh:"
-
-
-msgid "Center:"
-msgstr "Centru:"
-
-
-msgid "Path:"
-msgstr "Cale:"
-
-
-msgid "Base Path:"
-msgstr "Cale de Bază:"
-
-
-msgid "Add Input"
-msgstr "Adăugare Intrare"
-
-
-msgid "Layer:"
-msgstr "Strat:"
-
-
-msgid "Format:"
-msgstr "Format:"
 
 
 msgid "Blender File View"
@@ -3845,40 +3799,4 @@ msgstr "Comutați Consola de sistem"
 msgctxt "Operator"
 msgid "Toggle System Console"
 msgstr "Comutați Consola de sistem"
-
-
-msgid "Finnish (Suomi)"
-msgstr "Finlandeză (Suomi)"
-
-
-msgid "Catalan (Català)"
-msgstr "Catalan (Català)"
-
-
-msgid "Polish (Polski)"
-msgstr "Poloneză (Polski)"
-
-
-msgid "Romanian (Român)"
-msgstr "Română"
-
-
-msgid "Bulgarian (Български)"
-msgstr "Bulgară (Български)"
-
-
-msgid "Greek (Ελληνικά)"
-msgstr "Greacă (Ελληνικά)"
-
-
-msgid "Nepali (नेपाली)"
-msgstr "Nepali (नेपाली)"
-
-
-msgid "Complete"
-msgstr "Complet"
-
-
-msgid "Starting"
-msgstr "Pornire"
 

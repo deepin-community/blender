@@ -62,7 +62,7 @@ class IndexBuf {
   };
 
  public:
-  IndexBuf(){};
+  IndexBuf() {};
   virtual ~IndexBuf();
 
   void init(uint indices_len,
@@ -117,7 +117,6 @@ class IndexBuf {
                                     uint max_idx,
                                     GPUPrimType prim_type,
                                     bool clamp_indices_in_range);
-  inline uint index_range(uint *r_min, uint *r_max);
   virtual void strip_restart_indices() = 0;
 };
 
@@ -134,6 +133,14 @@ inline int indices_per_primitive(GPUPrimType prim_type)
       return 4;
     case GPU_PRIM_TRIS_ADJ:
       return 6;
+    /** IMPORTANT: These last two expects no restart primitive.
+     * Asserting for this would be too slow. Just don't be stupid.
+     * This is needed for polylines but should be deprecated.
+     * See GPU_batch_draw_expanded_parameter_get */
+    case GPU_PRIM_LINE_STRIP:
+      return 1; /* Minus one for the whole length. */
+    case GPU_PRIM_LINE_LOOP:
+      return 1;
     default:
       return -1;
   }
@@ -192,6 +199,10 @@ void GPU_indexbuf_set_line_restart(GPUIndexBufBuilder *builder, uint elem);
 void GPU_indexbuf_set_tri_restart(GPUIndexBufBuilder *builder, uint elem);
 
 blender::gpu::IndexBuf *GPU_indexbuf_build(GPUIndexBufBuilder *);
+blender::gpu::IndexBuf *GPU_indexbuf_build_ex(GPUIndexBufBuilder *builder,
+                                              uint index_min,
+                                              uint index_max,
+                                              bool uses_restart_indices);
 void GPU_indexbuf_build_in_place(GPUIndexBufBuilder *, blender::gpu::IndexBuf *);
 void GPU_indexbuf_build_in_place_ex(GPUIndexBufBuilder *builder,
                                     uint index_min,
@@ -206,14 +217,16 @@ void GPU_indexbuf_build_in_place_ex(GPUIndexBufBuilder *builder,
  *
  * \todo The optimization to avoid the local copy currently isn't implemented.
  */
-void GPU_indexbuf_build_in_place_from_memory(blender::gpu::IndexBuf *ibo,
-                                             GPUPrimType prim_type,
-                                             const uint32_t *data,
-                                             int32_t data_len,
-                                             int32_t index_min,
-                                             int32_t index_max,
-                                             bool uses_restart_indices);
+blender::gpu::IndexBuf *GPU_indexbuf_build_from_memory(GPUPrimType prim_type,
+                                                       const uint32_t *data,
+                                                       int32_t data_len,
+                                                       int32_t index_min,
+                                                       int32_t index_max,
+                                                       bool uses_restart_indices);
 
+/**
+ * \note Sub-ranges are not taken into account, the whole buffer will be bound without any offset.
+ */
 void GPU_indexbuf_bind_as_ssbo(blender::gpu::IndexBuf *elem, int binding);
 
 blender::gpu::IndexBuf *GPU_indexbuf_build_curves_on_device(GPUPrimType prim_type,
@@ -261,3 +274,17 @@ int GPU_indexbuf_primitive_len(GPUPrimType prim_type);
       elem = nullptr; \
     } \
   } while (0)
+
+namespace blender::gpu {
+
+class IndexBufDeleter {
+ public:
+  void operator()(IndexBuf *ibo)
+  {
+    GPU_indexbuf_discard(ibo);
+  }
+};
+
+using IndexBufPtr = std::unique_ptr<IndexBuf, IndexBufDeleter>;
+
+}  // namespace blender::gpu

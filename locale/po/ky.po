@@ -1,20 +1,19 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 4.3.0 Release Candidate (b'7dfe47164a63')\n"
-"(b'0000000000000000000000000000000000000000')\n"
+"Project-Id-Version: Blender 5.0.0 Beta (b'd29f9f6118e5')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2024-11-18 11:20+0000\n"
-"PO-Revision-Date: 2013-11-05 13:47+0600\n"
-"Last-Translator: Chyngyz Dzhumaliev <kyrgyzl10n@gmail.com>\n"
-"Language-Team: Kirghiz <kyrgyzl10n@gmail.com>\n"
-"Language: __POT__\n"
+"POT-Creation-Date: 2025-11-10 09:45+0000\n"
+"PO-Revision-Date: 2025-07-23 15:20+0000\n"
+"Last-Translator: Anonymous <noreply@weblate.org>\n"
+"Language-Team: Kyrgyz <https://translate.blender.org/projects/blender-ui/ui/ky/>\n"
+"Language: ky\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
-"X-Poedit-SourceCharset: UTF-8\n"
-"X-Generator: Poedit 1.5.4"
+"X-Generator: Weblate 5.12.1\n"
+"X-Poedit-SourceCharset: UTF-8"
 
 
 msgid "Name"
@@ -105,6 +104,22 @@ msgid "Drivers"
 msgstr "Драйверлер"
 
 
+msgid "Hide"
+msgstr "Жашыруу"
+
+
+msgid "Opacity"
+msgstr "Күңүрттүк"
+
+
+msgid "Info"
+msgstr "Маалымат"
+
+
+msgid "Default"
+msgstr "Жарыяланбас"
+
+
 msgid "Empty"
 msgstr "Боштук"
 
@@ -123,10 +138,6 @@ msgstr "Текст редактору"
 
 msgid "Python Console"
 msgstr "Python консолу"
-
-
-msgid "Info"
-msgstr "Маалымат"
 
 
 msgid "Properties"
@@ -165,6 +176,10 @@ msgid "Layer"
 msgstr "Кат"
 
 
+msgid "Object"
+msgstr "Объект"
+
+
 msgid "Margin"
 msgstr "Кемтиги"
 
@@ -193,10 +208,6 @@ msgid "-Z"
 msgstr "-Z"
 
 
-msgid "Object"
-msgstr "Объект"
-
-
 msgid "None"
 msgstr "Жок"
 
@@ -209,16 +220,16 @@ msgid "Target"
 msgstr "Максат"
 
 
+msgid "Bake normals"
+msgstr "Нормалдарды бышыруу"
+
+
 msgid "Clear"
 msgstr "Тазалоо"
 
 
 msgid "Free"
 msgstr "Бош"
-
-
-msgid "Hide"
-msgstr "Жашыруу"
 
 
 msgid "Weight"
@@ -285,90 +296,6 @@ msgid "Worlds"
 msgstr "Дүйнөлөр"
 
 
-msgid "Armature"
-msgstr "Скелет"
-
-
-msgid "Brush"
-msgstr "Чачы"
-
-
-msgid "Camera"
-msgstr "Камера"
-
-
-msgid "Curve"
-msgstr "Ийри"
-
-
-msgid "Font"
-msgstr "Арип"
-
-
-msgid "Image"
-msgstr "Сүрөт"
-
-
-msgid "Key"
-msgstr "Ачкыч"
-
-
-msgid "Mask"
-msgstr "Маска"
-
-
-msgid "Material"
-msgstr "Материал"
-
-
-msgid "Mesh"
-msgstr "Политор"
-
-
-msgid "Movie Clip"
-msgstr "Видеофрагмент"
-
-
-msgid "Particle"
-msgstr "Бөлүкчө"
-
-
-msgid "Scene"
-msgstr "Сахна"
-
-
-msgid "Screen"
-msgstr "Экран"
-
-
-msgid "Sound"
-msgstr "Үн"
-
-
-msgid "Speaker"
-msgstr "Үн булагы"
-
-
-msgid "Text"
-msgstr "Текст"
-
-
-msgid "Texture"
-msgstr "Текстура"
-
-
-msgid "Volume"
-msgstr "Көлөм"
-
-
-msgid "Window Manager"
-msgstr "Терезе менеджери"
-
-
-msgid "World"
-msgstr "Дүйнө"
-
-
 msgid "Speed"
 msgstr "Ылдамдыгы"
 
@@ -383,6 +310,10 @@ msgstr "Сызык"
 
 msgid "Random"
 msgstr "Кокустугу"
+
+
+msgid "Volume"
+msgstr "Көлөм"
 
 
 msgctxt "Operator"
@@ -403,12 +334,12 @@ msgid "Mode"
 msgstr "Режим"
 
 
+msgid "Material"
+msgstr "Материал"
+
+
 msgid "Vertex Color"
 msgstr "Чоку түсү"
-
-
-msgid "Normal"
-msgstr "Нормаль"
 
 
 msgid "All"
@@ -421,10 +352,6 @@ msgstr "Жөнөкөйлөө"
 
 msgid "Background Image"
 msgstr "Фон сүрөтү"
-
-
-msgid "Opacity"
-msgstr "Күңүрттүк"
 
 
 msgid "MovieClip"
@@ -443,6 +370,10 @@ msgid "Crop"
 msgstr "Кесүү"
 
 
+msgid "Image"
+msgstr "Сүрөт"
+
+
 msgid "Image User"
 msgstr "Сүрөт колдонуучусу"
 
@@ -457,6 +388,10 @@ msgstr "Масштаб"
 
 msgid "Background Source"
 msgstr "Фон булагы"
+
+
+msgid "Movie Clip"
+msgstr "Видеофрагмент"
 
 
 msgid "Background Images"
@@ -483,6 +418,10 @@ msgid "Gravity"
 msgstr "Тартыш"
 
 
+msgid "Curve"
+msgstr "Ийри"
+
+
 msgid "Exposure"
 msgstr "Экспозиция"
 
@@ -495,6 +434,10 @@ msgid "Use Curves"
 msgstr "Ийрилерди колдонуу"
 
 
+msgid "View"
+msgstr "Көрүнүш"
+
+
 msgid "Mix"
 msgstr "Аралаш"
 
@@ -505,6 +448,10 @@ msgstr "Караңгы кылуу"
 
 msgid "Lighten"
 msgstr "Жарык кылуу"
+
+
+msgid "Screen"
+msgstr "Экран"
 
 
 msgid "Overlay"
@@ -552,6 +499,10 @@ msgid "Influence"
 msgstr "Таасир"
 
 
+msgid "Armature"
+msgstr "Скелет"
+
+
 msgid "Floor"
 msgstr "Пол"
 
@@ -568,16 +519,12 @@ msgid "Z"
 msgstr "Z"
 
 
-msgid "Default"
-msgstr "Жарыяланбас"
+msgid "Camera"
+msgstr "Камера"
 
 
 msgid "Bone"
 msgstr "Сөөк"
-
-
-msgid "Script"
-msgstr "Скрипт"
 
 
 msgid "Front"
@@ -616,12 +563,12 @@ msgid "Plane"
 msgstr "Тегиздик"
 
 
-msgid "View"
-msgstr "Көрүнүш"
-
-
 msgid "Render"
 msgstr "Визуалдаштыруу"
+
+
+msgid "Scene"
+msgstr "Сахна"
 
 
 msgid "Shading"
@@ -678,6 +625,10 @@ msgstr "Чечим"
 
 msgid "UV Texture"
 msgstr "UV-текстура"
+
+
+msgid "Texture"
+msgstr "Текстура"
 
 
 msgid "Vertex"
@@ -749,16 +700,16 @@ msgid "Audio volume"
 msgstr "Үн катуулугу"
 
 
+msgid "H.264"
+msgstr "H.264"
+
+
 msgid "DNxHD"
 msgstr "DNxHD"
 
 
 msgid "Flash Video"
 msgstr "Flash-видео"
-
-
-msgid "H.264"
-msgstr "H.264"
 
 
 msgid "HuffYUV"
@@ -785,16 +736,16 @@ msgid "MPEG-4"
 msgstr "MPEG-4"
 
 
-msgid "Ogg"
-msgstr "Ogg"
-
-
 msgid "Matroska"
 msgstr "Matroska"
 
 
 msgid "Flash"
 msgstr "Flash"
+
+
+msgid "Ogg"
+msgstr "Ogg"
 
 
 msgid "Frame"
@@ -873,6 +824,10 @@ msgid "Fire"
 msgstr "От"
 
 
+msgid "Normal"
+msgstr "Нормаль"
+
+
 msgid "Visibility"
 msgstr "Көрүнүү"
 
@@ -909,8 +864,17 @@ msgid "Users"
 msgstr "Колдонуучулар"
 
 
+msgctxt "Curve"
+msgid "Sphere"
+msgstr "Сфера"
+
+
 msgid "Draw"
 msgstr "Тартуу"
+
+
+msgid "Brush"
+msgstr "Чачы"
 
 
 msgid "Rate"
@@ -973,6 +937,10 @@ msgid "Text Curve"
 msgstr "Текст ийриси"
 
 
+msgid "Font"
+msgstr "Арип"
+
+
 msgid "Font Size"
 msgstr "Арип өлчөмү"
 
@@ -987,26 +955,6 @@ msgstr "Мин."
 
 msgid "Max"
 msgstr "Макс."
-
-
-msgid "Iris"
-msgstr "Iris"
-
-
-msgid "Targa"
-msgstr "Targa"
-
-
-msgid "Targa Raw"
-msgstr "Targa Raw"
-
-
-msgid "Cineon"
-msgstr "Cineon"
-
-
-msgid "Radiance HDR"
-msgstr "Radiance HDR"
 
 
 msgid "Movie file"
@@ -1069,6 +1017,10 @@ msgid "Filter"
 msgstr "Фильтр"
 
 
+msgid "Script"
+msgstr "Скрипт"
+
+
 msgid "Interface"
 msgstr "Интерфейс"
 
@@ -1087,6 +1039,10 @@ msgstr "Оңдоо"
 
 msgid "Tool"
 msgstr "Аспап"
+
+
+msgid "Mesh"
+msgstr "Политор"
 
 
 msgid "Active Material"
@@ -1119,6 +1075,10 @@ msgstr "Скульптинг режими"
 
 msgid "Mass"
 msgstr "Масса"
+
+
+msgid "Particle"
+msgstr "Бөлүкчө"
 
 
 msgid "Halo"
@@ -1156,6 +1116,10 @@ msgstr "Көрсөтүү ырастоолору"
 msgctxt "Sound"
 msgid "Pitch"
 msgstr "Бийиктик"
+
+
+msgid "Sound"
+msgstr "Үн"
 
 
 msgid "Clouds"
@@ -1234,6 +1198,10 @@ msgid "(x*x+y*y+z*z)"
 msgstr "(x*x+y*y+z*z)"
 
 
+msgid "Window Manager"
+msgstr "Терезе менеджери"
+
+
 msgid "Category"
 msgstr "Категориясы"
 
@@ -1310,21 +1278,36 @@ msgid "Circles"
 msgstr "Тегеректер"
 
 
-msgctxt "Curve"
-msgid "Sphere"
-msgstr "Сфера"
-
-
 msgid "Mask Layers"
 msgstr "Маска каттары"
+
+
+msgid "Mask"
+msgstr "Маска"
+
+
+msgid "Apply"
+msgstr "Колдонуу"
+
+
+msgid "Tracking"
+msgstr "Трекинг"
+
+
+msgid "Text"
+msgstr "Текст"
 
 
 msgid "Mirror"
 msgstr "Чагылтуу"
 
 
-msgid "Apply"
-msgstr "Колдонуу"
+msgid "Import"
+msgstr "Импорттоо"
+
+
+msgid "UV"
+msgstr "UV"
 
 
 msgctxt "MovieClip"
@@ -1348,8 +1331,16 @@ msgid "Languages..."
 msgstr "Тилдер..."
 
 
+msgid "Cache"
+msgstr "Кэш"
+
+
 msgid "Channel"
 msgstr "Канал"
+
+
+msgid "Key"
+msgstr "Ачкыч"
 
 
 msgid "Marker"
@@ -1360,20 +1351,13 @@ msgid "Files"
 msgstr "Файлдар"
 
 
+msgctxt "Operator"
 msgid "Smooth"
 msgstr "Тегиз"
 
 
-msgid "UV"
-msgstr "UV"
-
-
 msgid "Align"
 msgstr "Түздөө"
-
-
-msgid "Import"
-msgstr "Импорттоо"
 
 
 msgid "Node"
@@ -1390,10 +1374,6 @@ msgstr "Физика"
 
 msgid "Sequencer"
 msgstr "Секвенсор"
-
-
-msgid "Cache"
-msgstr "Кэш"
 
 
 msgid "System"
@@ -1414,6 +1394,15 @@ msgstr "Тышкы маалыматтар"
 
 msgid "Help"
 msgstr "Жардам"
+
+
+msgctxt "Operator"
+msgid "Lattice"
+msgstr "Решётка"
+
+
+msgid "Smooth"
+msgstr "Тегиз"
 
 
 msgid "Active Element"
@@ -1496,6 +1485,10 @@ msgid "Copy"
 msgstr "Көчүрүү"
 
 
+msgid "World"
+msgstr "Дүйнө"
+
+
 msgid "Origin"
 msgstr "Таяныч чекити"
 
@@ -1508,8 +1501,8 @@ msgid "Units"
 msgstr "Ченөө бирдиктери"
 
 
-msgid "Meta"
-msgstr "Мета"
+msgid "Starting"
+msgstr "Башталууда"
 
 
 msgid "YCbCr"
@@ -1526,38 +1519,6 @@ msgstr "ITU 709"
 
 msgid "To"
 msgstr "Кимге"
-
-
-msgid "X2"
-msgstr "X2"
-
-
-msgid "Y2"
-msgstr "Y2"
-
-
-msgid "X1"
-msgstr "X1"
-
-
-msgid "Y1"
-msgstr "Y1"
-
-
-msgid "Shadow"
-msgstr "Көлөкө"
-
-
-msgid "Red Channel"
-msgstr "Кызыл каналы"
-
-
-msgid "Green Channel"
-msgstr "Жашыл каналы"
-
-
-msgid "Blue Channel"
-msgstr "Көк каналы"
 
 
 msgid "Render Layers"
@@ -1602,6 +1563,10 @@ msgstr "Z-огу"
 
 msgid "Active Node"
 msgstr "Активдүү түйүн"
+
+
+msgid "Shadow"
+msgstr "Көлөкө"
 
 
 msgctxt "Operator"
@@ -1671,11 +1636,6 @@ msgstr "Тандалганын жашыруу"
 msgctxt "Operator"
 msgid "Subdivide"
 msgstr "Бөлүү"
-
-
-msgctxt "Curve"
-msgid "Mode"
-msgstr "Режим"
 
 
 msgctxt "Operator"
@@ -1818,11 +1778,6 @@ msgstr "Жолду кошуу"
 
 
 msgctxt "Operator"
-msgid "Smooth"
-msgstr "Тегиз"
-
-
-msgctxt "Operator"
 msgid "Spin"
 msgstr "Буроо"
 
@@ -1863,10 +1818,6 @@ msgstr "Лампа"
 
 msgid "Other"
 msgstr "Башка"
-
-
-msgid "Path Mode"
-msgstr "Жол режими"
 
 
 msgctxt "Operator"
@@ -1967,10 +1918,6 @@ msgstr "Текстти коюу"
 
 msgid "Eraser"
 msgstr "Өчүргүч"
-
-
-msgid "Remove"
-msgstr "Өчүрүү"
 
 
 msgid "Sigma"
@@ -2116,11 +2063,6 @@ msgstr "Чыгуу"
 
 
 msgctxt "Operator"
-msgid "Hide"
-msgstr "Жашыруу"
-
-
-msgctxt "Operator"
 msgid "Add Armature"
 msgstr "Скелетти кошуу"
 
@@ -2231,6 +2173,11 @@ msgid "Hierarchy"
 msgstr "Иерархия"
 
 
+msgctxt "Operator"
+msgid "Hide"
+msgstr "Жашыруу"
+
+
 msgid "Reload"
 msgstr "Кайтадан жүктөө"
 
@@ -2244,8 +2191,9 @@ msgid "Render"
 msgstr "Визуалдаштыруу"
 
 
-msgid "Render active scene"
-msgstr "Активдүү сахнаны визуалдаштыруу"
+msgctxt "Curve"
+msgid "Mode"
+msgstr "Режим"
 
 
 msgctxt "Operator"
@@ -2365,11 +2313,6 @@ msgstr "Түрү"
 msgctxt "Sequence"
 msgid "Add"
 msgstr "Кошуу"
-
-
-msgctxt "Sequence"
-msgid "Transform"
-msgstr "Өзгөртүү"
 
 
 msgctxt "Sequence"
@@ -2548,12 +2491,8 @@ msgid "Reset"
 msgstr "Түшүрүү"
 
 
-msgid "Island"
-msgstr "Арал"
-
-
-msgid "Save a Collada file"
-msgstr "Collada файлын сактоо"
+msgid "Remove"
+msgstr "Өчүрүү"
 
 
 msgctxt "Operator"
@@ -2660,10 +2599,6 @@ msgstr "Аудио"
 
 msgid "Development"
 msgstr "Иштетүү"
-
-
-msgid "Panel Colors"
-msgstr "Панель түстөрү"
 
 
 msgid "Styles"
@@ -2773,10 +2708,6 @@ msgid "Sky"
 msgstr "Асман"
 
 
-msgid "Bake normals"
-msgstr "Нормалдарды бышыруу"
-
-
 msgid "Engine"
 msgstr "Кыймылдаткыч"
 
@@ -2829,26 +2760,6 @@ msgid "Stamp Time"
 msgstr "Убакыт штампы"
 
 
-msgctxt "Sequence"
-msgid "Image"
-msgstr "Сүрөт"
-
-
-msgctxt "Sequence"
-msgid "Scene"
-msgstr "Сахна"
-
-
-msgctxt "Sequence"
-msgid "Mask"
-msgstr "Маска"
-
-
-msgctxt "Sequence"
-msgid "Sound"
-msgstr "Үн"
-
-
 msgid "Sepia"
 msgstr "Сепия"
 
@@ -2886,12 +2797,40 @@ msgid "Lens"
 msgstr "Объектив"
 
 
+msgid "Meta"
+msgstr "Мета"
+
+
+msgid "Speaker"
+msgstr "Үн булагы"
+
+
 msgid "3D"
 msgstr "3D"
 
 
 msgid "Stereo Mode"
 msgstr "Стереорежим"
+
+
+msgctxt "Sequence"
+msgid "Image"
+msgstr "Сүрөт"
+
+
+msgctxt "Sequence"
+msgid "Scene"
+msgstr "Сахна"
+
+
+msgctxt "Sequence"
+msgid "Mask"
+msgstr "Маска"
+
+
+msgctxt "Sequence"
+msgid "Sound"
+msgstr "Үн"
 
 
 msgid "Force Field"
@@ -3112,10 +3051,6 @@ msgid "Statistics"
 msgstr "Статистика"
 
 
-msgid "Tracking"
-msgstr "Трекинг"
-
-
 msgid "3D View"
 msgstr "3D-көрүнүш"
 
@@ -3172,6 +3107,10 @@ msgid "Back"
 msgstr "Артынан"
 
 
+msgid "Island"
+msgstr "Арал"
+
+
 msgctxt "Operator"
 msgid "Save As..."
 msgstr "Ат коюп сактоо..."
@@ -3190,11 +3129,6 @@ msgstr "Кыр"
 msgctxt "Operator"
 msgid "Face"
 msgstr "Каптал"
-
-
-msgctxt "Operator"
-msgid "Island"
-msgstr "Арал"
 
 
 msgid "Image*"
@@ -3229,11 +3163,6 @@ msgstr "Түс"
 msgctxt "Operator"
 msgid "Text"
 msgstr "Текст"
-
-
-msgctxt "Operator"
-msgid "Scene..."
-msgstr "Сахна..."
 
 
 msgctxt "Text"
@@ -3378,17 +3307,16 @@ msgstr "Эсептөө"
 
 
 msgctxt "Operator"
-msgid "Lattice"
-msgstr "Решётка"
-
-
-msgctxt "Operator"
 msgid "Quick Edit"
 msgstr "Тез оңдоо"
 
 
 msgid "Untitled"
 msgstr "Аты жок"
+
+
+msgid "Cancel"
+msgstr "Жокко чыгаруу"
 
 
 msgctxt "Curve"
@@ -3400,16 +3328,16 @@ msgid "%s: %s"
 msgstr "%s: %s"
 
 
+msgid "Value:"
+msgstr "Мааниси:"
+
+
 msgid "Hex"
 msgstr "Hex"
 
 
 msgid "OK"
 msgstr "ООБА"
-
-
-msgid "Cancel"
-msgstr "Жокко чыгаруу"
 
 
 msgid "Movie"
@@ -3524,6 +3452,10 @@ msgid "New"
 msgstr "Жаңы"
 
 
+msgid "Path Mode"
+msgstr "Жол режими"
+
+
 msgid "Rigging"
 msgstr "Риггинг"
 
@@ -3633,12 +3565,8 @@ msgid "Stone"
 msgstr "Таш"
 
 
-msgid "ON"
-msgstr "өч."
-
-
-msgid "OFF"
-msgstr "күй."
+msgid "Render active scene"
+msgstr "Активдүү сахнаны визуалдаштыруу"
 
 
 msgid "X:"
@@ -3657,20 +3585,12 @@ msgid "File name"
 msgstr "Файл аты"
 
 
-msgid "Value:"
-msgstr "Мааниси:"
-
-
 msgid "<No ID>"
 msgstr "<ID жок>"
 
 
 msgid "Select Layer"
 msgstr "Катты тандоо"
-
-
-msgid "Can't Load Image"
-msgstr "Сүрөттү жүктөө оңунан чыккан жок"
 
 
 msgid "(Key) "
@@ -3778,138 +3698,14 @@ msgid "W4"
 msgstr "W4"
 
 
+msgid "ON"
+msgstr "өч."
+
+
+msgid "OFF"
+msgstr "күй."
+
+
 msgid "Import-Export"
 msgstr "Импорт-экспорт"
-
-
-msgid "English (English)"
-msgstr "Англис (English)"
-
-
-msgid "Japanese (日本語)"
-msgstr "Жапон (日本語)"
-
-
-msgid "Italian (Italiano)"
-msgstr "Итальян (Italiano)"
-
-
-msgid "German (Deutsch)"
-msgstr "Немис (Deutsch)"
-
-
-msgid "Finnish (Suomi)"
-msgstr "Финн (Suomi)"
-
-
-msgid "Swedish (Svenska)"
-msgstr "Швед (Svenska)"
-
-
-msgid "French (Français)"
-msgstr "Француз (Français)"
-
-
-msgid "Spanish (Español)"
-msgstr "Испан (Español)"
-
-
-msgid "Catalan (Català)"
-msgstr "Каталон (Català)"
-
-
-msgid "Portuguese (Português)"
-msgstr "Португал (Português)"
-
-
-msgid "Simplified Chinese (简体中文)"
-msgstr "Кытай жөнөкөйлөнгөн (简体中文)"
-
-
-msgid "Traditional Chinese (繁體中文)"
-msgstr "Кытай салттуу (繁體中文)"
-
-
-msgid "Russian (Русский)"
-msgstr "Орус (Русский)"
-
-
-msgid "Croatian (Hrvatski)"
-msgstr "Хорват (Hrvatski)"
-
-
-msgid "Serbian (Српски)"
-msgstr "Серб (Српски)"
-
-
-msgid "Polish (Polski)"
-msgstr "Поляк (Polski)"
-
-
-msgid "Romanian (Român)"
-msgstr "Румын (Român)"
-
-
-msgid "Arabic (ﺔﻴﺑﺮﻌﻟﺍ)"
-msgstr "Араб (ﺔﻴﺑﺮﻌﻟﺍ)"
-
-
-msgid "Bulgarian (Български)"
-msgstr "Болгар (Български)"
-
-
-msgid "Greek (Ελληνικά)"
-msgstr "Грек (Ελληνικά)"
-
-
-msgid "Nepali (नेपाली)"
-msgstr "Непал (नेपाली)"
-
-
-msgid "Persian (ﯽﺳﺭﺎﻓ)"
-msgstr "Парсы (ﯽﺳﺭﺎﻓ)"
-
-
-msgid "Kyrgyz (Кыргыз тили)"
-msgstr "Кыргыз (Кыргыз тили)"
-
-
-msgid "Turkish (Türkçe)"
-msgstr "Түрк (Türkçe)"
-
-
-msgid "Hungarian (Magyar)"
-msgstr "Венгр (Magyar)"
-
-
-msgid "Hebrew (תירִבְעִ)"
-msgstr "Иврит (תירִבְעִ)"
-
-
-msgid "Esperanto (Esperanto)"
-msgstr "Эсперанто (Esperanto)"
-
-
-msgid "Amharic (አማርኛ)"
-msgstr "Амхар (አማርኛ)"
-
-
-msgid "Uzbek (Oʻzbek)"
-msgstr "Өзбек (Oʻzbek)"
-
-
-msgid "Uzbek Cyrillic (Ўзбек)"
-msgstr "Өзбек кириллица (Ўзбек)"
-
-
-msgid "Complete"
-msgstr "Бүтүрүлгөн"
-
-
-msgid "In Progress"
-msgstr "Которулууда"
-
-
-msgid "Starting"
-msgstr "Башталууда"
 

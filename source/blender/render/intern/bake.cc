@@ -50,12 +50,16 @@
  */
 
 #include <climits>
+#include <cstring>
 
+#include "BLI_string_ref.hh"
 #include "MEM_guardedalloc.h"
 
+#include "BLI_index_range.hh"
 #include "BLI_math_geom.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector.h"
+#include "BLI_task.hh"
 
 #include "BKE_attribute.hh"
 #include "BKE_bvhutils.hh"
@@ -85,18 +89,10 @@ struct BakeDataZSpan {
   float dv_dx, dv_dy;
 };
 
-/**
- * struct wrapping up tangent space data
- */
-struct TSpace {
-  float tangent[3];
-  float sign;
-};
-
 struct TriTessFace {
   const float *positions[3];
   const float *vert_normals[3];
-  const TSpace *tspace[3];
+  blender::float4 tspace[3];
   const float *loop_normal[3];
   float normal[3]; /* for flat faces */
   bool is_smooth;
@@ -147,7 +143,7 @@ void RE_bake_margin(ImBuf *ibuf,
                     const int margin,
                     const char margin_type,
                     const Mesh *mesh,
-                    char const *uv_layer,
+                    const blender::StringRef uv_layer,
                     const float uv_offset[2])
 {
   /* margin */
@@ -316,20 +312,20 @@ static void barycentric_differentials_from_position(const float co[3],
 /**
  * This function populates pixel_array and returns TRUE if things are correct
  */
-static bool cast_ray_highpoly(BVHTreeFromMesh *treeData,
+static bool cast_ray_highpoly(blender::bke::BVHTreeFromMesh *treeData,
                               TriTessFace *triangle_low,
                               TriTessFace *triangles[],
                               BakePixel *pixel_array_low,
                               BakePixel *pixel_array,
                               const float mat_low[4][4],
                               BakeHighPolyData *highpoly,
+                              const int highpoly_num,
+                              blender::MutableSpan<BVHTreeRayHit> hits,
                               const float co[3],
                               const float dir[3],
                               const int pixel_id,
-                              const int tot_highpoly,
                               const float max_ray_distance)
 {
-  int i;
   int hit_mesh = -1;
   float hit_distance_squared = max_ray_distance * max_ray_distance;
   if (hit_distance_squared == 0.0f) {
@@ -337,11 +333,7 @@ static bool cast_ray_highpoly(BVHTreeFromMesh *treeData,
     hit_distance_squared = FLT_MAX;
   }
 
-  BVHTreeRayHit *hits;
-  hits = static_cast<BVHTreeRayHit *>(
-      MEM_mallocN(sizeof(BVHTreeRayHit) * tot_highpoly, "Bake Highpoly to Lowpoly: BVH Rays"));
-
-  for (i = 0; i < tot_highpoly; i++) {
+  for (int i = 0; i < highpoly_num; i++) {
     float co_high[3], dir_high[3];
 
     hits[i].index = -1;
@@ -442,7 +434,6 @@ static bool cast_ray_highpoly(BVHTreeFromMesh *treeData,
     pixel_array[pixel_id].seed = 0;
   }
 
-  MEM_freeN(hits);
   return hit_mesh != -1;
 }
 
@@ -471,7 +462,7 @@ static TriTessFace *mesh_calc_tri_tessface(Mesh *mesh, bool tangent, Mesh *mesh_
 
   blender::int3 *corner_tris = static_cast<blender::int3 *>(
       MEM_mallocN(sizeof(*corner_tris) * tottri, __func__));
-  triangles = static_cast<TriTessFace *>(MEM_callocN(sizeof(TriTessFace) * tottri, __func__));
+  triangles = MEM_calloc_arrayN<TriTessFace>(tottri, __func__);
 
   const bool calculate_normal = BKE_mesh_face_normals_are_dirty(mesh);
   blender::Span<blender::float3> precomputed_normals;
@@ -487,14 +478,23 @@ static TriTessFace *mesh_calc_tri_tessface(Mesh *mesh, bool tangent, Mesh *mesh_
     blender::bke::mesh::corner_tris_calc(positions, faces, corner_verts, {corner_tris, tottri});
   }
 
-  const TSpace *tspace = nullptr;
+  Array<float4> tspace;
   blender::Span<blender::float3> corner_normals;
   if (tangent) {
-    BKE_mesh_calc_loop_tangents(mesh_eval, true, nullptr, 0);
-
-    tspace = static_cast<const TSpace *>(
-        CustomData_get_layer(&mesh_eval->corner_data, CD_TANGENT));
-    BLI_assert(tspace);
+    const StringRef active_uv_map = CustomData_get_active_layer_name(&mesh_eval->corner_data,
+                                                                     CD_PROP_FLOAT2);
+    const VArraySpan uv_map = *attributes.lookup<float2>(active_uv_map, bke::AttrDomain::Corner);
+    Array<Array<float4>> result = bke::mesh::calc_uv_tangents(positions,
+                                                              faces,
+                                                              corner_verts,
+                                                              {corner_tris, tottri},
+                                                              mesh->corner_tri_faces(),
+                                                              VArraySpan(sharp_faces),
+                                                              mesh->vert_normals(),
+                                                              mesh->face_normals(),
+                                                              mesh->corner_normals(),
+                                                              {uv_map});
+    tspace = std::move(result[0]);
 
     corner_normals = mesh_eval->corner_normals();
   }
@@ -514,9 +514,9 @@ static TriTessFace *mesh_calc_tri_tessface(Mesh *mesh, bool tangent, Mesh *mesh_
     triangles[i].is_smooth = !sharp_faces[face_i];
 
     if (tangent) {
-      triangles[i].tspace[0] = &tspace[tri[0]];
-      triangles[i].tspace[1] = &tspace[tri[1]];
-      triangles[i].tspace[2] = &tspace[tri[2]];
+      triangles[i].tspace[0] = tspace[tri[0]];
+      triangles[i].tspace[1] = tspace[tri[1]];
+      triangles[i].tspace[2] = tspace[tri[2]];
     }
 
     if (!corner_normals.is_empty()) {
@@ -546,7 +546,7 @@ bool RE_bake_pixels_populate_from_objects(Mesh *me_low,
                                           BakePixel pixel_array_from[],
                                           BakePixel pixel_array_to[],
                                           BakeHighPolyData highpoly[],
-                                          const int tot_highpoly,
+                                          const int highpoly_num,
                                           const size_t pixels_num,
                                           const bool is_custom_cage,
                                           const float cage_extrusion,
@@ -555,9 +555,7 @@ bool RE_bake_pixels_populate_from_objects(Mesh *me_low,
                                           const float mat_cage[4][4],
                                           Mesh *me_cage)
 {
-  size_t i;
-  int primitive_id;
-  float u, v;
+  using namespace blender;
   float imat_low[4][4];
   bool is_cage = me_cage != nullptr;
   bool result = true;
@@ -571,12 +569,11 @@ bool RE_bake_pixels_populate_from_objects(Mesh *me_low,
   TriTessFace **tris_high;
 
   /* Assume all low-poly tessfaces can be quads. */
-  tris_high = MEM_cnew_array<TriTessFace *>(tot_highpoly, "MVerts Highpoly Mesh Array");
+  tris_high = MEM_calloc_arrayN<TriTessFace *>(highpoly_num, "MVerts Highpoly Mesh Array");
 
   /* Assume all high-poly tessfaces are triangles. */
-  me_highpoly = static_cast<Mesh **>(
-      MEM_mallocN(sizeof(Mesh *) * tot_highpoly, "Highpoly Derived Meshes"));
-  blender::Array<BVHTreeFromMesh> treeData(tot_highpoly);
+  me_highpoly = MEM_malloc_arrayN<Mesh *>(highpoly_num, "Highpoly Derived Meshes");
+  Array<blender::bke::BVHTreeFromMesh> treeData(highpoly_num);
 
   if (!is_cage) {
     me_eval_low = BKE_mesh_copy_for_eval(*me_low);
@@ -592,15 +589,13 @@ bool RE_bake_pixels_populate_from_objects(Mesh *me_low,
 
   invert_m4_m4(imat_low, mat_low);
 
-  for (i = 0; i < tot_highpoly; i++) {
+  for (int i = 0; i < highpoly_num; i++) {
     tris_high[i] = mesh_calc_tri_tessface(highpoly[i].mesh, false, nullptr);
 
     me_highpoly[i] = highpoly[i].mesh;
 
     if (BKE_mesh_runtime_corner_tris_len(me_highpoly[i]) != 0) {
-      /* Create a BVH-tree for each `highpoly` object. */
-      BKE_bvhtree_from_mesh_get(&treeData[i], me_highpoly[i], BVHTREE_FROM_CORNER_TRIS, 2);
-
+      treeData[i] = me_highpoly[i]->bvh_corner_tris();
       if (treeData[i].tree == nullptr) {
         printf("Baking: out of memory while creating BHVTree for object \"%s\"\n",
                highpoly[i].ob->id.name + 2);
@@ -610,62 +605,63 @@ bool RE_bake_pixels_populate_from_objects(Mesh *me_low,
     }
   }
 
-  for (i = 0; i < pixels_num; i++) {
-    float co[3];
-    float dir[3];
-    TriTessFace *tri_low;
+  threading::parallel_for(IndexRange(pixels_num), 1024, [&](const IndexRange range) {
+    Array<BVHTreeRayHit> hits(highpoly_num);
+    for (const IndexRange::Iterator::value_type i : range) {
+      int primitive_id = pixel_array_from[i].primitive_id;
 
-    primitive_id = pixel_array_from[i].primitive_id;
+      if (primitive_id == -1) {
+        pixel_array_to[i].primitive_id = -1;
+        continue;
+      }
 
-    if (primitive_id == -1) {
-      pixel_array_to[i].primitive_id = -1;
-      continue;
-    }
+      const float u = pixel_array_from[i].uv[0];
+      const float v = pixel_array_from[i].uv[1];
+      float co[3];
+      float dir[3];
+      TriTessFace *tri_low;
 
-    u = pixel_array_from[i].uv[0];
-    v = pixel_array_from[i].uv[1];
+      /* calculate from low poly mesh cage */
+      if (is_custom_cage) {
+        calc_point_from_barycentric_cage(
+            tris_low, tris_cage, mat_low, mat_cage, primitive_id, u, v, co, dir);
+        tri_low = &tris_cage[primitive_id];
+      }
+      else if (is_cage) {
+        calc_point_from_barycentric_extrusion(
+            tris_cage, mat_low, imat_low, primitive_id, u, v, cage_extrusion, co, dir, true);
+        tri_low = &tris_cage[primitive_id];
+      }
+      else {
+        calc_point_from_barycentric_extrusion(
+            tris_low, mat_low, imat_low, primitive_id, u, v, cage_extrusion, co, dir, false);
+        tri_low = &tris_low[primitive_id];
+      }
 
-    /* calculate from low poly mesh cage */
-    if (is_custom_cage) {
-      calc_point_from_barycentric_cage(
-          tris_low, tris_cage, mat_low, mat_cage, primitive_id, u, v, co, dir);
-      tri_low = &tris_cage[primitive_id];
+      /* cast ray */
+      if (!cast_ray_highpoly(treeData.data(),
+                             tri_low,
+                             tris_high,
+                             pixel_array_from,
+                             pixel_array_to,
+                             mat_low,
+                             highpoly,
+                             highpoly_num,
+                             hits,
+                             co,
+                             dir,
+                             i,
+                             max_ray_distance))
+      {
+        /* if it fails mask out the original pixel array */
+        pixel_array_from[i].primitive_id = -1;
+      }
     }
-    else if (is_cage) {
-      calc_point_from_barycentric_extrusion(
-          tris_cage, mat_low, imat_low, primitive_id, u, v, cage_extrusion, co, dir, true);
-      tri_low = &tris_cage[primitive_id];
-    }
-    else {
-      calc_point_from_barycentric_extrusion(
-          tris_low, mat_low, imat_low, primitive_id, u, v, cage_extrusion, co, dir, false);
-      tri_low = &tris_low[primitive_id];
-    }
-
-    /* cast ray */
-    if (!cast_ray_highpoly(treeData.data(),
-                           tri_low,
-                           tris_high,
-                           pixel_array_from,
-                           pixel_array_to,
-                           mat_low,
-                           highpoly,
-                           co,
-                           dir,
-                           i,
-                           tot_highpoly,
-                           max_ray_distance))
-    {
-      /* if it fails mask out the original pixel array */
-      pixel_array_from[i].primitive_id = -1;
-    }
-  }
+  });
 
   /* garbage collection */
 cleanup:
-  for (i = 0; i < tot_highpoly; i++) {
-    free_bvhtree_from_mesh(&treeData[i]);
-
+  for (int i = 0; i < highpoly_num; i++) {
     if (tris_high[i]) {
       MEM_freeN(tris_high[i]);
     }
@@ -716,27 +712,27 @@ void RE_bake_pixels_populate(Mesh *mesh,
                              BakePixel pixel_array[],
                              const size_t pixels_num,
                              const BakeTargets *targets,
-                             const char *uv_layer)
+                             const blender::StringRef uv_layer)
 {
   using namespace blender;
-  const float(*mloopuv)[2];
-  if ((uv_layer == nullptr) || (uv_layer[0] == '\0')) {
-    mloopuv = static_cast<const float(*)[2]>(
-        CustomData_get_layer(&mesh->corner_data, CD_PROP_FLOAT2));
+  const bke::AttributeAccessor attributes = mesh->attributes();
+  VArraySpan<float2> uv_map;
+  if (uv_layer.is_empty()) {
+    const StringRef active_layer_name = CustomData_get_active_layer_name(&mesh->corner_data,
+                                                                         CD_PROP_FLOAT2);
+    uv_map = *attributes.lookup<float2>(active_layer_name, bke::AttrDomain::Corner);
   }
   else {
-    int uv_id = CustomData_get_named_layer(&mesh->corner_data, CD_PROP_FLOAT2, uv_layer);
-    mloopuv = static_cast<const float(*)[2]>(
-        CustomData_get_layer_n(&mesh->corner_data, CD_PROP_FLOAT2, uv_id));
+    uv_map = *attributes.lookup<float2>(uv_layer, bke::AttrDomain::Corner);
   }
 
-  if (mloopuv == nullptr) {
+  if (uv_map.is_empty()) {
     return;
   }
 
   BakeDataZSpan bd;
   bd.pixel_array = pixel_array;
-  bd.zspan = MEM_cnew_array<ZSpan>(targets->images_num, "bake zspan");
+  bd.zspan = MEM_calloc_arrayN<ZSpan>(targets->images_num, "bake zspan");
 
   /* initialize all pixel arrays so we know which ones are 'blank' */
   for (int i = 0; i < pixels_num; i++) {
@@ -749,14 +745,12 @@ void RE_bake_pixels_populate(Mesh *mesh,
   }
 
   const int tottri = poly_to_tri_count(mesh->faces_num, mesh->corners_num);
-  blender::int3 *corner_tris = static_cast<blender::int3 *>(
-      MEM_mallocN(sizeof(*corner_tris) * tottri, __func__));
+  blender::int3 *corner_tris = MEM_malloc_arrayN<blender::int3>(size_t(tottri), __func__);
 
   blender::bke::mesh::corner_tris_calc(
       mesh->vert_positions(), mesh->faces(), mesh->corner_verts(), {corner_tris, tottri});
 
   const blender::Span<int> tri_faces = mesh->corner_tri_faces();
-  const bke::AttributeAccessor attributes = mesh->attributes();
   const VArraySpan material_indices = *attributes.lookup<int>("material_index",
                                                               bke::AttrDomain::Face);
 
@@ -782,7 +776,7 @@ void RE_bake_pixels_populate(Mesh *mesh,
       /* Compute triangle vertex UV coordinates. */
       float vec[3][2];
       for (int a = 0; a < 3; a++) {
-        const float *uv = mloopuv[tri[a]];
+        const float2 &uv = uv_map[tri[a]];
 
         /* NOTE(@ideasman42): workaround for pixel aligned UVs which are common and can screw
          * up our intersection tests where a pixel gets in between 2 faces or the middle of a quad,
@@ -907,7 +901,7 @@ void RE_bake_normal_world_to_tangent(const BakePixel pixel_array[],
     is_smooth = triangle->is_smooth;
 
     for (j = 0; j < 3; j++) {
-      const TSpace *ts;
+      const blender::float4 *ts;
 
       if (is_smooth) {
         if (triangle->loop_normal[j]) {
@@ -918,9 +912,9 @@ void RE_bake_normal_world_to_tangent(const BakePixel pixel_array[],
         }
       }
 
-      ts = triangle->tspace[j];
-      copy_v3_v3(tangents[j], ts->tangent);
-      signs[j] = ts->sign;
+      ts = &triangle->tspace[j];
+      copy_v3_v3(tangents[j], ts->xyz());
+      signs[j] = ts->w;
     }
 
     u = pixel_array[i].uv[0];
@@ -1063,7 +1057,7 @@ int RE_pass_depth(const eScenePassType pass_type)
   return 4;
 
   switch (pass_type) {
-    case SCE_PASS_Z:
+    case SCE_PASS_DEPTH:
     case SCE_PASS_AO:
     case SCE_PASS_MIST: {
       return 1;

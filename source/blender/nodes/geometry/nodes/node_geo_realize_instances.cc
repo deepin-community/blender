@@ -8,13 +8,17 @@
 
 #include "GEO_realize_instances.hh"
 
-#include "UI_resources.hh"
+#include "FN_multi_function_builder.hh"
 
 namespace blender::nodes::node_geo_realize_instances_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Geometry>("Geometry");
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
+  b.add_input<decl::Geometry>("Geometry")
+      .description("Geometry whose instances are (partially) realized");
+  b.add_output<decl::Geometry>("Geometry").propagate_all().align_with_previous();
   b.add_input<decl::Bool>("Selection")
       .default_value(true)
       .hide_value()
@@ -28,7 +32,6 @@ static void node_declare(NodeDeclarationBuilder &b)
           "of the Depth input");
   b.add_input<decl::Int>("Depth").default_value(0).min(0).field_on_all().description(
       "Number of levels of nested instances to realize for each top-level instance");
-  b.add_output<decl::Geometry>("Geometry").propagate_all();
 }
 
 static void node_geo_exec(GeoNodeExecParams params)
@@ -49,7 +52,7 @@ static void node_geo_exec(GeoNodeExecParams params)
         return realize_all_field ? geometry::VariedDepthOptions::MAX_DEPTH : std::max(depth, 0);
       });
 
-  Field<int> depth_field_overridden(FieldOperation::Create(
+  Field<int> depth_field_overridden(FieldOperation::from(
       depth_override, {std::move(depth_field), std::move(realize_all_field)}));
 
   Field<bool> selection_field = params.extract_input<Field<bool>>("Selection");
@@ -58,7 +61,7 @@ static void node_geo_exec(GeoNodeExecParams params)
       "selection_override",
       [](int depth_override, bool selection) { return depth_override == 0 ? false : selection; });
 
-  Field<bool> selection_field_overrided(FieldOperation::Create(
+  Field<bool> selection_field_overrided(FieldOperation::from(
       selection_override, {depth_field_overridden, std::move(selection_field)}));
 
   const bke::Instances &instances = *geometry_set.get_instances();
@@ -78,20 +81,27 @@ static void node_geo_exec(GeoNodeExecParams params)
   options.realize_instance_attributes = true;
   const NodeAttributeFilter attribute_filter = params.get_attribute_filter("Geometry");
   options.attribute_filter = attribute_filter;
-  GeometrySet new_geometry_set = geometry::realize_instances(
+  geometry::RealizeInstancesResult realize_result = geometry::realize_instances(
       geometry_set, options, varied_depth_option);
-  new_geometry_set.name = geometry_set.name;
-  params.set_output("Geometry", std::move(new_geometry_set));
+  for (const StringRef error : realize_result.errors) {
+    params.error_message_add(NodeWarningType::Error, error);
+  }
+  realize_result.geometry.name = geometry_set.name;
+  params.set_output("Geometry", std::move(realize_result.geometry));
 }
 
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_REALIZE_INSTANCES, "Realize Instances", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeRealizeInstances", GEO_NODE_REALIZE_INSTANCES);
+  ntype.ui_name = "Realize Instances";
+  ntype.ui_description = "Convert instances into real geometry data";
+  ntype.enum_name_legacy = "REALIZE_INSTANCES";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

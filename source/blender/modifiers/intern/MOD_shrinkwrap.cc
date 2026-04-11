@@ -20,7 +20,7 @@
 #include "BKE_modifier.hh"
 #include "BKE_shrinkwrap.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "RNA_access.hh"
@@ -95,23 +95,16 @@ static void deform_verts(ModifierData *md,
                             mesh,
                             dvert,
                             defgrp_index,
-                            reinterpret_cast<float(*)[3]>(positions.data()),
+                            reinterpret_cast<float (*)[3]>(positions.data()),
                             positions.size());
 }
 
 static void update_depsgraph(ModifierData *md, const ModifierUpdateDepsgraphContext *ctx)
 {
   ShrinkwrapModifierData *smd = (ShrinkwrapModifierData *)md;
-  CustomData_MeshMasks mask = {0};
-
-  if (BKE_shrinkwrap_needs_normals(smd->shrinkType, smd->shrinkMode)) {
-    mask.lmask |= CD_MASK_CUSTOMLOOPNORMAL;
-  }
-
   if (smd->target != nullptr) {
     DEG_add_object_relation(ctx->node, smd->target, DEG_OB_COMP_TRANSFORM, "Shrinkwrap Modifier");
     DEG_add_object_relation(ctx->node, smd->target, DEG_OB_COMP_GEOMETRY, "Shrinkwrap Modifier");
-    DEG_add_customdata_mask(ctx->node, smd->target, &mask);
     if (smd->shrinkType == MOD_SHRINKWRAP_TARGET_PROJECT) {
       DEG_add_special_eval_flag(ctx->node, &smd->target->id, DAG_EVAL_NEED_SHRINKWRAP_BOUNDARY);
     }
@@ -121,7 +114,6 @@ static void update_depsgraph(ModifierData *md, const ModifierUpdateDepsgraphCont
         ctx->node, smd->auxTarget, DEG_OB_COMP_TRANSFORM, "Shrinkwrap Modifier");
     DEG_add_object_relation(
         ctx->node, smd->auxTarget, DEG_OB_COMP_GEOMETRY, "Shrinkwrap Modifier");
-    DEG_add_customdata_mask(ctx->node, smd->auxTarget, &mask);
     if (smd->shrinkType == MOD_SHRINKWRAP_TARGET_PROJECT) {
       DEG_add_special_eval_flag(ctx->node, &smd->auxTarget->id, DAG_EVAL_NEED_SHRINKWRAP_BOUNDARY);
     }
@@ -138,50 +130,49 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
   PointerRNA ob_ptr;
   PointerRNA *ptr = modifier_panel_get_property_pointers(panel, &ob_ptr);
 
-  uiLayoutSetPropSep(layout, true);
+  layout->use_property_split_set(true);
 
   int wrap_method = RNA_enum_get(ptr, "wrap_method");
 
-  uiItemR(layout, ptr, "wrap_method", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->prop(ptr, "wrap_method", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   if (ELEM(wrap_method,
            MOD_SHRINKWRAP_PROJECT,
            MOD_SHRINKWRAP_NEAREST_SURFACE,
            MOD_SHRINKWRAP_TARGET_PROJECT))
   {
-    uiItemR(layout, ptr, "wrap_mode", UI_ITEM_NONE, nullptr, ICON_NONE);
+    layout->prop(ptr, "wrap_mode", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 
   if (wrap_method == MOD_SHRINKWRAP_PROJECT) {
-    uiItemR(layout, ptr, "project_limit", UI_ITEM_NONE, IFACE_("Limit"), ICON_NONE);
-    uiItemR(layout, ptr, "subsurf_levels", UI_ITEM_NONE, nullptr, ICON_NONE);
+    layout->prop(ptr, "project_limit", UI_ITEM_NONE, IFACE_("Limit"), ICON_NONE);
+    layout->prop(ptr, "subsurf_levels", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-    col = uiLayoutColumn(layout, false);
-    row = uiLayoutRowWithHeading(col, true, IFACE_("Axis"));
-    uiItemR(row, ptr, "use_project_x", toggles_flag, nullptr, ICON_NONE);
-    uiItemR(row, ptr, "use_project_y", toggles_flag, nullptr, ICON_NONE);
-    uiItemR(row, ptr, "use_project_z", toggles_flag, nullptr, ICON_NONE);
+    col = &layout->column(false);
+    row = &col->row(true, IFACE_("Axis"));
+    row->prop(ptr, "use_project_x", toggles_flag, std::nullopt, ICON_NONE);
+    row->prop(ptr, "use_project_y", toggles_flag, std::nullopt, ICON_NONE);
+    row->prop(ptr, "use_project_z", toggles_flag, std::nullopt, ICON_NONE);
 
-    uiItemR(col, ptr, "use_negative_direction", UI_ITEM_NONE, nullptr, ICON_NONE);
-    uiItemR(col, ptr, "use_positive_direction", UI_ITEM_NONE, nullptr, ICON_NONE);
+    col->prop(ptr, "use_negative_direction", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+    col->prop(ptr, "use_positive_direction", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-    uiItemR(layout, ptr, "cull_face", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
-    col = uiLayoutColumn(layout, false);
-    uiLayoutSetActive(col,
-                      RNA_boolean_get(ptr, "use_negative_direction") &&
-                          RNA_enum_get(ptr, "cull_face") != 0);
-    uiItemR(col, ptr, "use_invert_cull", UI_ITEM_NONE, nullptr, ICON_NONE);
+    layout->prop(ptr, "cull_face", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
+    col = &layout->column(false);
+    col->active_set(RNA_boolean_get(ptr, "use_negative_direction") &&
+                    RNA_enum_get(ptr, "cull_face") != 0);
+    col->prop(ptr, "use_invert_cull", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 
-  uiItemR(layout, ptr, "target", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->prop(ptr, "target", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   if (wrap_method == MOD_SHRINKWRAP_PROJECT) {
-    uiItemR(layout, ptr, "auxiliary_target", UI_ITEM_NONE, nullptr, ICON_NONE);
+    layout->prop(ptr, "auxiliary_target", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
-  uiItemR(layout, ptr, "offset", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->prop(ptr, "offset", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  modifier_vgroup_ui(layout, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", nullptr);
+  modifier_vgroup_ui(layout, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", std::nullopt);
 
-  modifier_panel_end(layout, ptr);
+  modifier_error_message_draw(layout, ptr);
 }
 
 static void panel_register(ARegionType *region_type)
@@ -224,4 +215,5 @@ ModifierTypeInfo modifierType_Shrinkwrap = {
     /*blend_write*/ nullptr,
     /*blend_read*/ nullptr,
     /*foreach_cache*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
 };

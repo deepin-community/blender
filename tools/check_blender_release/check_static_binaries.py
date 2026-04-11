@@ -3,6 +3,10 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+__all__ = (
+    "main",
+)
+
 import os
 from pathlib import Path
 import re
@@ -33,7 +37,7 @@ ALLOWED_LIBS = [
     "libcrypt.so",
     "libuuid.so",
 
-    # Bundled python ncurses deps
+    # Bundled Python NCURSES dependencies.
     "libpanelw.so",
     "libncursesw.so",
     "libtinfo.so",
@@ -192,10 +196,15 @@ class UnitTesting(unittest.TestCase):
         self.assertTrue(os.path.isdir(args.directory),
                         "Given path is not a directory: {}" .
                         format(args.directory))
+        # Add sanitizer libraries if needed.
+        if args.is_sanitizer_build:
+            ALLOWED_LIBS.extend([
+                "libasan.so",
+                "libubsan.so",
+            ])
         # Add all libraries the we bundle to the allowed list
-        global ALLOWED_LIBS
-        ALLOWED_LIBS += glob.glob("*.so", root_dir=args.directory + "/lib")
-        # Add OIDN libs that do not have a .so symlink
+        ALLOWED_LIBS.extend(glob.glob("*.so", root_dir=args.directory + "/lib"))
+        # Add OIDN libs that do not have an `.so` symbolic-link.
         for oidn_lib in glob.glob("libOpenImageDenoise_*.so*", root_dir=args.directory + "/lib"):
             ALLOWED_LIBS.append(stripLibraryABI(oidn_lib))
         # Add all bundled python libs

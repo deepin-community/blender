@@ -2,15 +2,16 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_compiler_compat.h"
+#include "BLI_string_ref.hh"
 
 #include "DNA_brush_types.h"
 #include "DNA_material_types.h"
 #include "DNA_scene_types.h"
+#include "DNA_userdef_types.h"
 #include "DNA_workspace_types.h"
 
 #include "BKE_context.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_paint.hh"
 
 #include "WM_toolsystem.hh"
@@ -112,7 +113,7 @@ eV3DShadingColorType ED_paint_shading_color_override(bContext *C,
                                                      Object &ob,
                                                      eV3DShadingColorType orig_color_type)
 {
-  if (!U.experimental.use_sculpt_texture_paint) {
+  if (!USER_EXPERIMENTAL_TEST(&U, use_sculpt_texture_paint)) {
     return orig_color_type;
   }
   /* NOTE: This early exit is temporarily, until a paint mode has been added.

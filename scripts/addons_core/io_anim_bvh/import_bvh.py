@@ -7,6 +7,7 @@ from math import radians, ceil
 import bpy
 from bpy.app.translations import pgettext_tip as tip_
 from mathutils import Vector, Euler, Matrix
+from bpy_extras import anim_utils
 
 
 class BVH_Node:
@@ -322,7 +323,7 @@ def read_bvh(context, file_path, rotate_mode='XYZ', global_scale=1.0):
                     rest_tail_local += bvh_node_child.rest_head_local
 
                 bvh_node.rest_tail_world = rest_tail_world * (1.0 / len(bvh_node.children))
-                bvh_node.rest_tail_local = rest_tail_local * (1.0 / len(bvh_node.children))
+                bvh_node.rest_tail_local = bvh_node.rest_head_local + (rest_tail_local * (1.0 / len(bvh_node.children)))
 
         # Make sure tail isn't the same location as the head.
         if (bvh_node.rest_tail_local - bvh_node.rest_head_local).length <= 0.001 * global_scale:
@@ -516,9 +517,19 @@ def bvh_node_dict2armature(
 
     context.view_layer.update()
 
-    arm_ob.animation_data_create()
+    arm_ob_adt = arm_ob.animation_data_create()
     action = bpy.data.actions.new(name=bvh_name)
-    arm_ob.animation_data.action = action
+    # Always use the same name for the slot. The Armature is named after the
+    # BVH file, and so when importing multiple files to get multiple Actions
+    # for a single character, it is likely that all but one of the Armatures
+    # is going to be deleted again. It should be simple to switch between
+    # imported Actions while keeping Slot auto-assignment, which means that
+    # all Actions should use the same slot name.
+    action_slot = action.slots.new(arm_ob.id_type, "Slot")
+    channelbag = anim_utils.action_ensure_channelbag_for_slot(action, action_slot)
+
+    arm_ob_adt.action = action
+    arm_ob_adt.action_slot = action_slot
 
     # Replace the bvh_node.temp (currently an editbone)
     # With a tuple  (pose_bone, armature_bone, bone_rest_matrix, bone_rest_matrix_inv)
@@ -578,7 +589,7 @@ def bvh_node_dict2armature(
 
             # For each location x, y, z.
             for axis_i in range(3):
-                curve = action.fcurves.new(data_path=data_path, index=axis_i, action_group=bvh_node.name)
+                curve = channelbag.fcurves.new(data_path=data_path, index=axis_i, group_name=bvh_node.name)
                 keyframe_points = curve.keyframe_points
                 keyframe_points.add(num_frame)
 
@@ -622,7 +633,7 @@ def bvh_node_dict2armature(
 
             # For each euler angle x, y, z (or quaternion w, x, y, z).
             for axis_i in range(len(rotate[0])):
-                curve = action.fcurves.new(data_path=data_path, index=axis_i, action_group=bvh_node.name)
+                curve = channelbag.fcurves.new(data_path=data_path, index=axis_i, group_name=bvh_node.name)
                 keyframe_points = curve.keyframe_points
                 keyframe_points.add(num_frame)
 
@@ -632,7 +643,7 @@ def bvh_node_dict2armature(
                         rotate[frame_i][axis_i],
                     )
 
-    for cu in action.fcurves:
+    for cu in channelbag.fcurves:
         if IMPORT_LOOP:
             pass  # 2.5 doenst have cyclic now?
 

@@ -9,6 +9,7 @@ __all__ = (
     "axis_conversion",
     "axis_conversion_ensure",
     "create_derived_objects",
+    "poll_file_object_drop",
     "unpack_list",
     "unpack_face_list",
     "path_reference",
@@ -63,7 +64,7 @@ class ExportHelper:
         if not self.filepath:
             blend_filepath = context.blend_data.filepath
             if not blend_filepath:
-                blend_filepath = data_("untitled")
+                blend_filepath = data_("Untitled")
             else:
                 blend_filepath = os.path.splitext(blend_filepath)[0]
 
@@ -297,8 +298,9 @@ _axis_convert_num = {'X': 0, 'Y': 1, 'Z': 2, '-X': 3, '-Y': 4, '-Z': 5}
 
 def axis_conversion(from_forward='Y', from_up='Z', to_forward='Y', to_up='Z'):
     """
-    Each argument us an axis in ['X', 'Y', 'Z', '-X', '-Y', '-Z']
+    Each argument is an axis in ['X', 'Y', 'Z', '-X', '-Y', '-Z']
     where the first 2 are a source and the second 2 are the target.
+    :rtype: :class:`mathutils.Matrix`
     """
     from mathutils import Matrix
     from functools import reduce
@@ -308,14 +310,17 @@ def axis_conversion(from_forward='Y', from_up='Z', to_forward='Y', to_up='Z'):
 
     if from_forward[-1] == from_up[-1] or to_forward[-1] == to_up[-1]:
         raise Exception("Invalid axis arguments passed, "
-                        "can't use up/forward on the same axis")
+                        "cannot use up/forward on the same axis")
 
-    value = reduce(int.__or__, (_axis_convert_num[a] << (i * 3)
-                                for i, a in enumerate((from_forward,
-                                                       from_up,
-                                                       to_forward,
-                                                       to_up,
-                                                       ))))
+    value = reduce(
+        int.__or__,
+        (_axis_convert_num[a] << (i * 3) for i, a in enumerate((
+            from_forward,
+            from_up,
+            to_forward,
+            to_up,
+        )))
+    )
 
     for i, axis_lut in enumerate(_axis_convert_lut):
         if value in axis_lut:
@@ -436,14 +441,14 @@ path_reference_mode = EnumProperty(
     items=(
         ('AUTO', "Auto", "Use relative paths with subdirectories only"),
         ('ABSOLUTE', "Absolute", "Always write absolute paths"),
-        ('RELATIVE', "Relative", "Always write relative paths "
-         "(where possible)"),
+        ('RELATIVE', "Relative", "Write relative paths where possible"),
         ('MATCH', "Match", "Match absolute/relative "
          "setting with input path"),
-        ('STRIP', "Strip Path", "Filename only"),
+        ('STRIP', "Strip", "Filename only"),
         ('COPY', "Copy", "Copy the file to the destination path "
          "(or subdirectory)"),
     ),
+    translation_context=i18n_contexts.editor_filebrowser,
     default='AUTO',
 )
 
@@ -548,13 +553,13 @@ def path_reference_copy(copy_set, report=print):
 
             try:
                 os.makedirs(dir_to, exist_ok=True)
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
 
             try:
                 shutil.copy(file_src, file_dst)
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
 

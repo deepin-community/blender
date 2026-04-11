@@ -6,8 +6,6 @@
 
 #include "scene/pass.h"
 #include "util/half.h"
-#include "util/string.h"
-#include "util/types.h"
 
 CCL_NAMESPACE_BEGIN
 
@@ -46,12 +44,11 @@ class PassAccessor {
   class Destination {
    public:
     Destination() = default;
-    Destination(float *pixels, int num_components);
-    Destination(const PassType pass_type, half4 *pixels);
+    Destination(float *pixels, const int num_components);
 
     /* Destination will be initialized with the number of components which is native for the given
      * pass type. */
-    explicit Destination(const PassType pass_type);
+    explicit Destination(const PassType pass_type, const PassMode pass_mode);
 
     /* CPU-side pointers. only usable by the `PassAccessorCPU`. */
     float *pixels = nullptr;
@@ -88,7 +85,7 @@ class PassAccessor {
   class Source {
    public:
     Source() = default;
-    Source(const float *pixels, int num_components);
+    Source(const float *pixels, const int num_components);
 
     /* CPU-side pointers. only usable by the `PassAccessorCPU`. */
     const float *pixels = nullptr;
@@ -99,7 +96,9 @@ class PassAccessor {
     int offset = 0;
   };
 
-  PassAccessor(const PassAccessInfo &pass_access_info, float exposure, int num_samples);
+  PassAccessor(const PassAccessInfo &pass_access_info,
+               const float exposure,
+               const int num_samples);
 
   virtual ~PassAccessor() = default;
 
@@ -132,12 +131,14 @@ class PassAccessor {
   /* Float (scalar) passes. */
   DECLARE_PASS_ACCESSOR(depth)
   DECLARE_PASS_ACCESSOR(mist)
+  DECLARE_PASS_ACCESSOR(volume_majorant)
   DECLARE_PASS_ACCESSOR(sample_count)
   DECLARE_PASS_ACCESSOR(float)
 
   /* Float3 passes. */
   DECLARE_PASS_ACCESSOR(light_path)
   DECLARE_PASS_ACCESSOR(shadow_catcher)
+  DECLARE_PASS_ACCESSOR(rgbe)
   DECLARE_PASS_ACCESSOR(float3)
 
   /* Float4 passes. */

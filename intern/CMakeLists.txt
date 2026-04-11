@@ -9,11 +9,12 @@ add_subdirectory(ghost)
 add_subdirectory(guardedalloc)
 add_subdirectory(libmv)
 add_subdirectory(memutil)
-add_subdirectory(opencolorio)
 add_subdirectory(opensubdiv)
 add_subdirectory(mikktspace)
 add_subdirectory(eigen)
 add_subdirectory(sky)
+
+add_subdirectory(openvdb)
 
 if(WITH_AUDASPACE)
   add_subdirectory(audaspace)
@@ -35,17 +36,17 @@ if(WITH_CYCLES)
   add_subdirectory(cycles)
 endif()
 
-if(WITH_INTERNATIONAL)
-  add_subdirectory(locale)
-endif()
-
 if(WITH_BULLET)
   add_subdirectory(rigidbody)
 endif()
 
-# only windows needs utf16 converter
+
 if(WIN32)
+  # Only windows needs utf16 converter.
   add_subdirectory(utfconv)
+
+  # Only used for Windows for now.
+  add_subdirectory(uriconvert)
 endif()
 
 if(WITH_MOD_FLUID)
@@ -56,16 +57,8 @@ if(WITH_UV_SLIM)
   add_subdirectory(slim)
 endif()
 
-if(WITH_OPENVDB)
-  add_subdirectory(openvdb)
-endif()
-
 if(WITH_QUADRIFLOW)
   add_subdirectory(quadriflow)
-endif()
-
-if(WITH_CODEC_FFMPEG)
-  add_subdirectory(ffmpeg)
 endif()
 
 if(UNIX AND NOT APPLE)

@@ -7,7 +7,6 @@
  */
 
 #include <algorithm>
-#include <cstdio>
 #include <cstdlib>
 
 #include "MEM_guardedalloc.h"
@@ -19,6 +18,7 @@
 #include "BLI_hash_md5.hh"
 #include "BLI_path_utils.hh"
 #include "BLI_string.h"
+#include "BLI_string_utf8.h"
 #include "BLI_string_utils.hh"
 #include "BLI_system.h"
 #include "BLI_threads.h"
@@ -31,6 +31,8 @@
 #include "IMB_imbuf_types.hh"
 #include "IMB_metadata.hh"
 #include "IMB_thumbs.hh"
+
+#include "MOV_read.hh"
 
 #include <cctype>
 #include <cstring>
@@ -81,9 +83,9 @@ static bool get_thumb_dir(char *dir, ThumbSize size)
 #else
 #  if defined(USE_FREEDESKTOP)
   const char *home_cache = BLI_getenv("XDG_CACHE_HOME");
-  const char *home = home_cache ? home_cache : BLI_getenv("HOME");
+  const char *home = home_cache ? home_cache : BLI_dir_home();
 #  else
-  const char *home = BLI_getenv("HOME");
+  const char *home = BLI_dir_home();
 #  endif
   if (!home) {
     return false;
@@ -165,7 +167,7 @@ static void escape_uri_string(const char *string,
                               const int escaped_string_size,
                               const eUnsafeCharacterSet mask)
 {
-#define ACCEPTABLE(a) ((a) >= 32 && (a) < 128 && (acceptable[(a)-32] & mask))
+#define ACCEPTABLE(a) ((a) >= 32 && (a) < 128 && (acceptable[(a) - 32] & mask))
 
   BLI_assert(escaped_string_size > 0);
   /* Remove space for \0. */
@@ -212,7 +214,7 @@ static bool thumbhash_from_path(const char * /*path*/, ThumbSource source, char 
   }
 }
 
-static bool uri_from_filename(const char *path, char *uri)
+static bool uri_from_filepath(const char *path, char *uri)
 {
   char orig_uri[URI_MAX];
 
@@ -353,7 +355,7 @@ static ImBuf *thumb_create_ex(const char *file_path,
       return nullptr;
     }
     if (size == THB_FAIL) {
-      img = IMB_allocImBuf(1, 1, 32, IB_rect | IB_metadata);
+      img = IMB_allocImBuf(1, 1, 32, IB_byte_data | IB_metadata);
       if (!img) {
         return nullptr;
       }
@@ -386,26 +388,29 @@ static ImBuf *thumb_create_ex(const char *file_path,
 
         if (img != nullptr) {
           if (BLI_stat(file_path, &info) != -1) {
-            SNPRINTF(mtime, "%ld", (long int)info.st_mtime);
+            SNPRINTF_UTF8(mtime, "%ld", (long int)info.st_mtime);
           }
         }
       }
       else if (THB_SOURCE_MOVIE == source) {
-        ImBufAnim *anim = nullptr;
-        anim = IMB_open_anim(file_path, IB_rect | IB_metadata, 0, nullptr);
+        MovieReader *anim = nullptr;
+        /* Image buffer is converted from float to byte and only the latter one is used, and the
+         * conversion process is aware of the float colorspace. So it is possible to save some
+         * compute time by keeping the original colorspace for movies. */
+        anim = MOV_open_file(file_path, IB_byte_data | IB_metadata, 0, true, nullptr);
         if (anim != nullptr) {
-          img = IMB_anim_absolute(anim, 0, IMB_TC_NONE, IMB_PROXY_NONE);
+          img = MOV_decode_frame(anim, 0, IMB_TC_NONE, IMB_PROXY_NONE);
           if (img == nullptr) {
             // printf("not an anim; %s\n", file_path);
           }
           else {
             IMB_freeImBuf(img);
-            img = IMB_anim_previewframe(anim);
+            img = MOV_decode_preview_frame(anim);
           }
-          IMB_free_anim(anim);
+          MOV_close(anim);
         }
         if (BLI_stat(file_path, &info) != -1) {
-          SNPRINTF(mtime, "%ld", (long int)info.st_mtime);
+          SNPRINTF_UTF8(mtime, "%ld", (long int)info.st_mtime);
         }
       }
       if (!img) {
@@ -420,14 +425,14 @@ static ImBuf *thumb_create_ex(const char *file_path,
         /* Save some time by only scaling byte buffer. */
         if (img->float_buffer.data) {
           if (img->byte_buffer.data == nullptr) {
-            IMB_rect_from_float(img);
+            IMB_byte_from_float(img);
           }
-          imb_freerectfloatImBuf(img);
+          IMB_free_float_pixels(img);
         }
         IMB_scale(img, ex, ey, IMBScaleFilter::Box, false);
       }
     }
-    SNPRINTF(desc, "Thumbnail for %s", uri);
+    SNPRINTF_UTF8(desc, "Thumbnail for %s", uri);
     IMB_metadata_ensure(&img->metadata);
     IMB_metadata_set_field(img->metadata, "Software", "Blender");
     IMB_metadata_set_field(img->metadata, "Thumb::URI", uri);
@@ -440,10 +445,10 @@ static ImBuf *thumb_create_ex(const char *file_path,
     img->planes = 32;
 
     /* If we generated from a 16bit PNG e.g., we have a float rect, not a byte one - fix this. */
-    IMB_rect_from_float(img);
-    imb_freerectfloatImBuf(img);
+    IMB_byte_from_float(img);
+    IMB_free_float_pixels(img);
 
-    if (IMB_saveiff(img, temp, IB_rect | IB_metadata)) {
+    if (IMB_save_image(img, temp, IB_byte_data | IB_metadata)) {
 #ifndef WIN32
       chmod(temp, S_IRUSR | S_IWUSR);
 #endif
@@ -487,7 +492,7 @@ ImBuf *IMB_thumb_create(const char *filepath, ThumbSize size, ThumbSource source
   char uri[URI_MAX] = "";
   char thumb_name[40];
 
-  if (!uri_from_filename(filepath, uri)) {
+  if (!uri_from_filepath(filepath, uri)) {
     return nullptr;
   }
   thumbname_from_uri(uri, thumb_name, sizeof(thumb_name));
@@ -502,11 +507,11 @@ ImBuf *IMB_thumb_read(const char *file_or_lib_path, ThumbSize size)
   char uri[URI_MAX];
   ImBuf *img = nullptr;
 
-  if (!uri_from_filename(file_or_lib_path, uri)) {
+  if (!uri_from_filepath(file_or_lib_path, uri)) {
     return nullptr;
   }
   if (thumbpath_from_uri(uri, thumb, sizeof(thumb), size)) {
-    img = IMB_loadiffname(thumb, IB_rect | IB_metadata, nullptr);
+    img = IMB_load_image_from_filepath(thumb, IB_byte_data | IB_metadata);
   }
 
   return img;
@@ -517,7 +522,7 @@ void IMB_thumb_delete(const char *file_or_lib_path, ThumbSize size)
   char thumb[FILE_MAX];
   char uri[URI_MAX];
 
-  if (!uri_from_filename(file_or_lib_path, uri)) {
+  if (!uri_from_filepath(file_or_lib_path, uri)) {
     return;
   }
   if (thumbpath_from_uri(uri, thumb, sizeof(thumb), size)) {
@@ -555,7 +560,7 @@ ImBuf *IMB_thumb_manage(const char *file_or_lib_path, ThumbSize size, ThumbSourc
     return nullptr;
   }
   char uri[URI_MAX];
-  if (!uri_from_filename(file_or_lib_path, uri)) {
+  if (!uri_from_filepath(file_or_lib_path, uri)) {
     return nullptr;
   }
 
@@ -564,7 +569,7 @@ ImBuf *IMB_thumb_manage(const char *file_or_lib_path, ThumbSize size, ThumbSourc
   if (file_attributes & FILE_ATTR_OFFLINE) {
     char thumb_path[FILE_MAX];
     if (thumbpath_from_uri(uri, thumb_path, sizeof(thumb_path), size)) {
-      return IMB_loadiffname(thumb_path, IB_rect | IB_metadata, nullptr);
+      return IMB_load_image_from_filepath(thumb_path, IB_byte_data | IB_metadata);
     }
     return nullptr;
   }
@@ -591,10 +596,10 @@ ImBuf *IMB_thumb_manage(const char *file_or_lib_path, ThumbSize size, ThumbSourc
     /* The requested path points to a generated thumbnail already (path into the thumbnail cache
      * directory). Attempt to load that, there's nothing we can recreate. */
     if (BLI_path_ncmp(file_or_lib_path, thumb_path, sizeof(thumb_path)) == 0) {
-      img = IMB_loadiffname(file_or_lib_path, IB_rect, nullptr);
+      img = IMB_load_image_from_filepath(file_or_lib_path, IB_byte_data);
     }
     else {
-      img = IMB_loadiffname(thumb_path, IB_rect | IB_metadata, nullptr);
+      img = IMB_load_image_from_filepath(thumb_path, IB_byte_data | IB_metadata);
       if (img) {
         bool regenerate = false;
 
@@ -649,8 +654,8 @@ ImBuf *IMB_thumb_manage(const char *file_or_lib_path, ThumbSize size, ThumbSourc
    * However, in some cases we may end loading 16bits PNGs, which generated float buffers.
    * This should be taken care of in generation step, but add also a safeguard here! */
   if (img) {
-    IMB_rect_from_float(img);
-    imb_freerectfloatImBuf(img);
+    IMB_byte_from_float(img);
+    IMB_free_float_pixels(img);
   }
 
   return img;

@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bke
+ */
+
 #pragma once
 
 #include "BLI_memory_counter_fwd.hh"
@@ -97,7 +101,7 @@ class VolumeGridBakeItem : public BakeItem {
   std::unique_ptr<GVolumeGrid> grid;
 
   VolumeGridBakeItem(std::unique_ptr<GVolumeGrid> grid);
-  ~VolumeGridBakeItem();
+  ~VolumeGridBakeItem() override;
 
   void count_memory(MemoryCounter &memory) const override;
 };
@@ -111,7 +115,7 @@ class PrimitiveBakeItem : public BakeItem {
 
  public:
   PrimitiveBakeItem(const CPPType &type, const void *value);
-  ~PrimitiveBakeItem();
+  ~PrimitiveBakeItem() override;
 
   const void *value() const
   {
@@ -137,6 +141,30 @@ class StringBakeItem : public BakeItem {
   }
 
   void count_memory(MemoryCounter &memory) const override;
+};
+
+/**
+ * \note It's not possible to use #PrimitiveBakeItem for bundles in general, because the items in
+ * the bundle also have to be converted to their bakeable form. This is especially important when
+ * serializing the bake.
+ */
+class BundleBakeItem : public BakeItem {
+ public:
+  struct SocketValue {
+    std::string socket_idname;
+    std::unique_ptr<BakeItem> value;
+  };
+
+  struct InternalValue {
+    ImplicitSharingPtr<> value;
+  };
+
+  struct Item {
+    std::string key;
+    std::variant<SocketValue, InternalValue> value;
+  };
+
+  Vector<Item> items;
 };
 
 }  // namespace blender::bke::bake

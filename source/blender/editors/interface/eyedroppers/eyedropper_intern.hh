@@ -10,14 +10,18 @@
 
 #pragma once
 
-/* `interface_eyedropper.cc` */
+struct ScrArea;
+struct bContext;
+struct uiBut;
+struct wmEvent;
+struct wmWindow;
 
-void eyedropper_draw_cursor_text_window(const wmWindow *window, const char *name);
+/* `interface_eyedropper.cc` */
 void eyedropper_draw_cursor_text_region(const int xy[2], const char *name);
 /**
  * Utility to retrieve a button representing a RNA property that is currently under the cursor.
  *
- * This is to be used by any eyedroppers which fetch properties (e.g. UI_OT_eyedropper_driver).
+ * This is to be used by any eyedroppers which fetch properties (e.g. #UI_OT_eyedropper_driver).
  * Especially during modal operations (e.g. as with the eyedroppers), context cannot be relied
  * upon to provide this information, as it is not updated until the operator finishes.
  *
@@ -42,7 +46,7 @@ void eyedropper_win_area_find(const bContext *C,
  * \note Exposed by 'eyedropper_intern.hh' for use with color band picking.
  */
 struct Eyedropper;
-void eyedropper_color_sample_fl(bContext *C,
+bool eyedropper_color_sample_fl(bContext *C,
                                 struct Eyedropper *eye,
                                 const int event_xy[2],
                                 float r_col[3]);

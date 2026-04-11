@@ -10,7 +10,6 @@
 
 #include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
-#include "BLI_sys_types.h"
 
 struct Mesh;
 
@@ -18,13 +17,15 @@ namespace blender::bke::subdiv {
 
 struct Subdiv;
 
-/* Special version of subdivision surface which calculates final positions for coarse vertices.
+/**
+ * Special version of subdivision surface which calculates final positions for coarse vertices.
  * Effectively is pushing the coarse positions to the limit surface.
  *
  * One of the usage examples is calculation of crazy space of subdivision modifier, allowing to
  * paint on a deformed mesh with sub-surf on it.
  *
- * vertex_cos are supposed to hold coordinates of the coarse mesh. */
+ * vertex_cos are supposed to hold coordinates of the coarse mesh.
+ */
 void deform_coarse_vertices(Subdiv *subdiv,
                             const Mesh *coarse_mesh,
                             MutableSpan<float3> vert_positions);

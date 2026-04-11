@@ -20,8 +20,6 @@
 
 #include "../mathutils/mathutils.hh"
 
-#include "../generic/py_capi_utils.hh"
-
 #define USE_GPU_PY_MATRIX_API
 #include "GPU_matrix.hh"
 #undef USE_GPU_PY_MATRIX_API
@@ -170,9 +168,14 @@ enum {
 static PyObject *pygpu_matrix_stack_context_enter(BPyGPU_MatrixStackContext *self);
 static PyObject *pygpu_matrix_stack_context_exit(BPyGPU_MatrixStackContext *self, PyObject *args);
 
-#if (defined(__GNUC__) && !defined(__clang__))
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wcast-function-type"
+#ifdef __GNUC__
+#  ifdef __clang__
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wcast-function-type"
+#  else
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wcast-function-type"
+#  endif
 #endif
 
 static PyMethodDef pygpu_matrix_stack_context__tp_methods[] = {
@@ -181,8 +184,12 @@ static PyMethodDef pygpu_matrix_stack_context__tp_methods[] = {
     {nullptr},
 };
 
-#if (defined(__GNUC__) && !defined(__clang__))
-#  pragma GCC diagnostic pop
+#ifdef __GNUC__
+#  ifdef __clang__
+#    pragma clang diagnostic pop
+#  else
+#    pragma GCC diagnostic pop
+#  endif
 #endif
 
 static PyTypeObject PyGPUMatrixStackContext_Type = {
@@ -581,9 +588,14 @@ static PyObject *pygpu_matrix_get_normal_matrix(PyObject * /*self*/)
 /** \name Module
  * \{ */
 
-#if (defined(__GNUC__) && !defined(__clang__))
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wcast-function-type"
+#ifdef __GNUC__
+#  ifdef __clang__
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wcast-function-type"
+#  else
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wcast-function-type"
+#  endif
 #endif
 
 static PyMethodDef pygpu_matrix__tp_methods[] = {
@@ -655,8 +667,12 @@ static PyMethodDef pygpu_matrix__tp_methods[] = {
     {nullptr, nullptr, 0, nullptr},
 };
 
-#if (defined(__GNUC__) && !defined(__clang__))
-#  pragma GCC diagnostic pop
+#ifdef __GNUC__
+#  ifdef __clang__
+#    pragma clang diagnostic pop
+#  else
+#    pragma GCC diagnostic pop
+#  endif
 #endif
 
 PyDoc_STRVAR(

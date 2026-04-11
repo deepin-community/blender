@@ -7,8 +7,11 @@ from bpy.types import (
     Menu,
 )
 
-from bpy.app.translations import pgettext_tip as tip_
-from bpy.app.translations import pgettext_iface as iface_
+from bpy.app.translations import (
+    pgettext_iface as iface_,
+    pgettext_tip as tip_,
+    contexts as i18n_contexts,
+)
 
 __all__ = (
     "ToolDef",
@@ -43,7 +46,7 @@ def _keymap_fn_from_seq(keymap_data):
 
 
 def _item_is_fn(item):
-    return (not (type(item) is ToolDef) and callable(item))
+    return ((type(item) is not ToolDef) and callable(item))
 
 
 from collections import namedtuple
@@ -813,7 +816,11 @@ class ToolSelectPanelHelper:
         # NOTE: we could show `item.text` here but it makes the layout jitter when switching tools.
         # Add some spacing since the icon is currently assuming regular small icon size.
         if show_tool_icon_always:
-            layout.label(text="    " + iface_(item.label, "Operator"), icon_value=icon_value)
+            layout.label(
+                text="    " + iface_(item.label, i18n_contexts.operator_default),
+                icon_value=icon_value,
+                translate=False,
+            )
             layout.separator()
         else:
             if not context.space_data.show_region_toolbar:
@@ -836,9 +843,13 @@ class ToolSelectPanelHelper:
             else:
                 label = "Active Tool"
 
-            row = layout.row(heading="Drag")
+            row = layout.row(heading="Drag", heading_ctxt=i18n_contexts.editor_view3d)
             row.context_pointer_set("tool", tool)
-            row.popover(panel="TOPBAR_PT_tool_fallback", text=iface_(label, "Operator"))
+            row.popover(
+                panel="TOPBAR_PT_tool_fallback",
+                text=iface_(label, i18n_contexts.operator_default),
+                translate=False,
+            )
 
         return tool
 
@@ -1062,14 +1073,19 @@ def _activate_by_item(context, space_type, item, index, *, as_fallback=False):
     WindowManager = bpy.types.WindowManager
 
     handle_map = _activate_by_item._cursor_draw_handle
-    handle = handle_map.pop(space_type, None)
+    # view_type used when in VSE, check if view_type exists because not every space_data has it.
+    view_type = getattr(context.space_data, "view_type", None)
+    handle = handle_map.pop((space_type, view_type), None)
     if handle is not None:
         WindowManager.draw_cursor_remove(handle)
     if item.draw_cursor is not None:
         def handle_fn(context, item, tool, xy):
             item.draw_cursor(context, tool, xy)
-        handle = WindowManager.draw_cursor_add(handle_fn, (context, item, tool), space_type, 'WINDOW')
-        handle_map[space_type] = handle
+        if view_type == 'PREVIEW':
+            handle = WindowManager.draw_cursor_add(handle_fn, (context, item, tool), space_type, 'PREVIEW')
+        else:
+            handle = WindowManager.draw_cursor_add(handle_fn, (context, item, tool), space_type, 'WINDOW')
+        handle_map[(space_type, view_type)] = handle
 
 
 _activate_by_item._cursor_draw_handle = {}
@@ -1154,6 +1170,8 @@ def description_from_id(context, space_type, idname, *, use_operator=True):
             return tip_(_bpy.ops.get_rna_type(operator).description)
     return ""
 
+# NOTE: used by tool-tips in C++ (not called from Python).
+
 
 def item_from_id(context, space_type, idname):
     # Used directly for tooltips.
@@ -1223,7 +1241,7 @@ def keymap_from_id(context, space_type, idname):
 def _keymap_from_item(context, item):
     if item.keymap is not None:
         wm = context.window_manager
-        keyconf = wm.keyconfigs.active
+        keyconf = wm.keyconfigs.user
         return keyconf.keymaps.get(item.keymap[0])
     return None
 

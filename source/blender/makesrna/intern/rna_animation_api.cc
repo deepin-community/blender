@@ -6,14 +6,11 @@
  * \ingroup RNA
  */
 
-#include <cstdio>
 #include <cstdlib>
 
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
 
-#include "DNA_anim_types.h"
-#include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
 #include "rna_internal.hh" /* own include */
@@ -32,7 +29,7 @@ static void rna_KeyingSet_context_refresh(KeyingSet *ks, bContext *C, ReportList
 {
   using namespace blender::animrig;
   /* TODO: enable access to providing a list of overrides (dsources)? */
-  const ModifyKeyReturn error = ANIM_validate_keyingset(C, nullptr, ks);
+  const ModifyKeyReturn error = validate_keyingset(C, nullptr, ks);
 
   if (error == ModifyKeyReturn::SUCCESS) {
     return;

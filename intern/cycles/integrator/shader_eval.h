@@ -4,11 +4,11 @@
 
 #pragma once
 
+#include <functional>
+
 #include "device/memory.h"
 
 #include "kernel/types.h"
-
-#include "util/function.h"
 
 CCL_NAMESPACE_BEGIN
 
@@ -19,6 +19,7 @@ enum ShaderEvalType {
   SHADER_EVAL_DISPLACE,
   SHADER_EVAL_BACKGROUND,
   SHADER_EVAL_CURVE_SHADOW_TRANSPARENCY,
+  SHADER_EVAL_VOLUME_DENSITY,
 };
 
 /* ShaderEval class performs shader evaluation for background light and displacement. */
@@ -31,8 +32,8 @@ class ShaderEval {
   bool eval(const ShaderEvalType type,
             const int max_num_inputs,
             const int num_channels,
-            const function<int(device_vector<KernelShaderEvalInput> &)> &fill_input,
-            const function<void(device_vector<float> &)> &read_output);
+            const std::function<int(device_vector<KernelShaderEvalInput> &)> &fill_input,
+            const std::function<void(device_vector<float> &)> &read_output);
 
  protected:
   bool eval_cpu(Device *device,

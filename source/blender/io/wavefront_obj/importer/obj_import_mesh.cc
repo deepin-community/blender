@@ -6,7 +6,7 @@
  * \ingroup obj
  */
 
-#include <iostream>
+#include <algorithm>
 
 #include "DNA_customdata_types.h"
 #include "DNA_material_types.h"
@@ -15,7 +15,7 @@
 #include "BKE_attribute.hh"
 #include "BKE_deform.hh"
 #include "BKE_lib_id.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_mesh.hh"
 #include "BKE_node_tree_update.hh"
 #include "BKE_object.hh"
@@ -28,6 +28,9 @@
 #include "importer_mesh_utils.hh"
 #include "obj_export_mtl.hh"
 #include "obj_import_mesh.hh"
+
+#include "CLG_log.h"
+static CLG_LogRef LOG = {"io.obj"};
 
 namespace blender::io::obj {
 
@@ -86,11 +89,16 @@ Object *MeshFromGeometry::create_mesh_object(
   Object *obj = BKE_object_add_only_object(bmain, OB_MESH, ob_name.c_str());
   obj->data = BKE_object_obdata_add_from_type(bmain, OB_MESH, ob_name.c_str());
 
-  this->create_materials(bmain, materials, created_materials, obj, import_params.relative_paths);
-
-  transform_object(obj, import_params);
+  this->create_materials(bmain,
+                         materials,
+                         created_materials,
+                         obj,
+                         import_params.relative_paths,
+                         import_params.mtl_name_collision_mode);
 
   BKE_mesh_nomain_to_mesh(mesh, static_cast<Mesh *>(obj->data), obj);
+
+  transform_object(obj, import_params);
 
   /* NOTE: vertex groups have to be created after final mesh is assigned to the object. */
   this->create_vertex_groups(obj);
@@ -221,7 +229,7 @@ void MeshFromGeometry::create_faces(Mesh *mesh, bool use_vertex_groups)
     const FaceElem &curr_face = mesh_geometry_.face_elements_[face_idx];
     if (curr_face.corner_count_ < 3) {
       /* Don't add single vertex face, or edges. */
-      std::cerr << "Face with less than 3 vertices found, skipping." << std::endl;
+      CLOG_WARN(&LOG, "Face with less than 3 vertices found, skipping.");
       continue;
     }
 
@@ -235,9 +243,7 @@ void MeshFromGeometry::create_faces(Mesh *mesh, bool use_vertex_groups)
     material_indices.span[face_idx] = curr_face.material_index;
     /* Importing obj files without any materials would result in negative indices, which is not
      * supported. */
-    if (material_indices.span[face_idx] < 0) {
-      material_indices.span[face_idx] = 0;
-    }
+    material_indices.span[face_idx] = std::max(material_indices.span[face_idx], 0);
 
     for (int idx = 0; idx < curr_face.corner_count_; ++idx) {
       const FaceCorner &curr_corner = mesh_geometry_.face_corners_[curr_face.start_index_ + idx];
@@ -354,25 +360,35 @@ static Material *get_or_create_material(Main *bmain,
                                         const std::string &name,
                                         Map<std::string, std::unique_ptr<MTLMaterial>> &materials,
                                         Map<std::string, Material *> &created_materials,
-                                        bool relative_paths)
+                                        bool relative_paths,
+                                        eOBJMtlNameCollisionMode mtl_name_collision_mode)
 {
-  /* Have we created this material already? */
+  /* Have we created this material already in this import session? */
   Material **found_mat = created_materials.lookup_ptr(name);
   if (found_mat != nullptr) {
     return *found_mat;
   }
 
-  /* We have not, will have to create it. Create a new default
-   * MTLMaterial too, in case the OBJ file tries to use a material
-   * that was not in the MTL file. */
+  /* Check if a material with this name already exists in the main database */
+  Material *existing_mat = (Material *)BKE_libblock_find_name(bmain, ID_MA, name.c_str());
+  if (existing_mat != nullptr &&
+      mtl_name_collision_mode == OBJ_MTL_NAME_COLLISION_REFERENCE_EXISTING)
+  {
+    /* If the collision mode is set to reference existing materials, use the existing one */
+    created_materials.add_new(name, existing_mat);
+    return existing_mat;
+  }
+
+  /* We need to create a new material */
   const MTLMaterial &mtl = *materials.lookup_or_add(name, std::make_unique<MTLMaterial>());
 
+  /* If we're in MAKE_UNIQUE mode and a material with this name already exists,
+   * BKE_material_add will automatically create a unique name */
   Material *mat = BKE_material_add(bmain, name.c_str());
   id_us_min(&mat->id);
 
-  mat->use_nodes = true;
   mat->nodetree = create_mtl_node_tree(bmain, mtl, mat, relative_paths);
-  BKE_ntree_update_main_tree(bmain, mat->nodetree, nullptr);
+  BKE_ntree_update_after_single_tree_change(*bmain, *mat->nodetree);
 
   created_materials.add_new(name, mat);
   return mat;
@@ -382,11 +398,12 @@ void MeshFromGeometry::create_materials(Main *bmain,
                                         Map<std::string, std::unique_ptr<MTLMaterial>> &materials,
                                         Map<std::string, Material *> &created_materials,
                                         Object *obj,
-                                        bool relative_paths)
+                                        bool relative_paths,
+                                        eOBJMtlNameCollisionMode mtl_name_collision_mode)
 {
   for (const std::string &name : mesh_geometry_.material_order_) {
     Material *mat = get_or_create_material(
-        bmain, name, materials, created_materials, relative_paths);
+        bmain, name, materials, created_materials, relative_paths, mtl_name_collision_mode);
     if (mat == nullptr) {
       continue;
     }
@@ -422,7 +439,7 @@ void MeshFromGeometry::create_normals(Mesh *mesh)
       corner_index++;
     }
   }
-  BKE_mesh_set_custom_normals(mesh, reinterpret_cast<float(*)[3]>(corner_normals.data()));
+  bke::mesh_set_custom_normals(*mesh, corner_normals);
 }
 
 void MeshFromGeometry::create_colors(Mesh *mesh)

@@ -17,8 +17,6 @@
 #include "BLI_array.hh"
 #include "BLI_math_vector_types.hh"
 
-#include "DNA_customdata_types.h"
-
 #include "bmesh.hh"
 
 struct BMLoop;
@@ -53,7 +51,7 @@ struct BMEditMesh {
 
   /** Selection mode (#SCE_SELECT_VERTEX, #SCE_SELECT_EDGE & #SCE_SELECT_FACE). */
   short selectmode;
-  /** The active material (assigned to newly created faces). */
+  /** The active material (zero-based, assigned to newly created faces). */
   short mat_nr;
 
   /** Temp variables for x-mirror editing (-1 when the layer does not exist). */
@@ -95,8 +93,16 @@ BMEditMesh *BKE_editmesh_copy(BMEditMesh *em);
  * don't add NULL data check here. caller must do that
  */
 BMEditMesh *BKE_editmesh_from_object(Object *ob);
+
 /**
- * \note Does not free the #BMEditMesh  itself.
+ * Return whether the evaluated mesh is a "descendant" of the original mesh: whether it is a
+ * version of the original mesh propagated during evaluation. This will be false if the mesh was
+ * taken from an different object during evaluation, with the object info node for example.
+ */
+bool BKE_editmesh_eval_orig_map_available(const Mesh &mesh_eval, const Mesh *mesh_orig);
+
+/**
+ * \note Does not free the #BMEditMesh itself.
  */
 void BKE_editmesh_free_data(BMEditMesh *em);
 

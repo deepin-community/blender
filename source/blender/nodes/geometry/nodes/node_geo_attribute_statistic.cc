@@ -7,7 +7,7 @@
 
 #include "NOD_rna_define.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "BLI_array_utils.hh"
@@ -24,7 +24,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   const bNode *node = b.node_or_null();
 
-  b.add_input<decl::Geometry>("Geometry");
+  b.add_input<decl::Geometry>("Geometry").description("Geometry to get the statistics from");
   b.add_input<decl::Bool>("Selection").default_value(true).field_on_all().hide_value();
 
   if (node != nullptr) {
@@ -32,7 +32,8 @@ static void node_declare(NodeDeclarationBuilder &b)
     b.add_input(data_type, "Attribute").hide_value().field_on_all();
 
     b.add_output(data_type, N_("Mean"));
-    b.add_output(data_type, N_("Median"));
+    b.add_output(data_type, CTX_N_(BLT_I18NCONTEXT_ID_NODETREE, "Median"))
+        .translation_context(BLT_I18NCONTEXT_ID_NODETREE);
     b.add_output(data_type, N_("Sum"));
     b.add_output(data_type, N_("Min"));
     b.add_output(data_type, N_("Max"));
@@ -44,8 +45,8 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "data_type", UI_ITEM_NONE, "", ICON_NONE);
-  uiItemR(layout, ptr, "domain", UI_ITEM_NONE, "", ICON_NONE);
+  layout->prop(ptr, "data_type", UI_ITEM_NONE, "", ICON_NONE);
+  layout->prop(ptr, "domain", UI_ITEM_NONE, "", ICON_NONE);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
@@ -92,18 +93,13 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
     for (const StringRefNull name :
          {"Mean", "Median", "Sum", "Min", "Max", "Range", "Standard Deviation", "Variance"})
     {
-      params.add_item(IFACE_(name.c_str()), [node_type, name, type](LinkSearchOpParams &params) {
+      params.add_item(IFACE_(name), [node_type, name, type](LinkSearchOpParams &params) {
         bNode &node = params.add_node(node_type);
         node.custom1 = *type;
         params.update_and_connect_available_socket(node, name);
       });
     }
   }
-}
-
-template<typename T> static T compute_sum(const Span<T> data)
-{
-  return std::accumulate(data.begin(), data.end(), T());
 }
 
 static float compute_variance(const Span<float> data, const float mean)
@@ -138,17 +134,17 @@ static float median_of_sorted_span(const Span<float> data)
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  GeometrySet geometry_set = params.get_input<GeometrySet>("Geometry");
+  GeometrySet geometry_set = params.extract_input<GeometrySet>("Geometry");
   const bNode &node = params.node();
   const eCustomDataType data_type = eCustomDataType(node.custom1);
   const AttrDomain domain = AttrDomain(node.custom2);
   Vector<const GeometryComponent *> components = geometry_set.get_components();
 
-  const Field<bool> selection_field = params.get_input<Field<bool>>("Selection");
+  const Field<bool> selection_field = params.extract_input<Field<bool>>("Selection");
 
   switch (data_type) {
     case CD_PROP_FLOAT: {
-      const Field<float> input_field = params.get_input<Field<float>>("Attribute");
+      const Field<float> input_field = params.extract_input<Field<float>>("Attribute");
       Vector<float> data;
       for (const GeometryComponent *component : components) {
         const std::optional<AttributeAccessor> attributes = component->attributes();
@@ -199,7 +195,7 @@ static void node_geo_exec(GeoNodeExecParams params)
           range = max - min;
         }
         if (sum_required || variance_required) {
-          sum = compute_sum<float>(data);
+          sum = blender::array_utils::compute_sum<float>(data);
           mean = sum / data.size();
 
           if (variance_required) {
@@ -226,7 +222,7 @@ static void node_geo_exec(GeoNodeExecParams params)
       break;
     }
     case CD_PROP_FLOAT3: {
-      const Field<float3> input_field = params.get_input<Field<float3>>("Attribute");
+      const Field<float3> input_field = params.extract_input<Field<float3>>("Attribute");
       Vector<float3> data;
       for (const GeometryComponent *component : components) {
         const std::optional<AttributeAccessor> attributes = component->attributes();
@@ -297,7 +293,7 @@ static void node_geo_exec(GeoNodeExecParams params)
           range = max - min;
         }
         if (sum_required || variance_required) {
-          sum = compute_sum(data.as_span());
+          sum = blender::array_utils::compute_sum(data.as_span());
           mean = sum / data.size();
 
           if (variance_required) {
@@ -363,16 +359,18 @@ static void node_rna(StructRNA *srna)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-
-  geo_node_type_base(
-      &ntype, GEO_NODE_ATTRIBUTE_STATISTIC, "Attribute Statistic", NODE_CLASS_ATTRIBUTE);
-
+  geo_node_type_base(&ntype, "GeometryNodeAttributeStatistic", GEO_NODE_ATTRIBUTE_STATISTIC);
+  ntype.ui_name = "Attribute Statistic";
+  ntype.ui_description =
+      "Calculate statistics about a data set from a field evaluated on a geometry";
+  ntype.enum_name_legacy = "ATTRIBUTE_STATISTIC";
+  ntype.nclass = NODE_CLASS_ATTRIBUTE;
   ntype.initfunc = node_init;
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
   ntype.gather_link_search_ops = node_gather_link_searches;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

@@ -28,6 +28,10 @@ or added to the Blender UI  translation table.
 
 URL is the: url_manual_prefix + url_manual_mapping[#id]
 '''
+__all__ = (
+    "main",
+)
+
 
 import os
 import argparse
@@ -138,7 +142,7 @@ def main():
     parser.add_argument(
         "--output",
         dest="output",
-        default=os.path.join(BASE_DIR, "scripts", "modules", "rna_manual_reference.py"),
+        default=os.path.join(BASE_DIR, "scripts", "modules", "_rna_manual_reference.py"),
         required=False,
         help="path to output including filename and extentsion",
         metavar="FILE")

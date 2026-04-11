@@ -8,4 +8,6 @@
 
 #pragma once
 
-PyObject *BPyInit__bpy_path();
+#include <Python.h>
+
+[[nodiscard]] PyObject *BPyInit__bpy_path();

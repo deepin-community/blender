@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <Python.h>
+
 #include "BLI_compiler_attrs.h"
 
 namespace blender::gpu {
@@ -24,4 +26,4 @@ struct BPyGPUVertBuf {
   blender::gpu::VertBuf *buf;
 };
 
-PyObject *BPyGPUVertBuf_CreatePyObject(blender::gpu::VertBuf *buf) ATTR_NONNULL(1);
+[[nodiscard]] PyObject *BPyGPUVertBuf_CreatePyObject(blender::gpu::VertBuf *buf) ATTR_NONNULL(1);

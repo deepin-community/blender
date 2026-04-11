@@ -15,17 +15,23 @@ struct ARegionType;
 struct AssetShelf;
 struct AssetShelfSettings;
 struct AssetShelfType;
-struct bContext;
-struct bContextDataResult;
 struct BlendDataReader;
 struct BlendWriter;
 struct Main;
 struct RegionPollParams;
+struct ScrArea;
+struct bContext;
+struct bContextDataResult;
+struct wmRegionListenerParams;
 struct wmRegionMessageSubscribeParams;
 struct wmWindowManager;
 
 namespace blender {
 class StringRef;
+class StringRefNull;
+namespace asset_system {
+class AssetRepresentation;
+}
 }  // namespace blender
 
 namespace blender::ed::asset::shelf {
@@ -80,7 +86,9 @@ void type_unregister(const AssetShelfType &shelf_type);
  * Permanent/non-popup asset shelf regions should use #type_poll_for_space_type() instead.
  */
 bool type_poll_for_popup(const bContext &C, const AssetShelfType *shelf_type);
-AssetShelfType *type_find_from_idname(const StringRef idname);
+bool type_asset_poll(const AssetShelfType &shelf_type,
+                     const blender::asset_system::AssetRepresentation &asset);
+AssetShelfType *type_find_from_idname(StringRef idname);
 
 /** \} */
 
@@ -89,6 +97,7 @@ AssetShelfType *type_find_from_idname(const StringRef idname);
  * \{ */
 
 void type_popup_unlink(const AssetShelfType &shelf_type);
+void ensure_asset_library_fetched(const bContext &C, const AssetShelfType &shelf_type);
 
 /** \} */
 
@@ -100,6 +109,11 @@ int tile_width(const AssetShelfSettings &settings);
 int tile_height(const AssetShelfSettings &settings);
 
 AssetShelf *active_shelf_from_area(const ScrArea *area);
+
+/**
+ * Enable catalog path in all shelves visible in all windows.
+ */
+void show_catalog_in_visible_shelves(const bContext &C, const StringRefNull catalog_path);
 
 int context(const bContext *C, const char *member, bContextDataResult *result);
 

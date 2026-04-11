@@ -30,7 +30,7 @@ NODE_SHADER_MATERIALX_BEGIN
 #ifdef WITH_MATERIALX
 {
   /* NOTE: This node doesn't have an implementation in MaterialX. */
-  return get_output_default(socket_out_->name, NodeItem::Type::Any);
+  return get_output_default(socket_out_->identifier, NodeItem::Type::Any);
 }
 #endif
 NODE_SHADER_MATERIALX_END
@@ -43,10 +43,16 @@ void register_node_type_sh_camera()
 
   static blender::bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, SH_NODE_CAMERA, "Camera Data", NODE_CLASS_INPUT);
+  sh_node_type_base(&ntype, "ShaderNodeCameraData", SH_NODE_CAMERA);
+  ntype.ui_name = "Camera Data";
+  ntype.ui_description =
+      "Retrieve information about the camera and how it relates to the current shading point's "
+      "position";
+  ntype.enum_name_legacy = "CAMERA";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;
   ntype.gpu_fn = file_ns::gpu_shader_camera;
   ntype.materialx_fn = file_ns::node_shader_materialx;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

@@ -6,11 +6,7 @@
  * \ingroup blenloader
  */
 
-#include "BLI_compiler_attrs.h"
 #include "BLI_utildefines.h"
-
-/* for MinGW32 definition of NULL, could use BLI_blenlib.h instead too */
-#include <cstddef>
 
 #include <string>
 
@@ -40,7 +36,9 @@
 #include "DNA_screen_types.h"
 #include "DNA_sequence_types.h"
 #include "DNA_space_types.h"
+#include "DNA_userdef_types.h"
 #include "DNA_view3d_types.h"
+#include "DNA_windowmanager_types.h"
 
 #include "DNA_genfile.h"
 
@@ -55,6 +53,7 @@
 #include "BKE_mask.h"
 #include "BKE_modifier.hh"
 #include "BKE_node.hh"
+#include "BKE_node_legacy_types.hh"
 #include "BKE_scene.hh"
 #include "BKE_screen.hh"
 #include "DNA_material_types.h"
@@ -67,6 +66,7 @@
 #include "BLI_math_rotation.h"
 #include "BLI_math_vector.h"
 #include "BLI_string.h"
+#include "BLI_string_utf8.h"
 #include "BLI_string_utils.hh"
 
 #include "BLT_translation.hh"
@@ -97,14 +97,14 @@ static bGPDpalette *BKE_gpencil_palette_addnew(bGPdata *gpd, const char *name)
   }
 
   /* allocate memory and add to end of list */
-  palette = static_cast<bGPDpalette *>(MEM_callocN(sizeof(bGPDpalette), "bGPDpalette"));
+  palette = MEM_callocN<bGPDpalette>("bGPDpalette");
 
   /* add to datablock */
   BLI_addtail(&gpd->palettes, palette);
 
   /* set basic settings */
   /* auto-name */
-  STRNCPY(palette->info, name);
+  STRNCPY_UTF8(palette->info, name);
   BLI_uniquename(&gpd->palettes,
                  palette,
                  DATA_("GP_Palette"),
@@ -127,8 +127,7 @@ static bGPDpalettecolor *BKE_gpencil_palettecolor_addnew(bGPDpalette *palette, c
   }
 
   /* allocate memory and add to end of list */
-  palcolor = static_cast<bGPDpalettecolor *>(
-      MEM_callocN(sizeof(bGPDpalettecolor), "bGPDpalettecolor"));
+  palcolor = MEM_callocN<bGPDpalettecolor>("bGPDpalettecolor");
 
   /* add to datablock */
   BLI_addtail(&palette->colors, palcolor);
@@ -138,7 +137,7 @@ static bGPDpalettecolor *BKE_gpencil_palettecolor_addnew(bGPDpalette *palette, c
   ARRAY_SET_ITEMS(palcolor->fill, 1.0f, 1.0f, 1.0f);
 
   /* auto-name */
-  STRNCPY(palcolor->info, name);
+  STRNCPY_UTF8(palcolor->info, name);
   BLI_uniquename(&palette->colors,
                  palcolor,
                  DATA_("Color"),
@@ -234,8 +233,7 @@ static void do_version_action_editor_properties_region(ListBase *regionbase)
     }
     if (region->regiontype == RGN_TYPE_WINDOW) {
       /* add new region here */
-      ARegion *region_new = static_cast<ARegion *>(
-          MEM_callocN(sizeof(ARegion), "buttons for action"));
+      ARegion *region_new = BKE_area_region_new();
 
       BLI_insertlinkbefore(regionbase, region, region_new);
 
@@ -280,20 +278,20 @@ static void do_version_hue_sat_node(bNodeTree *ntree, bNode *node)
 
   /* Convert value from old storage to new sockets. */
   NodeHueSat *nhs = static_cast<NodeHueSat *>(node->storage);
-  bNodeSocket *hue = blender::bke::node_find_socket(node, SOCK_IN, "Hue");
-  bNodeSocket *saturation = blender::bke::node_find_socket(node, SOCK_IN, "Saturation");
-  bNodeSocket *value = blender::bke::node_find_socket(node, SOCK_IN, "Value");
+  bNodeSocket *hue = blender::bke::node_find_socket(*node, SOCK_IN, "Hue");
+  bNodeSocket *saturation = blender::bke::node_find_socket(*node, SOCK_IN, "Saturation");
+  bNodeSocket *value = blender::bke::node_find_socket(*node, SOCK_IN, "Value");
   if (hue == nullptr) {
     hue = blender::bke::node_add_static_socket(
-        ntree, node, SOCK_IN, SOCK_FLOAT, PROP_FACTOR, "Hue", "Hue");
+        *ntree, *node, SOCK_IN, SOCK_FLOAT, PROP_FACTOR, "Hue", "Hue");
   }
   if (saturation == nullptr) {
     saturation = blender::bke::node_add_static_socket(
-        ntree, node, SOCK_IN, SOCK_FLOAT, PROP_FACTOR, "Saturation", "Saturation");
+        *ntree, *node, SOCK_IN, SOCK_FLOAT, PROP_FACTOR, "Saturation", "Saturation");
   }
   if (value == nullptr) {
     value = blender::bke::node_add_static_socket(
-        ntree, node, SOCK_IN, SOCK_FLOAT, PROP_FACTOR, "Value", "Value");
+        *ntree, *node, SOCK_IN, SOCK_FLOAT, PROP_FACTOR, "Value", "Value");
   }
 
   ((bNodeSocketValueFloat *)hue->default_value)->value = nhs->hue;
@@ -328,10 +326,9 @@ static void do_versions_compositor_render_passes_storage(bNode *node)
        sock = static_cast<bNodeSocket *>(sock->next), pass_index++)
   {
     if (sock->storage == nullptr) {
-      NodeImageLayer *sockdata = static_cast<NodeImageLayer *>(
-          MEM_callocN(sizeof(NodeImageLayer), "node image layer"));
+      NodeImageLayer *sockdata = MEM_callocN<NodeImageLayer>("node image layer");
       sock->storage = sockdata;
-      STRNCPY(sockdata->pass_name, node_cmp_rlayers_sock_to_pass(pass_index));
+      STRNCPY_UTF8(sockdata->pass_name, node_cmp_rlayers_sock_to_pass(pass_index));
 
       if (pass_index == 0) {
         sockname = "Image";
@@ -342,7 +339,7 @@ static void do_versions_compositor_render_passes_storage(bNode *node)
       else {
         sockname = node_cmp_rlayers_sock_to_pass(pass_index);
       }
-      STRNCPY(sock->name, sockname);
+      STRNCPY_UTF8(sock->name, sockname);
     }
   }
 }
@@ -350,7 +347,7 @@ static void do_versions_compositor_render_passes_storage(bNode *node)
 static void do_versions_compositor_render_passes(bNodeTree *ntree)
 {
   LISTBASE_FOREACH (bNode *, node, &ntree->nodes) {
-    if (node->type == CMP_NODE_R_LAYERS) {
+    if (node->type_legacy == CMP_NODE_R_LAYERS) {
       /* First we make sure existing sockets have proper names.
        * This is important because otherwise verification will
        * drop links from sockets which were renamed.
@@ -423,39 +420,37 @@ static void do_version_bbone_easing_fcurve_fix(ID * /*id*/, FCurve *fcu)
   }
 }
 
-static bool seq_update_proxy_cb(Sequence *seq, void * /*user_data*/)
+static bool strip_update_proxy_cb(Strip *strip, void * /*user_data*/)
 {
-  seq->stereo3d_format = static_cast<Stereo3dFormat *>(
-      MEM_callocN(sizeof(Stereo3dFormat), "Stereo Display 3d Format"));
+  strip->stereo3d_format = MEM_callocN<Stereo3dFormat>("Stereo Display 3d Format");
 
-#define SEQ_USE_PROXY_CUSTOM_DIR (1 << 19)
-#define SEQ_USE_PROXY_CUSTOM_FILE (1 << 21)
-  if (seq->strip && seq->strip->proxy && !seq->strip->proxy->storage) {
-    if (seq->flag & SEQ_USE_PROXY_CUSTOM_DIR) {
-      seq->strip->proxy->storage = SEQ_STORAGE_PROXY_CUSTOM_DIR;
+#define STRIP_USE_PROXY_CUSTOM_DIR (1 << 19)
+#define STRIP_USE_PROXY_CUSTOM_FILE (1 << 21)
+  if (strip->data && strip->data->proxy && !strip->data->proxy->storage) {
+    if (strip->flag & STRIP_USE_PROXY_CUSTOM_DIR) {
+      strip->data->proxy->storage = SEQ_STORAGE_PROXY_CUSTOM_DIR;
     }
-    if (seq->flag & SEQ_USE_PROXY_CUSTOM_FILE) {
-      seq->strip->proxy->storage = SEQ_STORAGE_PROXY_CUSTOM_FILE;
+    if (strip->flag & STRIP_USE_PROXY_CUSTOM_FILE) {
+      strip->data->proxy->storage = SEQ_STORAGE_PROXY_CUSTOM_FILE;
     }
   }
-#undef SEQ_USE_PROXY_CUSTOM_DIR
-#undef SEQ_USE_PROXY_CUSTOM_FILE
+#undef STRIP_USE_PROXY_CUSTOM_DIR
+#undef STRIP_USE_PROXY_CUSTOM_FILE
   return true;
 }
 
-static bool seq_update_effectdata_cb(Sequence *seq, void * /*user_data*/)
+static bool strip_update_effectdata_cb(Strip *strip, void * /*user_data*/)
 {
-
-  if (seq->type != SEQ_TYPE_TEXT) {
+  if (strip->type != STRIP_TYPE_TEXT) {
     return true;
   }
 
-  if (seq->effectdata == nullptr) {
-    SeqEffectHandle effect_handle = SEQ_effect_handle_get(seq);
-    effect_handle.init(seq);
+  if (strip->effectdata == nullptr) {
+    blender::seq::EffectHandle effect_handle = blender::seq::strip_effect_handle_get(strip);
+    effect_handle.init(strip);
   }
 
-  TextVars *data = static_cast<TextVars *>(seq->effectdata);
+  TextVars *data = static_cast<TextVars *>(strip->effectdata);
   if (data->color[3] == 0.0f) {
     copy_v4_fl(data->color, 1.0f);
     data->shadow_color[3] = 1.0f;
@@ -484,7 +479,7 @@ void blo_do_versions_270(FileData *fd, Library * /*lib*/, Main *bmain)
     FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
       if (ntree->type == NTREE_COMPOSIT) {
         LISTBASE_FOREACH (bNode *, node, &ntree->nodes) {
-          if (ELEM(node->type, CMP_NODE_COMPOSITE, CMP_NODE_OUTPUT_FILE)) {
+          if (ELEM(node->type_legacy, CMP_NODE_COMPOSITE_DEPRECATED, CMP_NODE_OUTPUT_FILE)) {
             node->id = nullptr;
           }
         }
@@ -781,7 +776,7 @@ void blo_do_versions_270(FileData *fd, Library * /*lib*/, Main *bmain)
       FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
         if (ntree->type == NTREE_COMPOSIT) {
           LISTBASE_FOREACH (bNode *, node, &ntree->nodes) {
-            if (ELEM(node->type, CMP_NODE_PLANETRACKDEFORM)) {
+            if (ELEM(node->type_legacy, CMP_NODE_PLANETRACKDEFORM)) {
               NodePlaneTrackDeformData *data = static_cast<NodePlaneTrackDeformData *>(
                   node->storage);
               data->flag = 0;
@@ -857,14 +852,14 @@ void blo_do_versions_270(FileData *fd, Library * /*lib*/, Main *bmain)
     LISTBASE_FOREACH (Scene *, scene, &bmain->scenes) {
       BKE_scene_add_render_view(scene, STEREO_LEFT_NAME);
       SceneRenderView *srv = static_cast<SceneRenderView *>(scene->r.views.first);
-      STRNCPY(srv->suffix, STEREO_LEFT_SUFFIX);
+      STRNCPY_UTF8(srv->suffix, STEREO_LEFT_SUFFIX);
 
       BKE_scene_add_render_view(scene, STEREO_RIGHT_NAME);
       srv = static_cast<SceneRenderView *>(scene->r.views.last);
-      STRNCPY(srv->suffix, STEREO_RIGHT_SUFFIX);
+      STRNCPY_UTF8(srv->suffix, STEREO_RIGHT_SUFFIX);
 
       if (scene->ed) {
-        SEQ_for_each_callback(&scene->ed->seqbase, seq_update_proxy_cb, nullptr);
+        blender::seq::foreach_strip(&scene->ed->seqbase, strip_update_proxy_cb, nullptr);
       }
     }
 
@@ -896,12 +891,10 @@ void blo_do_versions_270(FileData *fd, Library * /*lib*/, Main *bmain)
     }
 
     LISTBASE_FOREACH (Image *, ima, &bmain->images) {
-      ima->stereo3d_format = static_cast<Stereo3dFormat *>(
-          MEM_callocN(sizeof(Stereo3dFormat), "Image Stereo 3d Format"));
+      ima->stereo3d_format = MEM_callocN<Stereo3dFormat>("Image Stereo 3d Format");
 
       if (ima->packedfile) {
-        ImagePackedFile *imapf = static_cast<ImagePackedFile *>(
-            MEM_mallocN(sizeof(ImagePackedFile), "Image Packed File"));
+        ImagePackedFile *imapf = MEM_mallocN<ImagePackedFile>("Image Packed File");
         BLI_addtail(&ima->packedfiles, imapf);
 
         imapf->packedfile = ima->packedfile;
@@ -912,8 +905,7 @@ void blo_do_versions_270(FileData *fd, Library * /*lib*/, Main *bmain)
 
     LISTBASE_FOREACH (wmWindowManager *, wm, &bmain->wm) {
       LISTBASE_FOREACH (wmWindow *, win, &wm->windows) {
-        win->stereo3d_format = static_cast<Stereo3dFormat *>(
-            MEM_callocN(sizeof(Stereo3dFormat), "Stereo Display 3d Format"));
+        win->stereo3d_format = MEM_callocN<Stereo3dFormat>("Stereo Display 3d Format");
       }
     }
   }
@@ -1015,8 +1007,10 @@ void blo_do_versions_270(FileData *fd, Library * /*lib*/, Main *bmain)
         CurveMapping *curve_mapping = &scene->r.mblur_shutter_curve;
         BKE_curvemapping_set_defaults(curve_mapping, 1, 0.0f, 0.0f, 1.0f, 1.0f, HD_AUTO);
         BKE_curvemapping_init(curve_mapping);
-        BKE_curvemap_reset(
-            curve_mapping->cm, &curve_mapping->clipr, CURVE_PRESET_MAX, CURVEMAP_SLOPE_POS_NEG);
+        BKE_curvemap_reset(curve_mapping->cm,
+                           &curve_mapping->clipr,
+                           CURVE_PRESET_MAX,
+                           CurveMapSlopeType::PositiveNegative);
       }
     }
   }
@@ -1033,9 +1027,8 @@ void blo_do_versions_270(FileData *fd, Library * /*lib*/, Main *bmain)
     LISTBASE_FOREACH (bGPdata *, gpd, &bmain->gpencils) {
       bool enabled = false;
 
-      /* Ensure that the datablock's onion-skinning toggle flag
-       * stays in sync with the status of the actual layers
-       */
+      /* Ensure that the data-block's onion-skinning toggle flag
+       * stays in sync with the status of the actual layers. */
       LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd->layers) {
         if (gpl->flag & GP_LAYER_ONIONSKIN) {
           enabled = true;
@@ -1051,12 +1044,10 @@ void blo_do_versions_270(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 276, 5)) {
-    ListBase *lbarray[INDEX_ID_MAX];
-    int a;
-
     /* Important to clear all non-persistent flags from older versions here,
      * otherwise they could collide with any new persistent flag we may add in the future. */
-    a = set_listbasepointers(bmain, lbarray);
+    MainListsArray lbarray = BKE_main_lists_get(*bmain);
+    int a = lbarray.size();
     while (a--) {
       LISTBASE_FOREACH (ID *, id, lbarray[a]) {
         id->flag &= ID_FLAG_FAKEUSER;
@@ -1137,7 +1128,7 @@ void blo_do_versions_270(FileData *fd, Library * /*lib*/, Main *bmain)
 
     LISTBASE_FOREACH (Scene *, scene, &bmain->scenes) {
       if (scene->ed) {
-        SEQ_for_each_callback(&scene->ed->seqbase, seq_update_effectdata_cb, nullptr);
+        blender::seq::foreach_strip(&scene->ed->seqbase, strip_update_effectdata_cb, nullptr);
       }
     }
 
@@ -1285,7 +1276,7 @@ void blo_do_versions_270(FileData *fd, Library * /*lib*/, Main *bmain)
               LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
                 LISTBASE_FOREACH (bGPDstroke *, gps, &gpf->strokes) {
                   /* set stroke to palette and force recalculation */
-                  STRNCPY(gps->colorname, gpl->info);
+                  STRNCPY_UTF8(gps->colorname, gpl->info);
                   gps->thickness = gpl->thickness;
 
                   /* set alpha strength to 1 */
@@ -1461,9 +1452,9 @@ void blo_do_versions_270(FileData *fd, Library * /*lib*/, Main *bmain)
     if (!DNA_struct_member_exists(fd->filesdna, "NodeGlare", "char", "star_45")) {
       FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
         if (ntree->type == NTREE_COMPOSIT) {
-          blender::bke::node_tree_set_type(nullptr, ntree);
+          blender::bke::node_tree_set_type(*ntree);
           LISTBASE_FOREACH (bNode *, node, &ntree->nodes) {
-            if (node->type == CMP_NODE_GLARE) {
+            if (node->type_legacy == CMP_NODE_GLARE) {
               NodeGlare *ndg = static_cast<NodeGlare *>(node->storage);
               switch (ndg->type) {
                 case CMP_NODE_GLARE_STREAKS:
@@ -1613,9 +1604,9 @@ void do_versions_after_linking_270(Main *bmain)
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 279, 0)) {
     FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
       if (ntree->type == NTREE_COMPOSIT) {
-        blender::bke::node_tree_set_type(nullptr, ntree);
+        blender::bke::node_tree_set_type(*ntree);
         LISTBASE_FOREACH (bNode *, node, &ntree->nodes) {
-          if (node->type == CMP_NODE_HUE_SAT) {
+          if (node->type_legacy == CMP_NODE_HUE_SAT) {
             do_version_hue_sat_node(ntree, node);
           }
         }

@@ -2,28 +2,30 @@
  *
  * SPDX-License-Identifier: Apache-2.0 */
 
+#include <algorithm>
+
 #include "scene/camera.h"
 #include "scene/mesh.h"
 #include "scene/object.h"
+#include "scene/osl.h"
 #include "scene/scene.h"
 #include "scene/stats.h"
 #include "scene/tables.h"
 
 #include "device/device.h"
 
-#include "util/foreach.h"
-#include "util/function.h"
 #include "util/log.h"
 #include "util/math_cdf.h"
-#include "util/task.h"
+#include "util/tbb.h"
 #include "util/time.h"
 #include "util/vector.h"
 
-/* needed for calculating differentials */
-#include "kernel/device/cpu/compat.h"
-#include "kernel/device/cpu/globals.h"
-
 #include "kernel/camera/camera.h"
+
+/* Custom cameras don't work with adaptive subdivision currently, and it's a bit tricky
+ * to fix for the OptiX case as there is no OSL shader compiled for the CPU. This is a temporary
+ * workaround to fall back to a perspective camera for that case. */
+#define FIX_CUSTOM_CAMERA_CRASH
 
 CCL_NAMESPACE_BEGIN
 
@@ -34,14 +36,12 @@ static float shutter_curve_eval(float x, array<float> &shutter_curve)
   }
 
   x = saturatef(x) * shutter_curve.size() - 1;
-  int index = (int)x;
-  float frac = x - index;
+  const int index = (int)x;
+  const float frac = x - index;
   if (index < shutter_curve.size() - 1) {
     return mix(shutter_curve[index], shutter_curve[index + 1], frac);
   }
-  else {
-    return shutter_curve[shutter_curve.size() - 1];
-  }
+  return shutter_curve[shutter_curve.size() - 1];
 }
 
 NODE_DEFINE(Camera)
@@ -81,6 +81,7 @@ NODE_DEFINE(Camera)
   type_enum.insert("perspective", CAMERA_PERSPECTIVE);
   type_enum.insert("orthograph", CAMERA_ORTHOGRAPHIC);
   type_enum.insert("panorama", CAMERA_PANORAMA);
+  type_enum.insert("custom", CAMERA_CUSTOM);
   SOCKET_ENUM(camera_type, "Type", type_enum, CAMERA_PERSPECTIVE);
 
   static NodeEnum panorama_type_enum;
@@ -195,36 +196,27 @@ Camera::Camera() : Node(get_node_type())
   memset((void *)&kernel_camera, 0, sizeof(kernel_camera));
 }
 
-Camera::~Camera() {}
+Camera::~Camera() = default;
 
 void Camera::compute_auto_viewplane()
 {
-  if (camera_type == CAMERA_PANORAMA) {
-    viewplane.left = 0.0f;
-    viewplane.right = 1.0f;
-    viewplane.bottom = 0.0f;
-    viewplane.top = 1.0f;
+  if (camera_type == CAMERA_PANORAMA || camera_type == CAMERA_CUSTOM) {
+    viewplane = BoundBox2D();
   }
   else {
-    float aspect = (float)full_width / (float)full_height;
+    const float aspect = (float)full_width / (float)full_height;
     if (full_width >= full_height) {
-      viewplane.left = -aspect;
-      viewplane.right = aspect;
-      viewplane.bottom = -1.0f;
-      viewplane.top = 1.0f;
+      viewplane = BoundBox2D(make_float2(aspect, 1.0f));
     }
     else {
-      viewplane.left = -1.0f;
-      viewplane.right = 1.0f;
-      viewplane.bottom = -1.0f / aspect;
-      viewplane.top = 1.0f / aspect;
+      viewplane = BoundBox2D(make_float2(1.0f, 1.0f / aspect));
     }
   }
 }
 
 void Camera::update(Scene *scene)
 {
-  Scene::MotionType need_motion = scene->need_motion();
+  const Scene::MotionType need_motion = scene->need_motion();
 
   if (previous_need_motion != need_motion) {
     /* scene's motion model could have been changed since previous device
@@ -237,27 +229,27 @@ void Camera::update(Scene *scene)
     return;
   }
 
-  scoped_callback_timer timer([scene](double time) {
+  const scoped_callback_timer timer([scene](double time) {
     if (scene->update_stats) {
       scene->update_stats->camera.times.add_entry({"update", time});
     }
   });
 
   /* Full viewport to camera border in the viewport. */
-  Transform fulltoborder = transform_from_viewplane(viewport_camera_border);
-  Transform bordertofull = transform_inverse(fulltoborder);
+  const Transform fulltoborder = transform_from_viewplane(viewport_camera_border);
+  const Transform bordertofull = transform_inverse(fulltoborder);
 
   /* NDC to raster. */
-  Transform ndctoraster = transform_scale(width, height, 1.0f) * bordertofull;
-  Transform full_ndctoraster = transform_scale(full_width, full_height, 1.0f) * bordertofull;
+  const Transform ndctoraster = transform_scale(width, height, 1.0f) * bordertofull;
+  const Transform full_ndctoraster = transform_scale(full_width, full_height, 1.0f) * bordertofull;
 
   /* Raster to screen. */
-  Transform screentondc = fulltoborder * transform_from_viewplane(viewplane);
+  const Transform screentondc = fulltoborder * transform_from_viewplane(viewplane);
 
-  Transform screentoraster = ndctoraster * screentondc;
-  Transform rastertoscreen = transform_inverse(screentoraster);
-  Transform full_screentoraster = full_ndctoraster * screentondc;
-  Transform full_rastertoscreen = transform_inverse(full_screentoraster);
+  const Transform screentoraster = ndctoraster * screentondc;
+  const Transform rastertoscreen = transform_inverse(screentoraster);
+  const Transform full_screentoraster = full_ndctoraster * screentondc;
+  const Transform full_rastertoscreen = transform_inverse(full_screentoraster);
 
   /* Screen to camera. */
   ProjectionTransform cameratoscreen;
@@ -271,10 +263,18 @@ void Camera::update(Scene *scene)
     cameratoscreen = projection_identity();
   }
 
-  ProjectionTransform screentocamera = projection_inverse(cameratoscreen);
+  const ProjectionTransform screentocamera = projection_inverse(cameratoscreen);
 
   rastertocamera = screentocamera * rastertoscreen;
   full_rastertocamera = screentocamera * full_rastertoscreen;
+
+#ifdef FIX_CUSTOM_CAMERA_CRASH
+  if (camera_type == CAMERA_CUSTOM) {
+    const ProjectionTransform full_cameratoscreen = projection_perspective(fov, nearclip, farclip);
+    const ProjectionTransform full_screentocamera = projection_inverse(full_cameratoscreen);
+    full_rastertocamera = full_screentocamera * full_rastertoscreen;
+  }
+#endif
 
   cameratoworld = matrix;
   screentoworld = cameratoworld * screentocamera;
@@ -307,6 +307,14 @@ void Camera::update(Scene *scene)
               transform_perspective(&full_rastertocamera, make_float3(0, 0, 0));
   }
   else {
+#ifdef FIX_CUSTOM_CAMERA_CRASH
+    if (camera_type == CAMERA_CUSTOM) {
+      full_dx = transform_perspective(&full_rastertocamera, make_float3(1, 0, 0)) -
+                transform_perspective(&full_rastertocamera, make_float3(0, 0, 0));
+      full_dy = transform_perspective(&full_rastertocamera, make_float3(0, 1, 0)) -
+                transform_perspective(&full_rastertocamera, make_float3(0, 0, 0));
+    }
+#endif
     dx = zero_float3();
     dy = zero_float3();
   }
@@ -316,13 +324,17 @@ void Camera::update(Scene *scene)
   full_dx = transform_direction(&cameratoworld, full_dx);
   full_dy = transform_direction(&cameratoworld, full_dy);
 
+#ifdef FIX_CUSTOM_CAMERA_CRASH
+  if (camera_type == CAMERA_PERSPECTIVE || camera_type == CAMERA_CUSTOM) {
+#else
   if (camera_type == CAMERA_PERSPECTIVE) {
+#endif
     float3 v = transform_perspective(&full_rastertocamera,
-                                     make_float3(full_width, full_height, 1.0f));
+                                     make_float3(full_width, full_height, 0.0f));
     frustum_right_normal = normalize(make_float3(v.z, 0.0f, -v.x));
     frustum_top_normal = normalize(make_float3(0.0f, v.z, -v.y));
 
-    v = transform_perspective(&full_rastertocamera, make_float3(0.0f, 0.0f, 1.0f));
+    v = transform_perspective(&full_rastertocamera, make_float3(0.0f, 0.0f, 0.0f));
     frustum_left_normal = normalize(make_float3(-v.z, 0.0f, v.x));
     frustum_bottom_normal = normalize(make_float3(0.0f, -v.z, v.y));
   }
@@ -353,7 +365,7 @@ void Camera::update(Scene *scene)
   }
 
   if (need_motion == Scene::MOTION_PASS) {
-    if (camera_type == CAMERA_PANORAMA) {
+    if (camera_type == CAMERA_PANORAMA || camera_type == CAMERA_CUSTOM) {
       if (have_motion) {
         kcam->motion_pass_pre = transform_inverse(motion[0]);
         kcam->motion_pass_post = transform_inverse(motion[motion.size() - 1]);
@@ -368,12 +380,12 @@ void Camera::update(Scene *scene)
         /* Note the values for perspective_pre/perspective_post calculated for MOTION_PASS are
          * different to those calculated for MOTION_BLUR below, so the code has not been combined.
          */
-        ProjectionTransform cameratoscreen_pre = projection_perspective(
+        const ProjectionTransform cameratoscreen_pre = projection_perspective(
             fov_pre, nearclip, farclip);
-        ProjectionTransform cameratoscreen_post = projection_perspective(
+        const ProjectionTransform cameratoscreen_post = projection_perspective(
             fov_post, nearclip, farclip);
-        ProjectionTransform cameratoraster_pre = screentoraster * cameratoscreen_pre;
-        ProjectionTransform cameratoraster_post = screentoraster * cameratoscreen_post;
+        const ProjectionTransform cameratoraster_pre = screentoraster * cameratoscreen_pre;
+        const ProjectionTransform cameratoraster_post = screentoraster * cameratoscreen_post;
         kcam->perspective_pre = cameratoraster_pre * transform_inverse(motion[0]);
         kcam->perspective_post = cameratoraster_post *
                                  transform_inverse(motion[motion.size() - 1]);
@@ -393,9 +405,9 @@ void Camera::update(Scene *scene)
 
     /* TODO(sergey): Support other types of camera. */
     if (use_perspective_motion && camera_type == CAMERA_PERSPECTIVE) {
-      ProjectionTransform screentocamera_pre = projection_inverse(
+      const ProjectionTransform screentocamera_pre = projection_inverse(
           projection_perspective(fov_pre, nearclip, farclip));
-      ProjectionTransform screentocamera_post = projection_inverse(
+      const ProjectionTransform screentocamera_post = projection_inverse(
           projection_perspective(fov_post, nearclip, farclip));
 
       kcam->perspective_pre = screentocamera_pre * rastertoscreen;
@@ -468,15 +480,12 @@ void Camera::update(Scene *scene)
   kcam->height = height;
 
   /* store differentials */
-  kcam->dx = float3_to_float4(dx);
-  kcam->dy = float3_to_float4(dy);
+  kcam->dx = make_float4(dx);
+  kcam->dy = make_float4(dy);
 
   /* clipping */
   kcam->nearclip = nearclip;
   kcam->cliplength = (farclip == FLT_MAX) ? FLT_MAX : farclip - nearclip;
-
-  /* Camera in volume. */
-  kcam->is_inside_volume = 0;
 
   /* Rolling shutter effect */
   kcam->rolling_shutter_type = rolling_shutter_type;
@@ -497,7 +506,7 @@ void Camera::device_update(Device * /*device*/, DeviceScene *dscene, Scene *scen
     return;
   }
 
-  scoped_callback_timer timer([scene](double time) {
+  const scoped_callback_timer timer([scene](double time) {
     if (scene->update_stats) {
       scene->update_stats->camera.times.add_entry({"device_update", time});
     }
@@ -506,22 +515,23 @@ void Camera::device_update(Device * /*device*/, DeviceScene *dscene, Scene *scen
   scene->lookup_tables->remove_table(&shutter_table_offset);
   if (kernel_camera.shuttertime != -1.0f) {
     vector<float> shutter_table;
-    util_cdf_inverted(SHUTTER_TABLE_SIZE,
-                      0.0f,
-                      1.0f,
-                      function_bind(shutter_curve_eval, _1, shutter_curve),
-                      false,
-                      shutter_table);
+    util_cdf_inverted(
+        SHUTTER_TABLE_SIZE,
+        0.0f,
+        1.0f,
+        [this](const float x) { return shutter_curve_eval(x, shutter_curve); },
+        false,
+        shutter_table);
     shutter_table_offset = scene->lookup_tables->add_table(dscene, shutter_table);
     kernel_camera.shutter_table_offset = (int)shutter_table_offset;
   }
 
   dscene->data.cam = kernel_camera;
 
-  size_t num_motion_steps = kernel_camera_motion.size();
+  const size_t num_motion_steps = kernel_camera_motion.size();
   if (num_motion_steps) {
     DecomposedTransform *camera_motion = dscene->camera_motion.alloc(num_motion_steps);
-    memcpy(camera_motion, kernel_camera_motion.data(), sizeof(*camera_motion) * num_motion_steps);
+    std::copy_n(kernel_camera_motion.data(), num_motion_steps, camera_motion);
     dscene->camera_motion.copy_to_device();
   }
   else {
@@ -535,33 +545,42 @@ void Camera::device_update_volume(Device * /*device*/, DeviceScene *dscene, Scen
     return;
   }
 
+  kernel_camera.is_inside_volume = 0;
+
   KernelIntegrator *kintegrator = &dscene->data.integrator;
   if (kintegrator->use_volumes) {
-    KernelCamera *kcam = &dscene->data.cam;
-    BoundBox viewplane_boundbox = viewplane_bounds_get();
+    if (camera_type == CAMERA_CUSTOM) {
+      kernel_camera.is_inside_volume = 1;
+      LOG_INFO << "Considering custom camera to be inside volume.";
+    }
+    else {
+      BoundBox viewplane_boundbox = viewplane_bounds_get();
 
-    /* Parallel object update, with grain size to avoid too much threading overhead
-     * for individual objects. */
-    static const int OBJECTS_PER_TASK = 32;
-    parallel_for(blocked_range<size_t>(0, scene->objects.size(), OBJECTS_PER_TASK),
-                 [&](const blocked_range<size_t> &r) {
-                   for (size_t i = r.begin(); i != r.end(); i++) {
-                     Object *object = scene->objects[i];
-                     if (object->get_geometry()->has_volume &&
-                         viewplane_boundbox.intersects(object->bounds)) {
-                       /* TODO(sergey): Consider adding more grained check. */
-                       VLOG_INFO << "Detected camera inside volume.";
-                       kcam->is_inside_volume = 1;
-                       parallel_for_cancel();
-                       break;
+      /* Parallel object update, with grain size to avoid too much threading overhead
+       * for individual objects. */
+      static const int OBJECTS_PER_TASK = 32;
+      parallel_for(blocked_range<size_t>(0, scene->objects.size(), OBJECTS_PER_TASK),
+                   [&](const blocked_range<size_t> &r) {
+                     for (size_t i = r.begin(); i != r.end(); i++) {
+                       Object *object = scene->objects[i];
+                       if (object->get_geometry()->has_volume &&
+                           viewplane_boundbox.intersects(object->bounds)) {
+                         /* TODO(sergey): Consider adding more grained check. */
+                         LOG_INFO << "Detected camera inside volume.";
+                         kernel_camera.is_inside_volume = 1;
+                         parallel_for_cancel();
+                         break;
+                       }
                      }
-                   }
-                 });
+                   });
 
-    if (!kcam->is_inside_volume) {
-      VLOG_INFO << "Camera is outside of the volume.";
+      if (!kernel_camera.is_inside_volume) {
+        LOG_INFO << "Camera is outside of the volume.";
+      }
     }
   }
+
+  dscene->data.cam.is_inside_volume = kernel_camera.is_inside_volume;
 
   need_device_update = false;
   need_flags_update = false;
@@ -573,12 +592,13 @@ void Camera::device_free(Device * /*device*/, DeviceScene *dscene, Scene *scene)
   dscene->camera_motion.free();
 }
 
-float3 Camera::transform_raster_to_world(float raster_x, float raster_y)
+float3 Camera::transform_full_raster_to_world(const float raster_x, const float raster_y)
 {
-  float3 D, P;
+  float3 D;
+  float3 P;
   if (camera_type == CAMERA_PERSPECTIVE) {
-    D = transform_perspective(&rastertocamera, make_float3(raster_x, raster_y, 0.0f));
-    float3 Pclip = normalize(D);
+    D = transform_perspective(&full_rastertocamera, make_float3(raster_x, raster_y, 0.0f));
+    const float3 Pclip = normalize(D);
     P = zero_float3();
     /* TODO(sergey): Aperture support? */
     P = transform_point(&cameratoworld, P);
@@ -592,7 +612,7 @@ float3 Camera::transform_raster_to_world(float raster_x, float raster_y)
   else if (camera_type == CAMERA_ORTHOGRAPHIC) {
     D = make_float3(0.0f, 0.0f, 1.0f);
     /* TODO(sergey): Aperture support? */
-    P = transform_perspective(&rastertocamera, make_float3(raster_x, raster_y, 0.0f));
+    P = transform_perspective(&full_rastertocamera, make_float3(raster_x, raster_y, 0.0f));
     P = transform_point(&cameratoworld, P);
     D = normalize(transform_direction(&cameratoworld, D));
   }
@@ -611,13 +631,13 @@ BoundBox Camera::viewplane_bounds_get()
   const float max_aperture_size = aperture_ratio < 1.0f ? aperturesize / aperture_ratio :
                                                           aperturesize;
 
-  if (camera_type == CAMERA_PANORAMA) {
+  if (camera_type == CAMERA_PANORAMA || camera_type == CAMERA_CUSTOM) {
     const float extend = max_aperture_size + nearclip;
     if (use_spherical_stereo == false) {
       bounds.grow(make_float3(cameratoworld.x.w, cameratoworld.y.w, cameratoworld.z.w), extend);
     }
     else {
-      float half_eye_distance = interocular_distance * 0.5f;
+      const float half_eye_distance = interocular_distance * 0.5f;
 
       bounds.grow(
           make_float3(cameratoworld.x.w + half_eye_distance, cameratoworld.y.w, cameratoworld.z.w),
@@ -663,21 +683,21 @@ BoundBox Camera::viewplane_bounds_get()
                                           0.0f;
     const float extend = max_aperture_size + max(nearclip, scaled_horz_dof_ray);
 
-    bounds.grow(transform_raster_to_world(0.0f, 0.0f), extend);
-    bounds.grow(transform_raster_to_world(0.0f, (float)height), extend);
-    bounds.grow(transform_raster_to_world((float)width, (float)height), extend);
-    bounds.grow(transform_raster_to_world((float)width, 0.0f), extend);
+    bounds.grow(transform_full_raster_to_world(0.0f, 0.0f), extend);
+    bounds.grow(transform_full_raster_to_world(0.0f, (float)full_height), extend);
+    bounds.grow(transform_full_raster_to_world((float)full_width, (float)full_height), extend);
+    bounds.grow(transform_full_raster_to_world((float)full_width, 0.0f), extend);
     if (camera_type == CAMERA_PERSPECTIVE) {
       /* Center point has the most distance in local Z axis,
        * use it to construct bounding box/
        */
-      bounds.grow(transform_raster_to_world(0.5f * width, 0.5f * height), extend);
+      bounds.grow(transform_full_raster_to_world(0.5f * full_width, 0.5f * full_height), extend);
     }
   }
   return bounds;
 }
 
-float Camera::world_to_raster_size(float3 P)
+float Camera::world_to_raster_size(const float3 P)
 {
   float res = 1.0f;
 
@@ -685,10 +705,10 @@ float Camera::world_to_raster_size(float3 P)
     res = min(len(full_dx), len(full_dy));
 
     if (offscreen_dicing_scale > 1.0f) {
-      float3 p = transform_point(&worldtocamera, P);
-      float3 v1 = transform_perspective(&full_rastertocamera,
-                                        make_float3(full_width, full_height, 0.0f));
-      float3 v2 = transform_perspective(&full_rastertocamera, zero_float3());
+      const float3 p = transform_point(&worldtocamera, P);
+      const float3 v1 = transform_perspective(&full_rastertocamera,
+                                              make_float3(full_width, full_height, 0.0f));
+      const float3 v2 = transform_perspective(&full_rastertocamera, zero_float3());
 
       /* Create point clamped to frustum */
       float3 c;
@@ -707,19 +727,23 @@ float Camera::world_to_raster_size(float3 P)
       }
     }
   }
+#ifdef FIX_CUSTOM_CAMERA_CRASH
+  else if (camera_type == CAMERA_PERSPECTIVE || camera_type == CAMERA_CUSTOM) {
+#else
   else if (camera_type == CAMERA_PERSPECTIVE) {
+#endif
     /* Calculate as if point is directly ahead of the camera. */
-    float3 raster = make_float3(0.5f * full_width, 0.5f * full_height, 0.0f);
-    float3 Pcamera = transform_perspective(&full_rastertocamera, raster);
+    const float3 raster = make_float3(0.5f * full_width, 0.5f * full_height, 0.0f);
+    const float3 Pcamera = transform_perspective(&full_rastertocamera, raster);
 
     /* dDdx */
-    float3 Ddiff = transform_direction(&cameratoworld, Pcamera);
-    float3 dx = len_squared(full_dx) < len_squared(full_dy) ? full_dx : full_dy;
-    float3 dDdx = normalize(Ddiff + dx) - normalize(Ddiff);
+    const float3 Ddiff = transform_direction(&cameratoworld, Pcamera);
+    const float3 dx = len_squared(full_dx) < len_squared(full_dy) ? full_dx : full_dy;
+    const float3 dDdx = normalize(Ddiff + dx) - normalize(Ddiff);
 
     /* dPdx */
-    float dist = len(transform_point(&worldtocamera, P));
-    float3 D = normalize(Ddiff);
+    const float dist = len(transform_point(&worldtocamera, P));
+    const float3 D = normalize(Ddiff);
     res = len(dist * dDdx - dot(dist * dDdx, D) * D);
 
     /* Decent approx distance to frustum
@@ -727,13 +751,13 @@ float Camera::world_to_raster_size(float3 P)
     float f_dist = 0.0f;
 
     if (offscreen_dicing_scale > 1.0f) {
-      float3 p = transform_point(&worldtocamera, P);
+      const float3 p = transform_point(&worldtocamera, P);
 
       /* Distance from the four planes */
-      float r = dot(p, frustum_right_normal);
-      float t = dot(p, frustum_top_normal);
-      float l = dot(p, frustum_left_normal);
-      float b = dot(p, frustum_bottom_normal);
+      const float r = dot(p, frustum_right_normal);
+      const float t = dot(p, frustum_top_normal);
+      const float l = dot(p, frustum_left_normal);
+      const float b = dot(p, frustum_bottom_normal);
 
       if (r <= 0.0f && l <= 0.0f && t <= 0.0f && b <= 0.0f) {
         /* Point is inside frustum */
@@ -745,10 +769,12 @@ float Camera::world_to_raster_size(float3 P)
       }
       else {
         /* Point may be behind or off to the side, need to check */
-        float3 along_right = make_float3(-frustum_right_normal.z, 0.0f, frustum_right_normal.x);
-        float3 along_left = make_float3(frustum_left_normal.z, 0.0f, -frustum_left_normal.x);
-        float3 along_top = make_float3(0.0f, -frustum_top_normal.z, frustum_top_normal.y);
-        float3 along_bottom = make_float3(0.0f, frustum_bottom_normal.z, -frustum_bottom_normal.y);
+        const float3 along_right = make_float3(
+            -frustum_right_normal.z, 0.0f, frustum_right_normal.x);
+        const float3 along_left = make_float3(frustum_left_normal.z, 0.0f, -frustum_left_normal.x);
+        const float3 along_top = make_float3(0.0f, -frustum_top_normal.z, frustum_top_normal.y);
+        const float3 along_bottom = make_float3(
+            0.0f, frustum_bottom_normal.z, -frustum_bottom_normal.y);
 
         float dist[] = {r, l, t, b};
         float3 along[] = {along_right, along_left, along_top, along_bottom};
@@ -782,38 +808,47 @@ float Camera::world_to_raster_size(float3 P)
       }
     }
   }
-  else if (camera_type == CAMERA_PANORAMA) {
-    float3 D = transform_point(&worldtocamera, P);
-    float dist = len(D);
+  else if (camera_type == CAMERA_PANORAMA || camera_type == CAMERA_CUSTOM) {
+    const float3 D = transform_point(&worldtocamera, P);
+    const float dist = len(D);
 
-    Ray ray;
-    memset(&ray, 0, sizeof(ray));
+    Ray ray = {};
 
     /* Distortion can become so great that the results become meaningless, there
      * may be a better way to do this, but calculating differentials from the
      * point directly ahead seems to produce good enough results. */
+    if (camera_type == CAMERA_CUSTOM) {
+      camera_sample_custom(nullptr,
+                           &kernel_camera,
+                           kernel_camera_motion.data(),
+                           0.5f * make_float2(full_width, full_height),
+                           zero_float2(),
+                           &ray);
+    }
+    else {
 #if 0
-    float2 dir = direction_to_panorama(&kernel_camera, kernel_camera_motion.data(), normalize(D));
-    float3 raster = transform_perspective(&full_cameratoraster, make_float3(dir.x, dir.y, 0.0f));
+      float2 dir = direction_to_panorama(&kernel_camera, kernel_camera_motion.data(), normalize(D));
+      float3 raster = transform_perspective(&full_cameratoraster, make_float3(dir.x, dir.y, 0.0f));
 
-    ray.t = 1.0f;
-    camera_sample_panorama(
-        &kernel_camera, kernel_camera_motion.data(), raster.x, raster.y, 0.0f, 0.0f, &ray);
-    if (ray.t == 0.0f) {
-      /* No differentials, just use from directly ahead. */
+      ray.t = 1.0f;
+      camera_sample_panorama(
+          &kernel_camera, kernel_camera_motion.data(), raster.x, raster.y, 0.0f, 0.0f, &ray);
+      if (ray.t == 0.0f) {
+        /* No differentials, just use from directly ahead. */
+        camera_sample_panorama(&kernel_camera,
+                              kernel_camera_motion.data(),
+                              0.5f * make_float2(full_width, full_height),
+                              zero_float2(),
+                              &ray);
+      }
+#else
       camera_sample_panorama(&kernel_camera,
                              kernel_camera_motion.data(),
                              0.5f * make_float2(full_width, full_height),
                              zero_float2(),
                              &ray);
-    }
-#else
-    camera_sample_panorama(&kernel_camera,
-                           kernel_camera_motion.data(),
-                           0.5f * make_float2(full_width, full_height),
-                           zero_float2(),
-                           &ray);
 #endif
+    }
 
     /* TODO: would it help to use more accurate differentials here? */
     return differential_transfer_compact(ray.dP, ray.D, ray.dD, dist);
@@ -827,21 +862,24 @@ bool Camera::use_motion() const
   return motion.size() > 1;
 }
 
-void Camera::set_screen_size(int width_, int height_)
+bool Camera::set_screen_size(const int width_, int height_)
 {
   if (width_ != width || height_ != height) {
     width = width_;
     height = height_;
     tag_modified();
+    return true;
   }
+
+  return false;
 }
 
-float Camera::motion_time(int step) const
+float Camera::motion_time(const int step) const
 {
   return (use_motion()) ? 2.0f * step / (motion.size() - 1) - 1.0f : 0.0f;
 }
 
-int Camera::motion_step(float time) const
+int Camera::motion_step(const float time) const
 {
   if (use_motion()) {
     for (int step = 0; step < motion.size(); step++) {
@@ -852,6 +890,147 @@ int Camera::motion_step(float time) const
   }
 
   return -1;
+}
+
+void Camera::set_osl_camera(Scene *scene,
+                            OSLCameraParamQuery &params,
+                            const std::string &filepath,
+                            const std::string &bytecode_hash,
+                            const std::string &bytecode)
+{
+#ifdef WITH_OSL
+  /* Ensure shading system exists before we try to load a shader. */
+  scene->osl_manager->shading_system_init(scene->shader_manager->get_scene_linear_space());
+
+  /* Load the shader. */
+  const char *hash;
+
+  if (!filepath.empty()) {
+    hash = scene->osl_manager->shader_load_filepath(filepath);
+  }
+  else {
+    hash = scene->osl_manager->shader_test_loaded(bytecode_hash);
+    if (!hash) {
+      hash = scene->osl_manager->shader_load_bytecode(bytecode_hash, bytecode);
+    }
+  }
+
+  bool changed = false;
+
+  if (!hash) {
+    changed = (!script_name.empty() || !script_params.empty());
+    script_name = "";
+    script_params.clear();
+  }
+  else {
+    changed = (script_name != hash);
+    script_name = hash;
+
+    OSLShaderInfo *info = scene->osl_manager->shader_loaded_info(hash);
+
+    /* Fetch parameter values. */
+    std::set<ustring> used_params;
+    for (int i = 0; i < info->query.nparams(); i++) {
+      const OSL::OSLQuery::Parameter *param = info->query.getparam(i);
+
+      /* Skip unsupported types. */
+      if (param->varlenarray || param->isstruct || param->type.arraylen > 1 || param->isoutput ||
+          param->isclosure)
+        continue;
+
+      vector<uint8_t> raw_data;
+      int vec_size = (int)param->type.aggregate;
+      if (param->type.basetype == TypeDesc::INT) {
+        vector<int> data;
+        if (!params.get_int(param->name, data) || data.size() != vec_size) {
+          continue;
+        }
+        raw_data.resize(sizeof(int) * vec_size);
+        memcpy(raw_data.data(), data.data(), sizeof(int) * vec_size);
+      }
+      else if (param->type.basetype == TypeDesc::FLOAT) {
+        vector<float> data;
+        if (!params.get_float(param->name, data) || data.size() != vec_size) {
+          continue;
+        }
+        raw_data.resize(sizeof(float) * vec_size);
+        memcpy(raw_data.data(), data.data(), sizeof(float) * vec_size);
+      }
+      else if (param->type.basetype == TypeDesc::STRING) {
+        string data;
+        if (!params.get_string(param->name, data)) {
+          continue;
+        }
+        raw_data.resize(data.length() + 1);
+        memcpy(raw_data.data(), data.c_str(), data.length() + 1);
+      }
+      else
+        continue;
+
+      auto entry = std::make_pair(raw_data, param->type);
+      auto it = script_params.find(param->name);
+      if (it == script_params.end()) {
+        script_params[param->name] = entry;
+        changed = true;
+      }
+      else if (it->second != entry) {
+        it->second = entry;
+        changed = true;
+      }
+
+      used_params.insert(param->name);
+    }
+
+    /* Remove unused parameters. */
+    for (auto it = script_params.begin(); it != script_params.end();) {
+      if (used_params.count(it->first)) {
+        it++;
+      }
+      else {
+        it = script_params.erase(it);
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) {
+    tag_modified();
+    scene->osl_manager->tag_update();
+  }
+#else
+  (void)scene;
+  (void)params;
+  (void)filepath;
+  (void)bytecode_hash;
+  (void)bytecode;
+#endif
+}
+
+void Camera::clear_osl_camera(Scene *scene)
+{
+#ifdef WITH_OSL
+  if (script_name == "") {
+    return;
+  }
+
+  script_name = "";
+  script_params.clear();
+
+  scene->osl_manager->tag_update();
+#else
+  (void)scene;
+#endif
+}
+
+uint Camera::get_kernel_features() const
+{
+  uint kernel_features = 0;
+
+  if (!script_name.empty()) {
+    kernel_features |= KERNEL_FEATURE_OSL_CAMERA;
+  }
+
+  return kernel_features;
 }
 
 CCL_NAMESPACE_END

@@ -6,21 +6,14 @@
  * \ingroup shader_fx
  */
 
-#include <cstdio>
-
-#include "DNA_gpencil_legacy_types.h"
-#include "DNA_object_types.h"
-#include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 
 #include "BKE_context.hh"
 #include "BKE_screen.hh"
 
-#include "BLI_utildefines.h"
-
 #include "BLT_translation.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "RNA_access.hh"
@@ -48,12 +41,12 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
 
   PointerRNA *ptr = shaderfx_panel_get_property_pointers(panel, nullptr);
 
-  uiLayoutSetPropSep(layout, true);
+  layout->use_property_split_set(true);
 
-  uiItemR(layout, ptr, "orientation", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "amplitude", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "period", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "phase", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->prop(ptr, "orientation", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
+  layout->prop(ptr, "amplitude", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  layout->prop(ptr, "period", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  layout->prop(ptr, "phase", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   shaderfx_panel_end(layout, ptr);
 }
@@ -78,5 +71,6 @@ ShaderFxTypeInfo shaderfx_Type_Wave = {
     /*update_depsgraph*/ nullptr,
     /*depends_on_time*/ nullptr,
     /*foreach_ID_link*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
     /*panel_register*/ panel_register,
 };

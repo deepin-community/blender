@@ -21,8 +21,13 @@ To validate that things are registered correctly:
 3. Run `info frame-filter` and check for `blender-frame-filters`.
 '''
 
+__all__ = (
+    # Not used externally but functions as a `main`.
+    "register",
+)
+
 import gdb
-import functools
+import gdb.printing
 from contextlib import contextmanager
 from gdb.FrameDecorator import FrameDecorator
 
@@ -531,8 +536,10 @@ class LazyFunctionEvalFilter:
     @staticmethod
     def frame_to_name(frame):
         function_name = frame.function()
-        if (function_name.startswith("blender::fn::lazy_function::LazyFunction::execute")
-                or function_name.startswith("blender::fn::lazy_function::Executor::push_to_task_pool")):
+        if function_name.startswith((
+                "blender::fn::lazy_function::LazyFunction::execute",
+                "blender::fn::lazy_function::Executor::push_to_task_pool",
+        )):
             return "Execute Lazy Function"
 
 
@@ -673,4 +680,5 @@ def register():
     gdb.frame_filters[frame_filter.name] = frame_filter
 
 
-register()
+if __name__ == "__main__":
+    register()

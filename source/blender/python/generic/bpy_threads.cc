@@ -11,6 +11,8 @@
 
 #include <Python.h>
 
+#include "python_compat.hh" /* IWYU pragma: keep. */
+
 #include "../BPY_extern.hh"
 
 BPy_ThreadStatePtr BPY_thread_save()
@@ -20,7 +22,7 @@ BPy_ThreadStatePtr BPY_thread_save()
    *
    * `PyEval_SaveThread()` will release the GIL, so this thread has to have the GIL to begin with
    * or badness will ensue. */
-  if (_PyThreadState_UncheckedGet() && PyGILState_Check()) {
+  if (PyThreadState_GetUnchecked() && PyGILState_Check()) {
     return (BPy_ThreadStatePtr)PyEval_SaveThread();
   }
   return nullptr;
@@ -30,5 +32,32 @@ void BPY_thread_restore(BPy_ThreadStatePtr tstate)
 {
   if (tstate) {
     PyEval_RestoreThread((PyThreadState *)tstate);
+  }
+}
+
+void BPY_thread_backtrace_print()
+{
+  PyThreadState *tstate = PyGILState_GetThisThreadState();
+
+  if (tstate) {
+    PyFrameObject *frame = PyThreadState_GetFrame(tstate);
+
+    printf(frame ? "Python stack trace:\n" : "No Python stack trace available.\n");
+
+    while (frame) {
+      PyCodeObject *frame_co = PyFrame_GetCode(frame);
+      int line = PyFrame_GetLineNumber(frame);
+      const char *filename = PyUnicode_AsUTF8(frame_co->co_filename);
+      const char *funcname = PyUnicode_AsUTF8(frame_co->co_name);
+      printf("    %s:%d %s\n", filename, line, funcname);
+      Py_DECREF(frame_co);
+      PyFrameObject *frame_back = PyFrame_GetBack(frame);
+      Py_DECREF(frame);
+      frame = frame_back;
+    }
+    printf("\n");
+  }
+  else {
+    printf("No Python thread state available.\n");
   }
 }

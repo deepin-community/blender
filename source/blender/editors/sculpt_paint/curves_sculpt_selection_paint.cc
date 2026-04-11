@@ -3,11 +3,9 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include <algorithm>
-#include <numeric>
 
 #include "BLI_math_geom.h"
 #include "BLI_math_matrix.hh"
-#include "BLI_memory_utils.hh"
 #include "BLI_task.hh"
 
 #include "DNA_brush_types.h"
@@ -65,6 +63,7 @@ struct SelectionPaintOperationExecutor {
 
   bke::SpanAttributeWriter<float> selection_;
 
+  CurvesSculpt *curves_sculpt_ = nullptr;
   const Brush *brush_ = nullptr;
   float brush_radius_base_re_;
   float brush_radius_factor_;
@@ -87,7 +86,7 @@ struct SelectionPaintOperationExecutor {
 
     curves_id_ = static_cast<Curves *>(object_->data);
     curves_ = &curves_id_->geometry.wrap();
-    if (curves_->curves_num() == 0) {
+    if (curves_->is_empty()) {
       return;
     }
     selection_ = float_selection_ensure(*curves_id_);
@@ -95,10 +94,11 @@ struct SelectionPaintOperationExecutor {
       return;
     }
 
-    brush_ = BKE_paint_brush_for_read(&ctx_.scene->toolsettings->curves_sculpt->paint);
-    brush_radius_base_re_ = BKE_brush_size_get(ctx_.scene, brush_);
+    curves_sculpt_ = ctx_.scene->toolsettings->curves_sculpt;
+    brush_ = BKE_paint_brush_for_read(&curves_sculpt_->paint);
+    brush_radius_base_re_ = BKE_brush_radius_get(&curves_sculpt_->paint, brush_);
     brush_radius_factor_ = brush_radius_factor(*brush_, stroke_extension);
-    brush_strength_ = BKE_brush_alpha_get(ctx_.scene, brush_);
+    brush_strength_ = brush_strength_get(curves_sculpt_->paint, *brush_, stroke_extension);
 
     brush_pos_re_ = stroke_extension.mouse_position;
 
@@ -115,7 +115,7 @@ struct SelectionPaintOperationExecutor {
     selection_goal_ = self_->use_select_ ? 1.0f : 0.0f;
 
     if (stroke_extension.is_first) {
-      if (falloff_shape == PAINT_FALLOFF_SHAPE_SPHERE) {
+      if (falloff_shape == PAINT_FALLOFF_SHAPE_SPHERE || (U.uiflag & USER_ORBIT_SELECTION)) {
         this->initialize_spherical_brush_reference_point();
       }
     }
@@ -377,6 +377,9 @@ struct SelectionPaintOperationExecutor {
                                                                    brush_radius_base_re_);
     if (brush_3d.has_value()) {
       self_->brush_3d_ = *brush_3d;
+      remember_stroke_position(
+          *curves_sculpt_,
+          math::transform_point(transforms_.curves_to_world, self_->brush_3d_.position_cu));
     }
   }
 };

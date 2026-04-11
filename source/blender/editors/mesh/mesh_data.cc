@@ -10,16 +10,16 @@
 
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
-#include "DNA_view3d_types.h"
 
 #include "BLI_array.hh"
-#include "BLI_utildefines.h"
+#include "BLI_math_constants.h"
 
 #include "BKE_attribute.hh"
 #include "BKE_context.hh"
 #include "BKE_customdata.hh"
 #include "BKE_editmesh.hh"
 #include "BKE_key.hh"
+#include "BKE_library.hh"
 #include "BKE_mesh.hh"
 #include "BKE_mesh_runtime.hh"
 #include "BKE_report.hh"
@@ -47,6 +47,7 @@ using blender::float2;
 using blender::float3;
 using blender::MutableSpan;
 using blender::Span;
+using blender::StringRef;
 
 static CustomData *mesh_customdata_get_type(Mesh *mesh, const char htype, int *r_tot)
 {
@@ -148,7 +149,7 @@ static void mesh_uv_reset_array(float **fuv, const int len)
   }
 }
 
-static void mesh_uv_reset_bmface(BMFace *f, const int cd_loop_uv_offset)
+static void reset_uvs_bmesh(BMFace *f, const int cd_loop_uv_offset)
 {
   Array<float *, BM_DEFAULT_NGON_STACK_SIZE> fuv(f->len);
   BMIter liter;
@@ -162,47 +163,43 @@ static void mesh_uv_reset_bmface(BMFace *f, const int cd_loop_uv_offset)
   mesh_uv_reset_array(fuv.data(), f->len);
 }
 
-static void mesh_uv_reset_mface(const blender::IndexRange face, float2 *mloopuv)
+static void reset_uvs_mesh(const blender::IndexRange face, MutableSpan<float2> uv_map)
 {
   Array<float *, BM_DEFAULT_NGON_STACK_SIZE> fuv(face.size());
 
   for (int i = 0; i < face.size(); i++) {
-    fuv[i] = mloopuv[face[i]];
+    fuv[i] = &uv_map[face[i]].x;
   }
 
   mesh_uv_reset_array(fuv.data(), face.size());
 }
 
-void ED_mesh_uv_loop_reset_ex(Mesh *mesh, const int layernum)
+static void reset_uv_map(Mesh *mesh, const StringRef name)
 {
+  using namespace blender;
   if (BMEditMesh *em = mesh->runtime->edit_mesh.get()) {
-    /* Collect BMesh UVs */
-    const int cd_loop_uv_offset = CustomData_get_n_offset(
-        &em->bm->ldata, CD_PROP_FLOAT2, layernum);
+    const int cd_loop_uv_offset = CustomData_get_offset_named(
+        &em->bm->ldata, CD_PROP_FLOAT2, name);
+    BLI_assert(cd_loop_uv_offset >= 0);
 
     BMFace *efa;
     BMIter iter;
-
-    BLI_assert(cd_loop_uv_offset >= 0);
-
     BM_ITER_MESH (efa, &iter, em->bm, BM_FACES_OF_MESH) {
       if (!BM_elem_flag_test(efa, BM_ELEM_SELECT)) {
         continue;
       }
-
-      mesh_uv_reset_bmface(efa, cd_loop_uv_offset);
+      reset_uvs_bmesh(efa, cd_loop_uv_offset);
     }
   }
   else {
-    /* Collect Mesh UVs */
-    BLI_assert(CustomData_has_layer(&mesh->corner_data, CD_PROP_FLOAT2));
-    float2 *mloopuv = static_cast<float2 *>(CustomData_get_layer_n_for_write(
-        &mesh->corner_data, CD_PROP_FLOAT2, layernum, mesh->corners_num));
-
-    const blender::OffsetIndices polys = mesh->faces();
-    for (const int i : polys.index_range()) {
-      mesh_uv_reset_mface(polys[i], mloopuv);
+    const OffsetIndices faces = mesh->faces();
+    bke::MutableAttributeAccessor attributes = mesh->attributes_for_write();
+    bke::SpanAttributeWriter uv_map = attributes.lookup_for_write_span<float2>(name);
+    BLI_assert(uv_map.domain == bke::AttrDomain::Corner);
+    for (const int i : faces.index_range()) {
+      reset_uvs_mesh(faces[i], uv_map.span);
     }
+    uv_map.finish();
   }
 
   DEG_id_tag_update(&mesh->id, 0);
@@ -212,8 +209,8 @@ void ED_mesh_uv_loop_reset(bContext *C, Mesh *mesh)
 {
   /* could be ldata or pdata */
   CustomData *ldata = mesh_customdata_get_type(mesh, BM_LOOP, nullptr);
-  const int layernum = CustomData_get_active_layer(ldata, CD_PROP_FLOAT2);
-  ED_mesh_uv_loop_reset_ex(mesh, layernum);
+  const char *name = CustomData_get_active_layer_name(ldata, CD_PROP_FLOAT2);
+  reset_uv_map(mesh, name);
 
   WM_event_add_notifier(C, NC_GEOM | ND_DATA, mesh);
 }
@@ -241,7 +238,7 @@ int ED_mesh_uv_add(
     }
 
     BM_data_layer_add_named(em->bm, &em->bm->ldata, CD_PROP_FLOAT2, unique_name.c_str());
-    BM_uv_map_ensure_select_and_pin_attrs(em->bm);
+    BM_uv_map_attr_pin_ensure_for_all_layers(em->bm);
     /* copy data from active UV */
     if (layernum_dst && do_init) {
       const int layernum_src = CustomData_get_active_layer(&em->bm->ldata, CD_PROP_FLOAT2);
@@ -283,7 +280,7 @@ int ED_mesh_uv_add(
 
   /* don't overwrite our copied coords */
   if (!is_init && do_init) {
-    ED_mesh_uv_loop_reset_ex(mesh, layernum_dst);
+    reset_uv_map(mesh, unique_name);
   }
 
   DEG_id_tag_update(&mesh->id, 0);
@@ -292,67 +289,29 @@ int ED_mesh_uv_add(
   return layernum_dst;
 }
 
-static const bool *mesh_loop_boolean_custom_data_get_by_name(const Mesh &mesh, const char *name)
+static blender::VArray<bool> get_corner_boolean_attribute(const Mesh &mesh, const StringRef name)
 {
-  return static_cast<const bool *>(
-      CustomData_get_layer_named(&mesh.corner_data, CD_PROP_BOOL, name));
+  const blender::bke::AttributeAccessor attributes = mesh.attributes();
+  return *attributes.lookup_or_default<bool>(name, blender::bke::AttrDomain::Corner, false);
 }
 
-const bool *ED_mesh_uv_map_vert_select_layer_get(const Mesh *mesh, const int uv_index)
+blender::VArray<bool> ED_mesh_uv_map_pin_layer_get(const Mesh *mesh, const int uv_index)
 {
   using namespace blender::bke;
   char buffer[MAX_CUSTOMDATA_LAYER_NAME];
   const char *uv_name = CustomData_get_layer_name(&mesh->corner_data, CD_PROP_FLOAT2, uv_index);
-  return mesh_loop_boolean_custom_data_get_by_name(
-      *mesh, BKE_uv_map_vert_select_name_get(uv_name, buffer));
-}
-const bool *ED_mesh_uv_map_edge_select_layer_get(const Mesh *mesh, const int uv_index)
-{
-  /* UV map edge selections are stored on face corners (loops) and not on edges
-   * because we need selections per face edge, even when the edge is split in UV space. */
-
-  using namespace blender::bke;
-  char buffer[MAX_CUSTOMDATA_LAYER_NAME];
-  const char *uv_name = CustomData_get_layer_name(&mesh->corner_data, CD_PROP_FLOAT2, uv_index);
-  return mesh_loop_boolean_custom_data_get_by_name(
-      *mesh, BKE_uv_map_edge_select_name_get(uv_name, buffer));
+  return get_corner_boolean_attribute(*mesh, BKE_uv_map_pin_name_get(uv_name, buffer));
 }
 
-const bool *ED_mesh_uv_map_pin_layer_get(const Mesh *mesh, const int uv_index)
+static blender::bke::AttributeWriter<bool> ensure_corner_boolean_attribute(Mesh &mesh,
+                                                                           const StringRef name)
 {
-  using namespace blender::bke;
-  char buffer[MAX_CUSTOMDATA_LAYER_NAME];
-  const char *uv_name = CustomData_get_layer_name(&mesh->corner_data, CD_PROP_FLOAT2, uv_index);
-  return mesh_loop_boolean_custom_data_get_by_name(*mesh,
-                                                   BKE_uv_map_pin_name_get(uv_name, buffer));
+  blender::bke::MutableAttributeAccessor attributes = mesh.attributes_for_write();
+  return attributes.lookup_or_add_for_write<bool>(
+      name, blender::bke::AttrDomain::Corner, blender::bke::AttributeInitDefaultValue());
 }
 
-static bool *ensure_corner_boolean_attribute(Mesh &mesh, const blender::StringRefNull name)
-{
-  bool *data = static_cast<bool *>(CustomData_get_layer_named_for_write(
-      &mesh.corner_data, CD_PROP_BOOL, name, mesh.corners_num));
-  if (!data) {
-    data = static_cast<bool *>(CustomData_add_layer_named(
-        &mesh.corner_data, CD_PROP_BOOL, CD_SET_DEFAULT, mesh.faces_num, name));
-  }
-  return data;
-}
-
-bool *ED_mesh_uv_map_vert_select_layer_ensure(Mesh *mesh, const int uv_index)
-{
-  using namespace blender::bke;
-  char buffer[MAX_CUSTOMDATA_LAYER_NAME];
-  const char *uv_name = CustomData_get_layer_name(&mesh->corner_data, CD_PROP_FLOAT2, uv_index);
-  return ensure_corner_boolean_attribute(*mesh, BKE_uv_map_vert_select_name_get(uv_name, buffer));
-}
-bool *ED_mesh_uv_map_edge_select_layer_ensure(Mesh *mesh, const int uv_index)
-{
-  using namespace blender::bke;
-  char buffer[MAX_CUSTOMDATA_LAYER_NAME];
-  const char *uv_name = CustomData_get_layer_name(&mesh->corner_data, CD_PROP_FLOAT2, uv_index);
-  return ensure_corner_boolean_attribute(*mesh, BKE_uv_map_edge_select_name_get(uv_name, buffer));
-}
-bool *ED_mesh_uv_map_pin_layer_ensure(Mesh *mesh, const int uv_index)
+blender::bke::AttributeWriter<bool> ED_mesh_uv_map_pin_layer_ensure(Mesh *mesh, const int uv_index)
 {
   using namespace blender::bke;
   char buffer[MAX_CUSTOMDATA_LAYER_NAME];
@@ -432,14 +391,14 @@ bool ED_mesh_color_ensure(Mesh *mesh, const char *name)
   const std::string unique_name = BKE_attribute_calc_unique_name(owner, name);
   if (!mesh->attributes_for_write().add(unique_name,
                                         bke::AttrDomain::Corner,
-                                        CD_PROP_BYTE_COLOR,
+                                        bke::AttrType::ColorByte,
                                         bke::AttributeInitDefaultValue()))
   {
     return false;
   }
 
-  BKE_id_attributes_active_color_set(&mesh->id, unique_name.c_str());
-  BKE_id_attributes_default_color_set(&mesh->id, unique_name.c_str());
+  BKE_id_attributes_active_color_set(&mesh->id, unique_name);
+  BKE_id_attributes_default_color_set(&mesh->id, unique_name);
   BKE_mesh_tessface_clear(mesh);
   DEG_id_tag_update(&mesh->id, 0);
 
@@ -475,7 +434,7 @@ static bool uv_texture_remove_poll(bContext *C)
   return false;
 }
 
-static int mesh_uv_texture_add_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus mesh_uv_texture_add_exec(bContext *C, wmOperator *op)
 {
   Object *ob = blender::ed::object::context_object(C);
   Mesh *mesh = static_cast<Mesh *>(ob->data);
@@ -500,7 +459,7 @@ void MESH_OT_uv_texture_add(wmOperatorType *ot)
   ot->description = "Add UV map";
   ot->idname = "MESH_OT_uv_texture_add";
 
-  /* api callbacks */
+  /* API callbacks. */
   ot->poll = layers_poll;
   ot->exec = mesh_uv_texture_add_exec;
 
@@ -508,7 +467,7 @@ void MESH_OT_uv_texture_add(wmOperatorType *ot)
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
-static int mesh_uv_texture_remove_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus mesh_uv_texture_remove_exec(bContext *C, wmOperator *op)
 {
   Object *ob = blender::ed::object::context_object(C);
   Mesh *mesh = static_cast<Mesh *>(ob->data);
@@ -539,7 +498,7 @@ void MESH_OT_uv_texture_remove(wmOperatorType *ot)
   ot->description = "Remove UV map";
   ot->idname = "MESH_OT_uv_texture_remove";
 
-  /* api callbacks */
+  /* API callbacks. */
   ot->poll = uv_texture_remove_poll;
   ot->exec = mesh_uv_texture_remove_exec;
 
@@ -549,14 +508,13 @@ void MESH_OT_uv_texture_remove(wmOperatorType *ot)
 
 /* *** CustomData clear functions, we need an operator for each *** */
 
-static int mesh_customdata_clear_exec__internal(bContext *C,
-                                                char htype,
-                                                const eCustomDataType type)
+static wmOperatorStatus mesh_customdata_clear_exec__internal(bContext *C,
+                                                             char htype,
+                                                             const eCustomDataType type)
 {
   Mesh *mesh = ED_mesh_context(C);
 
-  int tot;
-  CustomData *data = mesh_customdata_get_type(mesh, htype, &tot);
+  CustomData *data = mesh_customdata_get_type(mesh, htype, nullptr);
 
   BLI_assert(CustomData_layertype_is_singleton(type) == true);
 
@@ -565,7 +523,7 @@ static int mesh_customdata_clear_exec__internal(bContext *C,
       BM_data_layer_free(mesh->runtime->edit_mesh->bm, data, type);
     }
     else {
-      CustomData_free_layers(data, type, tot);
+      CustomData_free_layers(data, type);
     }
 
     DEG_id_tag_update(&mesh->id, ID_RECALC_GEOMETRY);
@@ -601,7 +559,7 @@ static bool mesh_customdata_mask_clear_poll(bContext *C)
   }
   return false;
 }
-static int mesh_customdata_mask_clear_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus mesh_customdata_mask_clear_exec(bContext *C, wmOperator *op)
 {
   Object *object = blender::ed::object::context_object(C);
   Mesh *mesh = static_cast<Mesh *>(object->data);
@@ -624,7 +582,7 @@ void MESH_OT_customdata_mask_clear(wmOperatorType *ot)
   ot->idname = "MESH_OT_customdata_mask_clear";
   ot->description = "Clear vertex sculpt masking data from the mesh";
 
-  /* api callbacks */
+  /* API callbacks. */
   ot->exec = mesh_customdata_mask_clear_exec;
   ot->poll = mesh_customdata_mask_clear_poll;
 
@@ -655,7 +613,7 @@ static bool mesh_customdata_skin_add_poll(bContext *C)
   return (mesh_customdata_skin_state(C) == 0);
 }
 
-static int mesh_customdata_skin_add_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus mesh_customdata_skin_add_exec(bContext *C, wmOperator * /*op*/)
 {
   Object *ob = blender::ed::object::context_object(C);
   Mesh *mesh = static_cast<Mesh *>(ob->data);
@@ -675,7 +633,7 @@ void MESH_OT_customdata_skin_add(wmOperatorType *ot)
   ot->idname = "MESH_OT_customdata_skin_add";
   ot->description = "Add a vertex skin layer";
 
-  /* api callbacks */
+  /* API callbacks. */
   ot->exec = mesh_customdata_skin_add_exec;
   ot->poll = mesh_customdata_skin_add_poll;
 
@@ -688,7 +646,7 @@ static bool mesh_customdata_skin_clear_poll(bContext *C)
   return (mesh_customdata_skin_state(C) == 1);
 }
 
-static int mesh_customdata_skin_clear_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus mesh_customdata_skin_clear_exec(bContext *C, wmOperator * /*op*/)
 {
   return mesh_customdata_clear_exec__internal(C, BM_VERT, CD_MVERT_SKIN);
 }
@@ -700,7 +658,7 @@ void MESH_OT_customdata_skin_clear(wmOperatorType *ot)
   ot->idname = "MESH_OT_customdata_skin_clear";
   ot->description = "Clear vertex skin layer";
 
-  /* api callbacks */
+  /* API callbacks. */
   ot->exec = mesh_customdata_skin_clear_exec;
   ot->poll = mesh_customdata_skin_clear_poll;
 
@@ -709,7 +667,8 @@ void MESH_OT_customdata_skin_clear(wmOperatorType *ot)
 }
 
 /* Clear custom loop normals */
-static int mesh_customdata_custom_splitnormals_add_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus mesh_customdata_custom_splitnormals_add_exec(bContext *C,
+                                                                     wmOperator * /*op*/)
 {
   using namespace blender;
   Mesh *mesh = ED_mesh_context(C);
@@ -719,11 +678,14 @@ static int mesh_customdata_custom_splitnormals_add_exec(bContext *C, wmOperator 
 
   if (mesh->runtime->edit_mesh) {
     BMesh &bm = *mesh->runtime->edit_mesh->bm;
-    BM_data_layer_add(&bm, &bm.ldata, CD_CUSTOMLOOPNORMAL);
+    BM_data_layer_ensure_named(&bm, &bm.ldata, CD_PROP_INT16_2D, "custom_normal");
   }
   else {
-    CustomData_add_layer(
-        &mesh->corner_data, CD_CUSTOMLOOPNORMAL, CD_SET_DEFAULT, mesh->corners_num);
+    if (!mesh->attributes_for_write().add<short2>(
+            "custom_normal", bke::AttrDomain::Corner, bke::AttributeInitDefaultValue()))
+    {
+      return OPERATOR_CANCELLED;
+    }
   }
 
   DEG_id_tag_update(&mesh->id, 0);
@@ -735,11 +697,11 @@ static int mesh_customdata_custom_splitnormals_add_exec(bContext *C, wmOperator 
 void MESH_OT_customdata_custom_splitnormals_add(wmOperatorType *ot)
 {
   /* identifiers */
-  ot->name = "Add Custom Split Normals Data";
+  ot->name = "Add Custom Normals Data";
   ot->idname = "MESH_OT_customdata_custom_splitnormals_add";
-  ot->description = "Add a custom split normals layer, if none exists yet";
+  ot->description = "Add a custom normals layer, if none exists yet";
 
-  /* api callbacks */
+  /* API callbacks. */
   ot->exec = mesh_customdata_custom_splitnormals_add_exec;
   ot->poll = ED_operator_editable_mesh;
 
@@ -747,25 +709,25 @@ void MESH_OT_customdata_custom_splitnormals_add(wmOperatorType *ot)
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
-static int mesh_customdata_custom_splitnormals_clear_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus mesh_customdata_custom_splitnormals_clear_exec(bContext *C,
+                                                                       wmOperator * /*op*/)
 {
   Mesh *mesh = ED_mesh_context(C);
 
   if (BMEditMesh *em = mesh->runtime->edit_mesh.get()) {
     BMesh &bm = *em->bm;
-    if (!CustomData_has_layer(&bm.ldata, CD_CUSTOMLOOPNORMAL)) {
+    if (!CustomData_has_layer_named(&bm.ldata, CD_PROP_INT16_2D, "custom_normal")) {
       return OPERATOR_CANCELLED;
     }
-    BM_data_layer_free(&bm, &bm.ldata, CD_CUSTOMLOOPNORMAL);
+    BM_data_layer_free_named(&bm, &bm.ldata, "custom_normal");
     if (bm.lnor_spacearr) {
       BKE_lnor_spacearr_clear(bm.lnor_spacearr);
     }
   }
   else {
-    if (!CustomData_has_layer(&mesh->corner_data, CD_CUSTOMLOOPNORMAL)) {
+    if (!mesh->attributes_for_write().remove("custom_normal")) {
       return OPERATOR_CANCELLED;
     }
-    CustomData_free_layers(&mesh->corner_data, CD_CUSTOMLOOPNORMAL, mesh->corners_num);
   }
 
   mesh->tag_custom_normals_changed();
@@ -778,11 +740,11 @@ static int mesh_customdata_custom_splitnormals_clear_exec(bContext *C, wmOperato
 void MESH_OT_customdata_custom_splitnormals_clear(wmOperatorType *ot)
 {
   /* identifiers */
-  ot->name = "Clear Custom Split Normals Data";
+  ot->name = "Clear Custom Normals Data";
   ot->idname = "MESH_OT_customdata_custom_splitnormals_clear";
-  ot->description = "Remove the custom split normals layer, if it exists";
+  ot->description = "Remove the custom normals layer, if it exists";
 
-  /* api callbacks */
+  /* API callbacks. */
   ot->exec = mesh_customdata_custom_splitnormals_clear_exec;
   ot->poll = ED_operator_editable_mesh;
 
@@ -807,7 +769,7 @@ static void mesh_add_verts(Mesh *mesh, int len)
     CustomData_add_layer_named(&vert_data, CD_PROP_FLOAT3, CD_SET_DEFAULT, totvert, "position");
   }
 
-  CustomData_free(&mesh->vert_data, mesh->verts_num);
+  CustomData_free(&mesh->vert_data);
   mesh->vert_data = vert_data;
 
   BKE_mesh_runtime_clear_cache(mesh);
@@ -843,7 +805,7 @@ static void mesh_add_edges(Mesh *mesh, int len)
         &edge_data, CD_PROP_INT32_2D, CD_SET_DEFAULT, totedge, ".edge_verts");
   }
 
-  CustomData_free(&mesh->edge_data, mesh->edges_num);
+  CustomData_free(&mesh->edge_data);
   mesh->edge_data = edge_data;
 
   BKE_mesh_runtime_clear_cache(mesh);
@@ -882,7 +844,7 @@ static void mesh_add_loops(Mesh *mesh, int len)
 
   BKE_mesh_runtime_clear_cache(mesh);
 
-  CustomData_free(&mesh->corner_data, mesh->corners_num);
+  CustomData_free(&mesh->corner_data);
   mesh->corner_data = ldata;
 
   mesh->corners_num = totloop;
@@ -919,7 +881,7 @@ static void mesh_add_faces(Mesh *mesh, int len)
   mesh->face_offset_indices[0] = 0;
   mesh->face_offset_indices[faces_num] = mesh->corners_num;
 
-  CustomData_free(&mesh->face_data, mesh->faces_num);
+  CustomData_free(&mesh->face_data);
   mesh->face_data = face_data;
 
   BKE_mesh_runtime_clear_cache(mesh);
@@ -1089,7 +1051,7 @@ void ED_mesh_geometry_clear(Mesh *mesh)
 
 /** \} */
 
-void ED_mesh_report_mirror_ex(wmOperator *op, int totmirr, int totfail, char selectmode)
+void ED_mesh_report_mirror_ex(ReportList &reports, int totmirr, int totfail, char selectmode)
 {
   const char *elem_type;
 
@@ -1104,17 +1066,16 @@ void ED_mesh_report_mirror_ex(wmOperator *op, int totmirr, int totfail, char sel
   }
 
   if (totfail) {
-    BKE_reportf(
-        op->reports, RPT_WARNING, "%d %s mirrored, %d failed", totmirr, elem_type, totfail);
+    BKE_reportf(&reports, RPT_WARNING, "%d %s mirrored, %d failed", totmirr, elem_type, totfail);
   }
   else {
-    BKE_reportf(op->reports, RPT_INFO, "%d %s mirrored", totmirr, elem_type);
+    BKE_reportf(&reports, RPT_INFO, "%d %s mirrored", totmirr, elem_type);
   }
 }
 
-void ED_mesh_report_mirror(wmOperator *op, int totmirr, int totfail)
+void ED_mesh_report_mirror(ReportList &reports, int totmirr, int totfail)
 {
-  ED_mesh_report_mirror_ex(op, totmirr, totfail, SCE_SELECT_VERTEX);
+  ED_mesh_report_mirror_ex(reports, totmirr, totfail, SCE_SELECT_VERTEX);
 }
 
 KeyBlock *ED_mesh_get_edit_shape_key(const Mesh *me)

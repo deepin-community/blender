@@ -10,7 +10,7 @@
  * since its the main purpose of the API.
  */
 
-#include <stddef.h>
+#include <cstddef>
 
 #include <optional>
 #include <string>
@@ -42,12 +42,6 @@ void BKE_appdir_exit();
 const char *BKE_appdir_folder_default() ATTR_WARN_UNUSED_RESULT;
 const char *BKE_appdir_folder_root() ATTR_WARN_UNUSED_RESULT ATTR_RETURNS_NONNULL;
 const char *BKE_appdir_folder_default_or_root() ATTR_WARN_UNUSED_RESULT ATTR_RETURNS_NONNULL;
-/**
- * Get the user's home directory, i.e.
- * - Unix: `$HOME`
- * - Windows: `%userprofile%`
- */
-const char *BKE_appdir_folder_home();
 /**
  * Get the user's document directory, i.e.
  * - Linux: `$HOME/Documents`

@@ -37,11 +37,10 @@ struct VKImageAccess {
    * we can temporary change a subset of layers, when the image is used as an attachment and a
    * image load/store.
    */
-  uint32_t layer_base;
-  uint32_t layer_count;
+  VKSubImageRange subimage;
 
   /** Determine the image layout for the vk_access_flags. */
-  VkImageLayout to_vk_image_layout() const;
+  VkImageLayout to_vk_image_layout(bool supports_local_read) const;
 };
 
 /** Struct describing the access to a buffer. */

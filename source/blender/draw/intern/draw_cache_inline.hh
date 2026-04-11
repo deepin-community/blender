@@ -9,7 +9,6 @@
 #pragma once
 
 #include "GPU_batch.hh"
-#include "MEM_guardedalloc.h"
 
 /* Common */
 // #define DRW_DEBUG_MESH_CACHE_REQUEST
@@ -41,7 +40,7 @@ inline bool DRW_batch_requested(blender::gpu::Batch *batch, GPUPrimType prim_typ
   if (batch != nullptr && batch->verts[0] == nullptr) {
     /* HACK. We init without a valid VBO and let the first vbo binding
      * fill verts[0]. */
-    GPU_batch_init_ex(batch, prim_type, (blender::gpu::VertBuf *)1, nullptr, (eGPUBatchFlag)0);
+    GPU_batch_init_ex(batch, prim_type, (blender::gpu::VertBuf *)1, nullptr, (GPUBatchFlag)0);
     batch->verts[0] = nullptr;
     return true;
   }

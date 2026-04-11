@@ -7,12 +7,12 @@
  */
 
 #include <atomic>
-#include <mutex>
+#include <optional>
 
 #include "BLI_concurrent_map.hh"
 #include "BLI_memory_cache.hh"
 #include "BLI_memory_counter.hh"
-#include "BLI_task.hh"
+#include "BLI_mutex.hh"
 
 namespace blender::memory_cache {
 
@@ -43,7 +43,7 @@ struct Cache {
    */
   std::atomic<int64_t> size_in_bytes = 0;
 
-  std::mutex global_mutex;
+  Mutex global_mutex;
   /** Amount of memory currently used in the cache. */
   MemoryCount memory;
   /**
@@ -138,18 +138,47 @@ void set_approximate_size_limit(const int64_t limit_in_bytes)
 
 void clear()
 {
+  memory_cache::remove_if([](const GenericKey &) { return true; });
+}
+
+void remove_if(const FunctionRef<bool(const GenericKey &)> predicate)
+{
   Cache &cache = get_cache();
   std::lock_guard lock{cache.global_mutex};
 
-  /* It's not possible to just call a map.clear() method because that is not thread-safe. */
-  for (const GenericKey *key : cache.keys) {
-    const bool success = cache.map.remove(*key);
+  /* Store predicate results to avoid assuming that the predicate is cheap and without side effects
+   * that must not happen more than once. */
+  Array<bool> predicate_results(cache.keys.size());
+
+  /* Recount memory of all elements that are not removed. */
+  cache.memory.reset();
+  MemoryCounter memory_counter{cache.memory};
+
+  for (const int64_t i : cache.keys.index_range()) {
+    const GenericKey &key = *cache.keys[i];
+    const bool ok_to_remove = predicate(key);
+    predicate_results[i] = ok_to_remove;
+
+    if (!ok_to_remove) {
+      /* The value is kept, so count its memory. */
+      CacheMap::ConstAccessor accessor;
+      if (cache.map.lookup(accessor, key)) {
+        accessor->second.value->count_memory(memory_counter);
+        continue;
+      }
+      BLI_assert_unreachable();
+    }
+    /* The value should be removed. */
+    const bool success = cache.map.remove(key);
     BLI_assert(success);
     UNUSED_VARS_NDEBUG(success);
   }
-  cache.keys.clear();
-  cache.size_in_bytes = 0;
-  cache.memory.reset();
+  /* Remove all removed keys from the vector too. */
+  cache.keys.remove_if([&](const GenericKey *&key) {
+    const int64_t index = &key - cache.keys.data();
+    return predicate_results[index];
+  });
+  cache.size_in_bytes = cache.memory.total_bytes;
 }
 
 static void try_enforce_limit()

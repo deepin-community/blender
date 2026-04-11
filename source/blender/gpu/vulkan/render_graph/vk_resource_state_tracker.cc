@@ -31,9 +31,8 @@ ResourceHandle VKResourceStateTracker::create_resource_slot()
 }
 
 void VKResourceStateTracker::add_image(VkImage vk_image,
-                                       uint32_t layer_count,
-                                       VkImageLayout vk_image_layout,
-                                       ResourceOwner owner,
+                                       bool use_subresource_tracking,
+                                       VKResourceBarrierState barrier_state,
                                        const char *name)
 {
   UNUSED_VARS_NDEBUG(name);
@@ -45,11 +44,9 @@ void VKResourceStateTracker::add_image(VkImage vk_image,
   image_resources_.add_new(vk_image, handle);
 
   resource.type = VKResourceType::IMAGE;
-  resource.owner = owner;
   resource.image.vk_image = vk_image;
-  resource.image.layer_count = layer_count;
-  resource.image.vk_image_layout = vk_image_layout;
-  resource.stamp = 0;
+  resource.image.use_subresource_tracking = use_subresource_tracking;
+  resource.barrier_state = barrier_state;
 #ifndef NDEBUG
   resource.name = name;
 #endif
@@ -57,6 +54,24 @@ void VKResourceStateTracker::add_image(VkImage vk_image,
 #ifdef VK_RESOURCE_STATE_TRACKER_VALIDATION
   validate();
 #endif
+}
+
+void VKResourceStateTracker::add_image(VkImage vk_image,
+                                       bool use_subresource_tracking,
+                                       const char *name)
+{
+  add_image(vk_image, use_subresource_tracking, {}, name);
+}
+
+void VKResourceStateTracker::add_swapchain_image(VkImage vk_image, const char *name)
+{
+  add_image(vk_image,
+            false,
+            {
+                VK_ACCESS_NONE,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            },
+            name);
 }
 
 void VKResourceStateTracker::add_buffer(VkBuffer vk_buffer, const char *name)
@@ -70,7 +85,6 @@ void VKResourceStateTracker::add_buffer(VkBuffer vk_buffer, const char *name)
   buffer_resources_.add_new(vk_buffer, handle);
 
   resource.type = VKResourceType::BUFFER;
-  resource.owner = ResourceOwner::APPLICATION;
   resource.buffer.vk_buffer = vk_buffer;
   resource.stamp = 0;
 #ifndef NDEBUG
@@ -159,16 +173,6 @@ ResourceWithStamp VKResourceStateTracker::get_image(VkImage vk_image) const
   return get_stamp(handle, resource);
 }
 
-void VKResourceStateTracker::reset_image_layouts()
-{
-  for (ResourceHandle image_handle : image_resources_.values()) {
-    VKResourceStateTracker::Resource &resource = resources_.lookup(image_handle);
-    if (resource.owner == ResourceOwner::SWAP_CHAIN) {
-      resource.reset_image_layout();
-    }
-  }
-}
-
 #ifdef VK_RESOURCE_STATE_TRACKER_VALIDATION
 void VKResourceStateTracker::validate() const
 {
@@ -193,5 +197,15 @@ void VKResourceStateTracker::validate() const
   BLI_assert(resources_.size() == image_resources_.size() + buffer_resources_.size());
 }
 #endif
+
+void VKResourceStateTracker::debug_print() const
+{
+  std::ostream &os = std::cout;
+  os << "VKResourceStateTracker\n";
+  os << " resources=(" << resources_.size() << "/" << resources_.capacity() << ")\n";
+  os << " buffers=(" << buffer_resources_.size() << "/" << buffer_resources_.capacity() << ")\n";
+  os << " images=(" << image_resources_.size() << "/" << image_resources_.capacity() << ")\n";
+  os << " unused=(" << unused_handles_.size() << "/" << unused_handles_.capacity() << ")\n";
+}
 
 }  // namespace blender::gpu::render_graph

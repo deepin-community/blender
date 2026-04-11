@@ -4,8 +4,6 @@
 
 set(INC
   .
-  ../../blenkernel
-  ../../gpu
   ../../makesrna
 )
 
@@ -14,7 +12,6 @@ set(INC_SYS
 )
 
 set(SRC
-  bgl.cc
   bl_math_py_api.cc
   blf_py_api.cc
   bpy_threads.cc
@@ -23,8 +20,8 @@ set(SRC
   imbuf_py_api.cc
   py_capi_rna.cc
   py_capi_utils.cc
+  python_compat.cc
 
-  bgl.h
   bl_math_py_api.hh
   blf_py_api.hh
   idprop_py_api.hh
@@ -32,17 +29,19 @@ set(SRC
   imbuf_py_api.hh
   py_capi_rna.hh
   py_capi_utils.hh
+  python_compat.hh
 
   # header-only
-  python_compat.hh
   python_utildefines.hh
 )
 
 set(LIB
   ${PYTHON_LINKFLAGS}
   ${PYTHON_LIBRARIES}
+  PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
   PRIVATE bf::dna
+  PRIVATE bf::gpu
   PRIVATE bf::intern::clog
   PRIVATE bf::intern::guardedalloc
 )

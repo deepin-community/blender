@@ -36,9 +36,10 @@ class VKRenderGraph;
  *   eventually not been displayed on screen. These branches should be pruned. The challenge is
  *   that we need to know for certain that it isn't used in a not submitted part of the graph.
  *
- * TODO: Walking the render graph isn't implemented yet. The idea is to have a
- * `Map<ResourceWithStamp, Vector<NodeHandle>> consumers` and `Map<ResourceWithStamp, NodeHandle>
- * producers`. These attributes can be stored in the render graph and created when building the
+ * TODO: Walking the render graph isn't implemented yet.
+ * The idea is to have a `Map<ResourceWithStamp, Vector<NodeHandle>> consumers` and
+ * `Map<ResourceWithStamp, NodeHandle> producers`.
+ * These attributes can be stored in the render graph and created when building the
  * links, or can be created inside the VKScheduler as a variable. The exact detail which one would
  * be better is unclear as there aren't any users yet. At the moment the scheduler would need them
  * we need to figure out the best way to store and retrieve the consumers/producers.
@@ -59,29 +60,18 @@ class VKScheduler {
    * NOTE: Currently will select all nodes.
    * NOTE: Result becomes invalid by the next call to VKScheduler.
    */
-  [[nodiscard]] Span<NodeHandle> select_nodes_for_image(const VKRenderGraph &render_graph,
-                                                        VkImage vk_image);
-
-  /**
-   * Determine which nodes of the render graph should be selected and in what order they should
-   * be executed to update the given vk_buffer to its latest content and state.
-   *
-   * NOTE: Currently will select all nodes.
-   * NOTE: Result becomes invalid by the next call to VKScheduler.
-   */
-  [[nodiscard]] Span<NodeHandle> select_nodes_for_buffer(const VKRenderGraph &render_graph,
-                                                         VkBuffer vk_buffer);
   [[nodiscard]] Span<NodeHandle> select_nodes(const VKRenderGraph &render_graph);
 
  private:
-  /**
-   * Select all nodes.
-   *
-   * Result is stored in `result_`.
-   */
-  void select_all_nodes(const VKRenderGraph &render_graph);
-
   void reorder_nodes(const VKRenderGraph &render_graph);
+
+  /**
+   * When a data transfer command writes to a resource which is initial it can be grouped at the
+   * beginning of the render graph.
+   *
+   * This reduces context switches when executing commands on the GPU.
+   */
+  void move_initial_transfer_to_start(const VKRenderGraph &render_graph);
 
   /**
    * Any data transfer or dispatch nodes should be scheduled before or after a rendering scope.

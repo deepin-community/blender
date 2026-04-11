@@ -17,9 +17,11 @@
 #include "DNA_armature_types.h"
 #include "DNA_object_types.h"
 
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector.h"
+#include "BLI_string.h"
+#include "BLI_string_utf8.h"
 #include "BLI_string_utils.hh"
 #include "BLI_utildefines.h"
 
@@ -30,6 +32,8 @@
 #include "ANIM_action_legacy.hh"
 
 #include "DEG_depsgraph.hh"
+
+using namespace blender;
 
 /* -------------------------------------------------------------------- */
 /** \name Flip the Action (Armature/Pose Objects)
@@ -125,7 +129,7 @@ static void action_flip_pchan_cache_init(FCurve_KeyCache *fkc,
   /* Cache the F-Curve values for `keyed_frames`. */
   const int fcurve_flag = fkc->fcurve->flag;
   fkc->fcurve->flag |= FCURVE_MOD_OFF;
-  fkc->fcurve_eval = static_cast<float *>(MEM_mallocN(sizeof(float) * keyed_frames_len, __func__));
+  fkc->fcurve_eval = MEM_malloc_arrayN<float>(size_t(keyed_frames_len), __func__);
   for (int frame_index = 0; frame_index < keyed_frames_len; frame_index++) {
     const float evaltime = keyed_frames[frame_index];
     fkc->fcurve_eval[frame_index] = evaluate_fcurve_only_curve(fkc->fcurve, evaltime);
@@ -133,8 +137,7 @@ static void action_flip_pchan_cache_init(FCurve_KeyCache *fkc,
   fkc->fcurve->flag = fcurve_flag;
 
   /* Cache the #BezTriple for `keyed_frames`, or leave as nullptr. */
-  fkc->bezt_array = static_cast<BezTriple **>(
-      MEM_mallocN(sizeof(*fkc->bezt_array) * keyed_frames_len, __func__));
+  fkc->bezt_array = MEM_malloc_arrayN<BezTriple *>(size_t(keyed_frames_len), __func__);
   BezTriple *bezt = fkc->fcurve->bezt;
   BezTriple *bezt_end = fkc->fcurve->bezt + fkc->fcurve->totvert;
 
@@ -169,9 +172,10 @@ static void action_flip_pchan(Object *ob_arm, const bPoseChannel *pchan, FCurveP
   /* Use a fixed buffer size as it's known this can only be at most:
    * `pose.bones["{MAXBONENAME}"].rotation_quaternion`. */
   char path_xform[256];
-  char pchan_name_esc[sizeof(bActionChannel::name) * 2];
+  char pchan_name_esc[sizeof(pchan->name) * 2];
   BLI_str_escape(pchan_name_esc, pchan->name, sizeof(pchan_name_esc));
-  const int path_xform_prefix_len = SNPRINTF(path_xform, "pose.bones[\"%s\"]", pchan_name_esc);
+  const int path_xform_prefix_len = SNPRINTF_UTF8(
+      path_xform, "pose.bones[\"%s\"]", pchan_name_esc);
   char *path_xform_suffix = path_xform + path_xform_prefix_len;
   const int path_xform_suffix_maxncpy = sizeof(path_xform) - path_xform_prefix_len;
 
@@ -191,7 +195,7 @@ static void action_flip_pchan(Object *ob_arm, const bPoseChannel *pchan, FCurveP
    * work well if the rotation happened to swap X/Y alignment, leave this for now.
    */
   struct {
-    FCurve_KeyCache loc[3], eul[3], quat[4], rotAxis[3], rotAngle, size[3], rotmode;
+    FCurve_KeyCache loc[3], eul[3], quat[4], rotAxis[3], rotAngle, scale[3], rotmode;
   } fkc_pchan = {{{nullptr}}};
 
 #define FCURVE_ASSIGN_VALUE(id, path_test_suffix, index) \
@@ -208,7 +212,7 @@ static void action_flip_pchan(Object *ob_arm, const bPoseChannel *pchan, FCurveP
   FCURVE_ASSIGN_ARRAY(quat, ".rotation_quaternion");
   FCURVE_ASSIGN_ARRAY(rotAxis, ".rotation_axis_angle");
   FCURVE_ASSIGN_VALUE(rotAngle, ".rotation_axis_angle", 3);
-  FCURVE_ASSIGN_ARRAY(size, ".scale");
+  FCURVE_ASSIGN_ARRAY(scale, ".scale");
   FCURVE_ASSIGN_VALUE(rotmode, ".rotation_mode", 0);
 
 #undef FCURVE_ASSIGN_VALUE
@@ -292,7 +296,7 @@ static void action_flip_pchan(Object *ob_arm, const bPoseChannel *pchan, FCurveP
     READ_ARRAY_FLT(quat);
     READ_ARRAY_FLT(rotAxis);
     READ_VALUE_FLT(rotAngle);
-    READ_ARRAY_FLT(size);
+    READ_ARRAY_FLT(scale);
     READ_VALUE_INT(rotmode);
 
 #undef READ_ARRAY_FLT
@@ -358,7 +362,7 @@ static void action_flip_pchan(Object *ob_arm, const bPoseChannel *pchan, FCurveP
     WRITE_ARRAY_FLT(quat);
     WRITE_ARRAY_FLT(rotAxis);
     WRITE_VALUE_FLT(rotAngle);
-    WRITE_ARRAY_FLT(size);
+    WRITE_ARRAY_FLT(scale);
     /* No need to write back 'rotmode' as it can't be transformed. */
 
 #undef WRITE_ARRAY_FLT
@@ -370,7 +374,7 @@ static void action_flip_pchan(Object *ob_arm, const bPoseChannel *pchan, FCurveP
     BKE_fcurve_handles_recalc_ex(fcurve_array[i], eBezTriple_Flag(0));
   }
 
-  MEM_freeN((void *)keyed_frames);
+  MEM_freeN(keyed_frames);
 
   for (int chan = 0; chan < FCURVE_CHANNEL_LEN; chan++) {
     FCurve_KeyCache *fkc = (FCurve_KeyCache *)(&fkc_pchan) + chan;
@@ -444,19 +448,34 @@ static void action_flip_pchan_rna_paths(bAction *act)
     char name_flip[MAXBONENAME];
     BLI_string_flip_side_name(name_flip, agrp->name, false, sizeof(name_flip));
     if (!STREQ(name_flip, agrp->name)) {
-      STRNCPY(agrp->name, name_flip);
+      STRNCPY_UTF8(agrp->name, name_flip);
     }
   }
 }
 
-void BKE_action_flip_with_pose(bAction *act, Object *ob_arm)
+void BKE_action_flip_with_pose(bAction *act, blender::Span<Object *> objects)
 {
-  FCurvePathCache *fcache = BKE_fcurve_pathcache_create(&act->curves);
-  int i;
-  LISTBASE_FOREACH_INDEX (bPoseChannel *, pchan, &ob_arm->pose->chanbase, i) {
-    action_flip_pchan(ob_arm, pchan, fcache);
+  animrig::Action &action = act->wrap();
+  if (action.slot_array_num == 0) {
+    /* Cannot flip an empty action. */
+    return;
   }
-  BKE_fcurve_pathcache_destroy(fcache);
+  blender::Set<animrig::Slot *> flipped_slots;
+  for (Object *object : objects) {
+    animrig::Slot *slot = animrig::generic_slot_for_autoassign(object->id, action, "");
+    if (!slot) {
+      slot = action.slot(0);
+    }
+    if (!flipped_slots.add(slot)) {
+      continue;
+    }
+    Vector<FCurve *> fcurves = animrig::fcurves_for_action_slot(action, slot->handle);
+    FCurvePathCache *fcache = BKE_fcurve_pathcache_create(fcurves);
+    LISTBASE_FOREACH (bPoseChannel *, pchan, &object->pose->chanbase) {
+      action_flip_pchan(object, pchan, fcache);
+    }
+    BKE_fcurve_pathcache_destroy(fcache);
+  }
 
   action_flip_pchan_rna_paths(act);
 

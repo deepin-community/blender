@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "editors/sculpt_paint/brushes/types.hh"
+#include "editors/sculpt_paint/brushes/brushes.hh"
 
 #include "DNA_brush_types.h"
 #include "DNA_mesh_types.h"
@@ -11,7 +11,7 @@
 
 #include "BKE_mesh.hh"
 #include "BKE_paint.hh"
-#include "BKE_pbvh.hh"
+#include "BKE_paint_bvh.hh"
 #include "BKE_subdiv_ccg.hh"
 
 #include "BLI_array.hh"
@@ -23,8 +23,9 @@
 #include "editors/sculpt_paint/sculpt_intern.hh"
 #include "editors/sculpt_paint/sculpt_smooth.hh"
 
-namespace blender::ed::sculpt_paint {
+#include "bmesh.hh"
 
+namespace blender::ed::sculpt_paint::brushes {
 inline namespace enhance_details_cc {
 
 struct LocalData {
@@ -32,7 +33,8 @@ struct LocalData {
   Vector<float3> new_positions;
   Vector<float> factors;
   Vector<float> distances;
-  Vector<Vector<int>> vert_neighbors;
+  Vector<int> neighbor_offsets;
+  Vector<int> neighbor_data;
   Vector<float3> translations;
 };
 
@@ -136,9 +138,13 @@ static void calc_translations_faces(const Span<float3> vert_positions,
 {
   const Span<int> verts = node.verts();
 
-  tls.vert_neighbors.resize(verts.size());
-  const MutableSpan<Vector<int>> neighbors = tls.vert_neighbors;
-  calc_vert_neighbors(faces, corner_verts, vert_to_face_map, hide_poly, verts, neighbors);
+  const GroupedSpan<int> neighbors = calc_vert_neighbors(faces,
+                                                         corner_verts,
+                                                         vert_to_face_map,
+                                                         hide_poly,
+                                                         verts,
+                                                         tls.neighbor_offsets,
+                                                         tls.neighbor_data);
 
   tls.new_positions.resize(verts.size());
   const MutableSpan<float3> new_positions = tls.new_positions;
@@ -188,58 +194,6 @@ static void calc_translations_bmesh(const bke::pbvh::BMeshNode &node,
 
 }  // namespace enhance_details_cc
 
-void calc_smooth_translations(const Depsgraph &depsgraph,
-                              const Object &object,
-                              const IndexMask &node_mask,
-                              const MutableSpan<float3> translations)
-{
-  const SculptSession &ss = *object.sculpt;
-  const bke::pbvh::Tree &pbvh = *bke::object::pbvh_get(object);
-
-  threading::EnumerableThreadSpecific<LocalData> all_tls;
-  switch (pbvh.type()) {
-    case bke::pbvh::Type::Mesh: {
-      Mesh &mesh = *static_cast<Mesh *>(object.data);
-      const MeshAttributeData attribute_data(mesh.attributes());
-      const Span<float3> positions_eval = bke::pbvh::vert_positions_eval(depsgraph, object);
-      const OffsetIndices faces = mesh.faces();
-      const Span<int> corner_verts = mesh.corner_verts();
-      const GroupedSpan<int> vert_to_face_map = mesh.vert_to_face_map();
-      const Span<bke::pbvh::MeshNode> nodes = pbvh.nodes<bke::pbvh::MeshNode>();
-      node_mask.foreach_index(GrainSize(1), [&](const int i) {
-        LocalData &tls = all_tls.local();
-        calc_translations_faces(positions_eval,
-                                faces,
-                                corner_verts,
-                                vert_to_face_map,
-                                attribute_data.hide_poly,
-                                nodes[i],
-                                tls,
-                                translations);
-      });
-      break;
-    }
-    case bke::pbvh::Type::Grids: {
-      SubdivCCG &subdiv_ccg = *ss.subdiv_ccg;
-      const Span<bke::pbvh::GridsNode> nodes = pbvh.nodes<bke::pbvh::GridsNode>();
-      node_mask.foreach_index(GrainSize(1), [&](const int i) {
-        LocalData &tls = all_tls.local();
-        calc_translations_grids(subdiv_ccg, nodes[i], tls, translations);
-      });
-      break;
-    }
-    case bke::pbvh::Type::BMesh:
-      BM_mesh_elem_index_ensure(ss.bm, BM_VERT);
-      BM_mesh_elem_table_ensure(ss.bm, BM_VERT);
-      const Span<bke::pbvh::BMeshNode> nodes = pbvh.nodes<bke::pbvh::BMeshNode>();
-      node_mask.foreach_index(GrainSize(1), [&](const int i) {
-        LocalData &tls = all_tls.local();
-        calc_translations_bmesh(nodes[i], tls, translations);
-      });
-      break;
-  }
-}
-
 void do_enhance_details_brush(const Depsgraph &depsgraph,
                               const Sculpt &sd,
                               Object &object,
@@ -249,7 +203,7 @@ void do_enhance_details_brush(const Depsgraph &depsgraph,
   const Brush &brush = *BKE_paint_brush_for_read(&sd.paint);
   bke::pbvh::Tree &pbvh = *bke::object::pbvh_get(object);
 
-  if (SCULPT_stroke_is_first_brush_step(*ss.cache)) {
+  if (ss.cache->detail_directions.is_empty()) {
     ss.cache->detail_directions.reinitialize(SCULPT_vertex_count_get(object));
     IndexMaskMemory memory;
     const IndexMask effective_nodes = bke::pbvh::search_nodes(
@@ -266,7 +220,7 @@ void do_enhance_details_brush(const Depsgraph &depsgraph,
   switch (pbvh.type()) {
     case bke::pbvh::Type::Mesh: {
       const Mesh &mesh = *static_cast<Mesh *>(object.data);
-      const MeshAttributeData attribute_data(mesh.attributes());
+      const MeshAttributeData attribute_data(mesh);
       const PositionDeformData position_data(depsgraph, object);
       const Span<float3> vert_normals = bke::pbvh::vert_normals_eval(depsgraph, object);
       MutableSpan<bke::pbvh::MeshNode> nodes = pbvh.nodes<bke::pbvh::MeshNode>();
@@ -309,7 +263,60 @@ void do_enhance_details_brush(const Depsgraph &depsgraph,
     }
   }
   pbvh.tag_positions_changed(node_mask);
-  bke::pbvh::flush_bounds_to_parents(pbvh);
+  pbvh.flush_bounds_to_parents();
+}
+
+}  // namespace blender::ed::sculpt_paint::brushes
+namespace blender::ed::sculpt_paint {
+void calc_smooth_translations(const Depsgraph &depsgraph,
+                              const Object &object,
+                              const IndexMask &node_mask,
+                              const MutableSpan<float3> translations)
+{
+  const SculptSession &ss = *object.sculpt;
+  const bke::pbvh::Tree &pbvh = *bke::object::pbvh_get(object);
+
+  threading::EnumerableThreadSpecific<brushes::LocalData> all_tls;
+  switch (pbvh.type()) {
+    case bke::pbvh::Type::Mesh: {
+      Mesh &mesh = *static_cast<Mesh *>(object.data);
+      const MeshAttributeData attribute_data(mesh);
+      const Span<float3> positions_eval = bke::pbvh::vert_positions_eval(depsgraph, object);
+      const OffsetIndices faces = mesh.faces();
+      const Span<int> corner_verts = mesh.corner_verts();
+      const GroupedSpan<int> vert_to_face_map = mesh.vert_to_face_map();
+      const Span<bke::pbvh::MeshNode> nodes = pbvh.nodes<bke::pbvh::MeshNode>();
+      node_mask.foreach_index(GrainSize(1), [&](const int i) {
+        brushes::LocalData &tls = all_tls.local();
+        calc_translations_faces(positions_eval,
+                                faces,
+                                corner_verts,
+                                vert_to_face_map,
+                                attribute_data.hide_poly,
+                                nodes[i],
+                                tls,
+                                translations);
+      });
+      break;
+    }
+    case bke::pbvh::Type::Grids: {
+      SubdivCCG &subdiv_ccg = *ss.subdiv_ccg;
+      const Span<bke::pbvh::GridsNode> nodes = pbvh.nodes<bke::pbvh::GridsNode>();
+      node_mask.foreach_index(GrainSize(1), [&](const int i) {
+        brushes::LocalData &tls = all_tls.local();
+        calc_translations_grids(subdiv_ccg, nodes[i], tls, translations);
+      });
+      break;
+    }
+    case bke::pbvh::Type::BMesh:
+      vert_random_access_ensure(const_cast<Object &>(object));
+      const Span<bke::pbvh::BMeshNode> nodes = pbvh.nodes<bke::pbvh::BMeshNode>();
+      node_mask.foreach_index(GrainSize(1), [&](const int i) {
+        brushes::LocalData &tls = all_tls.local();
+        calc_translations_bmesh(nodes[i], tls, translations);
+      });
+      break;
+  }
 }
 
 }  // namespace blender::ed::sculpt_paint

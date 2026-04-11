@@ -8,11 +8,13 @@
 
 #include "BLI_math_geom.h"
 
-#include "BKE_attribute_math.hh"
+#include "DNA_mesh_types.h"
+
 #include "BKE_bvhutils.hh"
 #include "BKE_context.hh"
 #include "BKE_curves.hh"
 #include "BKE_object.hh"
+#include "BKE_paint_types.hh"
 #include "BKE_report.hh"
 
 #include "ED_view3d.hh"
@@ -178,7 +180,7 @@ std::optional<CurvesBrush3D> sample_curves_3d_brush(const Depsgraph &depsgraph,
   const Curves &curves_id = *static_cast<Curves *>(curves_object.data);
   const CurvesGeometry &curves = curves_id.geometry.wrap();
   Object *surface_object = curves_id.surface;
-  Object *surface_object_eval = DEG_get_evaluated_object(&depsgraph, surface_object);
+  Object *surface_object_eval = DEG_get_evaluated(&depsgraph, surface_object);
 
   float3 center_ray_start_wo, center_ray_end_wo;
   ED_view3d_win_to_segment_clipped(
@@ -190,9 +192,7 @@ std::optional<CurvesBrush3D> sample_curves_3d_brush(const Depsgraph &depsgraph,
     const float4x4 world_to_surface_mat = math::invert(surface_to_world_mat);
 
     Mesh *surface_eval = BKE_object_get_evaluated_mesh(surface_object_eval);
-    BVHTreeFromMesh surface_bvh;
-    BKE_bvhtree_from_mesh_get(&surface_bvh, surface_eval, BVHTREE_FROM_CORNER_TRIS, 2);
-    BLI_SCOPED_DEFER([&]() { free_bvhtree_from_mesh(&surface_bvh); });
+    bke::BVHTreeFromMesh surface_bvh = surface_eval->bvh_corner_tris();
 
     const float3 center_ray_start_su = math::transform_point(world_to_surface_mat,
                                                              center_ray_start_wo);
@@ -270,7 +270,7 @@ std::optional<CurvesBrush3D> sample_curves_surface_3d_brush(
     const ARegion &region,
     const View3D &v3d,
     const CurvesSurfaceTransforms &transforms,
-    const BVHTreeFromMesh &surface_bvh,
+    const bke::BVHTreeFromMesh &surface_bvh,
     const float2 &brush_pos_re,
     const float brush_radius_re)
 {
@@ -344,6 +344,14 @@ Vector<float4x4> get_symmetry_brush_transforms(const eCurvesSymmetryType symmetr
   }
 
   return matrices;
+}
+
+void remember_stroke_position(CurvesSculpt &curves_sculpt, const float3 &brush_position_wo)
+{
+  bke::PaintRuntime &paint_runtime = *curves_sculpt.paint.runtime;
+  copy_v3_v3(paint_runtime.average_stroke_accum, brush_position_wo);
+  paint_runtime.average_stroke_counter = 1;
+  paint_runtime.last_stroke_valid = true;
 }
 
 float transform_brush_radius(const float4x4 &transform,
@@ -431,9 +439,11 @@ void report_invalid_uv_map(ReportList *reports)
 
 void CurvesConstraintSolver::initialize(const bke::CurvesGeometry &curves,
                                         const IndexMask &curve_selection,
-                                        const bool use_surface_collision)
+                                        const bool use_surface_collision,
+                                        const float surface_collision_distance)
 {
   use_surface_collision_ = use_surface_collision;
+  surface_collision_distance_ = surface_collision_distance;
   segment_lengths_.reinitialize(curves.points_num());
   geometry::curve_constraints::compute_segment_lengths(
       curves.points_by_curve(), curves.positions(), curve_selection, segment_lengths_);
@@ -455,7 +465,8 @@ void CurvesConstraintSolver::solve_step(bke::CurvesGeometry &curves,
         start_positions_,
         *surface,
         transforms,
-        curves.positions_for_write());
+        curves.positions_for_write(),
+        surface_collision_distance_);
     start_positions_ = curves.positions();
   }
   else {

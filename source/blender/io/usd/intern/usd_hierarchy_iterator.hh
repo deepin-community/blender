@@ -33,6 +33,10 @@ class USDHierarchyIterator : public AbstractHierarchyIterator {
   ObjExportMap skinned_mesh_export_map_;
   ObjExportMap shape_key_mesh_export_map_;
 
+  /* Map prototype_paths[instancer path] = [
+   *   (proto_path_1, proto_object_1), (proto_path_2, proto_object_2), ... ] */
+  Map<pxr::SdfPath, Set<std::pair<pxr::SdfPath, Object *>>> prototype_paths_;
+
  public:
   USDHierarchyIterator(Main *bmain,
                        Depsgraph *depsgraph,
@@ -41,24 +45,28 @@ class USDHierarchyIterator : public AbstractHierarchyIterator {
 
   void set_export_frame(float frame_nr);
 
-  virtual std::string make_valid_name(const std::string &name) const override;
+  std::string make_valid_name(const std::string &name) const override;
 
   void process_usd_skel() const;
 
  protected:
-  virtual bool mark_as_weak_export(const Object *object) const override;
+  bool mark_as_weak_export(const Object *object) const override;
+  bool determine_point_instancers(const HierarchyContext *context);
 
-  virtual AbstractHierarchyWriter *create_transform_writer(
-      const HierarchyContext *context) override;
-  virtual AbstractHierarchyWriter *create_data_writer(const HierarchyContext *context) override;
-  virtual AbstractHierarchyWriter *create_hair_writer(const HierarchyContext *context) override;
-  virtual AbstractHierarchyWriter *create_particle_writer(
-      const HierarchyContext *context) override;
+  AbstractHierarchyWriter *create_transform_writer(const HierarchyContext *context) override;
+  AbstractHierarchyWriter *create_data_writer(const HierarchyContext *context) override;
+  AbstractHierarchyWriter *create_hair_writer(const HierarchyContext *context) override;
+  AbstractHierarchyWriter *create_particle_writer(const HierarchyContext *context) override;
 
-  virtual void release_writer(AbstractHierarchyWriter *writer) override;
+  void release_writer(AbstractHierarchyWriter *writer) override;
+
+  bool include_data_writers(const HierarchyContext *context) const override;
+  bool include_child_writers(const HierarchyContext *context) const override;
 
  private:
   USDExporterContext create_usd_export_context(const HierarchyContext *context);
+  USDExporterContext create_point_instancer_context(
+      const HierarchyContext *context, const USDExporterContext &usd_export_context) const;
 
   void add_usd_skel_export_mapping(const Object *obj, const pxr::SdfPath &usd_path);
 };

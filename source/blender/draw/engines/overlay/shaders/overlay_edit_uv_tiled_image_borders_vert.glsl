@@ -2,20 +2,22 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma BLENDER_REQUIRE(common_view_lib.glsl)
+#include "infos/overlay_edit_mode_infos.hh"
 
-#ifndef USE_GPU_SHADER_CREATE_INFO
-in vec3 pos;
+VERTEX_SHADER_CREATE_INFO(overlay_edit_uv_tiled_image_borders)
+
+#ifdef GLSL_CPP_STUBS
+/* TODO(fclem): Simplify this. There is no reason for tile_scale and tile_pos to be a mix of
+ * defines and push constant. Have to add the define manually for the CPP compilation. */
+#  define tile_scale float3(0.0f)
 #endif
+
+#include "draw_view_lib.glsl"
 
 void main()
 {
   /* `pos` contains the coordinates of a quad (-1..1). but we need the coordinates of an image
    * plane (0..1) */
-  vec3 image_pos = pos * 0.5 + 0.5;
-#ifdef OVERLAY_NEXT
-  gl_Position = point_world_to_ndc(tile_scale * image_pos + tile_pos);
-#else
-  gl_Position = point_object_to_ndc(image_pos);
-#endif
+  float3 image_pos = pos * 0.5f + 0.5f;
+  gl_Position = drw_point_world_to_homogenous(tile_scale * image_pos + tile_pos);
 }

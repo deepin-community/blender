@@ -73,18 +73,18 @@ static VArray<float3> construct_curve_tangent_gvarray(const bke::CurvesGeometry 
   const VArray<int8_t> types = curves.curve_types();
   if (curves.is_single_type(CURVE_TYPE_POLY)) {
     return curves.adapt_domain<float3>(
-        VArray<float3>::ForSpan(curves.evaluated_tangents()), AttrDomain::Point, domain);
+        VArray<float3>::from_span(curves.evaluated_tangents()), AttrDomain::Point, domain);
   }
 
   Array<float3> tangents = curve_tangent_point_domain(curves);
 
   if (domain == AttrDomain::Point) {
-    return VArray<float3>::ForContainer(std::move(tangents));
+    return VArray<float3>::from_container(std::move(tangents));
   }
 
   if (domain == AttrDomain::Curve) {
     return curves.adapt_domain<float3>(
-        VArray<float3>::ForContainer(std::move(tangents)), AttrDomain::Point, AttrDomain::Curve);
+        VArray<float3>::from_container(std::move(tangents)), AttrDomain::Point, AttrDomain::Curve);
   }
 
   return nullptr;
@@ -131,10 +131,14 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_INPUT_TANGENT, "Curve Tangent", NODE_CLASS_INPUT);
+  geo_node_type_base(&ntype, "GeometryNodeInputTangent", GEO_NODE_INPUT_TANGENT);
+  ntype.ui_name = "Curve Tangent";
+  ntype.ui_description = "Retrieve the direction of curves at each control point";
+  ntype.enum_name_legacy = "INPUT_TANGENT";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

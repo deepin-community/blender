@@ -53,6 +53,7 @@ set(SRC_HD_CYCLES
   camera.cpp
   field.cpp
   file_reader.cpp
+  geometry.cpp
   instancer.cpp
   light.cpp
   material.cpp
@@ -66,13 +67,6 @@ set(SRC_HD_CYCLES
   session.cpp
   volume.cpp
 )
-
-if(WITH_OPENVDB)
-  add_definitions(-DWITH_OPENVDB ${OPENVDB_DEFINITIONS})
-  list(APPEND INC_SYS
-    ${OPENVDB_INCLUDE_DIRS}
-  )
-endif()
 
 # Blender libraries do not include hgiGL, so build without display driver then.
 if(EXISTS ${USD_INCLUDE_DIR}/pxr/imaging/hgiGL)

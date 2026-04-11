@@ -23,7 +23,6 @@
 #include "bmesh_py_types.hh"
 
 #include "../generic/py_capi_utils.hh"
-#include "../generic/python_utildefines.hh"
 
 BLI_STATIC_ASSERT(sizeof(PyC_FlagSet) == sizeof(BMO_FlagSet), "size mismatch");
 
@@ -548,11 +547,12 @@ static int bpy_slot_from_py(BMesh *bm,
           break;
         }
         case BMO_OP_SLOT_SUBTYPE_MAP_EMPTY: {
-          if (PySet_Size(value) > 0) {
+          if (PySet_GET_SIZE(value) > 0) {
+            PyObject *it = PyObject_GetIter(value);
             PyObject *arg_key;
-            Py_ssize_t arg_pos = 0;
-            Py_ssize_t arg_hash = 0;
-            while (_PySet_NextEntry(value, &arg_pos, &arg_key, &arg_hash)) {
+            while ((arg_key = PyIter_Next(it))) {
+              /* Borrow from the set. */
+              Py_DECREF(arg_key);
 
               if (bpy_slot_from_py_elem_check((BPy_BMElem *)arg_key,
                                               bm,
@@ -561,10 +561,15 @@ static int bpy_slot_from_py(BMesh *bm,
                                               slot_name,
                                               "invalid key in set") == -1)
               {
-                return -1; /* error is set in bpy_slot_from_py_elem_check() */
+                /* Error is set in #bpy_slot_from_py_elem_check(). */
+                break;
               }
 
               BMO_slot_map_empty_insert(bmop, slot, ((BPy_BMElem *)arg_key)->ele);
+            }
+            Py_DECREF(it);
+            if (arg_key) {
+              return -1;
             }
           }
           break;
@@ -831,7 +836,7 @@ PyObject *BPy_BMO_call(BPy_BMeshOpFunc *self, PyObject *args, PyObject *kw)
       }
 
 #if 1
-      /* temp code, strip off '.out' while we keep this convention */
+      /* Temporary code, strip off `.out` while we keep this convention. */
       {
         char slot_name_strip[MAX_SLOTNAME];
         const char *ch = strchr(slot->slot_name, '.'); /* can't fail! */

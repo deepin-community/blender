@@ -7,7 +7,7 @@
 #ifdef WITH_CUDA
 
 #  ifdef WITH_CUDA_DYNLOAD
-#    include "cuew.h"
+#    include <cuew.h>
 #  else
 #    include <cuda.h>
 #  endif
@@ -47,6 +47,16 @@ const char *cuewErrorString(CUresult result);
 const char *cuewCompilerPath();
 int cuewCompilerVersion();
 #  endif /* WITH_CUDA_DYNLOAD */
+
+static inline bool cudaSupportsDevice(const int cudaDevID)
+{
+  int major;
+  cuDeviceGetAttribute(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, cudaDevID);
+  if (major >= 5) {
+    return true;
+  }
+  return false;
+}
 
 CCL_NAMESPACE_END
 

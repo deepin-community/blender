@@ -6,7 +6,6 @@
  * \ingroup spfile
  */
 
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -27,7 +26,7 @@
 #include "ED_fileselect.hh"
 
 #ifdef WIN32
-#  include "BLI_string_utf8.h" /* For `BLI_strncpy_wchar_as_utf8`. */
+#  include "utfconv.hh"
 
 /* Need to include windows.h so _WIN32_IE is defined. */
 #  include <windows.h>
@@ -54,12 +53,17 @@
 
 #include "fsmenu.h"
 
+#ifdef __linux__
+#  include "CLG_log.h"
+static CLG_LogRef LOG = {"system.path"};
+#endif
+
 struct FSMenu;
 
 /* -------------------------------------------------------------------- */
 /** \name XDG User Directory Support (Unix)
  *
- * Generic Unix, Use XDG when available, otherwise fallback to the home directory.
+ * Generic Unix, Use XDG when available, otherwise fall back to the home directory.
  * \{ */
 
 /**
@@ -211,10 +215,25 @@ static void fsmenu_add_windows_quick_access(FSMenu *fsmenu,
     }
 
     char utf_path[FILE_MAXDIR];
-    BLI_strncpy_wchar_as_utf8(utf_path, path, FILE_MAXDIR);
+    conv_utf_16_to_8(path, utf_path, FILE_MAXDIR);
 
-    /* Skip library folders since they are not currently supported. */
-    if (!BLI_strcasestr(utf_path, ".library-ms")) {
+    /* Despite the above IsFolder check, Windows considers libraries and archives to be folders.
+     * However, as Blender does not support opening them, they must be filtered out. #138863. */
+    const char *ext_folderlike[] = {
+        ".library-ms",
+        ".zip",
+        ".rar",
+        ".7z",
+        ".tar",
+        ".gz",
+        ".bz2",
+        ".zst",
+        ".xz",
+        ".cab",
+        ".iso",
+        nullptr,
+    };
+    if (!BLI_path_extension_check_array(utf_path, ext_folderlike)) {
       /* Add folder to the fsmenu. */
       fsmenu_insert_entry(fsmenu, category, utf_path, NULL, ICON_FILE_FOLDER, flag);
     }
@@ -232,7 +251,7 @@ static void fsmenu_add_windows_folder(FSMenu *fsmenu,
   LPWSTR pPath;
   char line[FILE_MAXDIR];
   if (SHGetKnownFolderPath(rfid, 0, nullptr, &pPath) == S_OK) {
-    BLI_strncpy_wchar_as_utf8(line, pPath, FILE_MAXDIR);
+    conv_utf_16_to_8(pPath, line, FILE_MAXDIR);
     fsmenu_insert_entry(fsmenu, category, line, name, icon, flag);
   }
   CoTaskMemFree(pPath);
@@ -262,7 +281,7 @@ void fsmenu_read_system(FSMenu *fsmenu, int read_bookmarks)
         /* Skip over floppy disks A & B. */
         if (i > 1) {
           /* Friendly volume descriptions without using SHGetFileInfoW (#85689). */
-          BLI_strncpy_wchar_from_utf8(wline, tmps, 4);
+          conv_utf_8_to_16(tmps, wline, 4);
           IShellFolder *desktop;
           if (SHGetDesktopFolder(&desktop) == S_OK) {
             PIDLIST_RELATIVE volume;
@@ -274,7 +293,7 @@ void fsmenu_read_system(FSMenu *fsmenu, int read_bookmarks)
               if (desktop->GetDisplayNameOf(volume, SHGDN_FORADDRESSBAR, &volume_name) == S_OK) {
                 wchar_t *volume_name_wchar;
                 if (StrRetToStrW(&volume_name, volume, &volume_name_wchar) == S_OK) {
-                  BLI_strncpy_wchar_as_utf8(line, volume_name_wchar, FILE_MAXDIR);
+                  conv_utf_16_to_8(volume_name_wchar, line, FILE_MAXDIR);
                   name = line;
                   CoTaskMemFree(volume_name_wchar);
                 }
@@ -305,12 +324,8 @@ void fsmenu_read_system(FSMenu *fsmenu, int read_bookmarks)
             break;
         }
 
-        fsmenu_insert_entry(fsmenu,
-                            FS_CATEGORY_SYSTEM,
-                            tmps,
-                            name,
-                            icon,
-                            FSMenuInsert(FS_INSERT_SORTED | FS_INSERT_NO_VALIDATE));
+        fsmenu_insert_entry(
+            fsmenu, FS_CATEGORY_SYSTEM, tmps, name, icon, FSMenuInsert(FS_INSERT_SORTED));
       }
     }
 
@@ -398,7 +413,7 @@ void fsmenu_read_system(FSMenu *fsmenu, int read_bookmarks)
                         ICON_FILE_FOLDER,
                         FS_INSERT_LAST);
 
-    const char *home = BLI_getenv("HOME");
+    const char *home = BLI_dir_home();
     if (home) {
 #  define FS_MACOS_PATH(path, name, icon) \
 \
@@ -535,10 +550,10 @@ void fsmenu_read_system(FSMenu *fsmenu, int read_bookmarks)
     }
 #  pragma GCC diagnostic pop
   }
-#else
-  /* unix */
+#else /* `!defined(WIN32) && !defined(__APPLE__)` */
+  /* Generic Unix. */
   {
-    const char *home = BLI_getenv("HOME");
+    const char *home = BLI_dir_home();
 
     if (read_bookmarks && home) {
 
@@ -570,7 +585,7 @@ void fsmenu_read_system(FSMenu *fsmenu, int read_bookmarks)
     }
 
     {
-      int found = 0;
+      bool found = false;
 #  ifdef __linux__
       /* loop over mount points */
       mntent *mnt;
@@ -578,20 +593,35 @@ void fsmenu_read_system(FSMenu *fsmenu, int read_bookmarks)
 
       fp = setmntent(MOUNTED, "r");
       if (fp == nullptr) {
-        fprintf(stderr, "could not get a list of mounted file-systems\n");
+        CLOG_WARN(&LOG, "Could not get a list of mounted file-systems");
       }
       else {
+
+        /* Similar to `STRPREFIX`,
+         * but ensures the prefix precedes a directory separator or null terminator.
+         * Define locally since it's fairly specific to this particular use case. */
+        auto strncmp_dir_delimit = [](const char *a, const char *b, size_t b_len) -> int {
+          const int result = strncmp(a, b, b_len);
+          return (result == 0 && !ELEM(a[b_len], '\0', '/')) ? 1 : result;
+        };
+#    define STRPREFIX_DIR_DELIMIT(a, b) (strncmp_dir_delimit((a), (b), strlen(b)) == 0)
+
         while ((mnt = getmntent(fp))) {
-          if (STRPREFIX(mnt->mnt_dir, "/boot")) {
+          if (STRPREFIX_DIR_DELIMIT(mnt->mnt_dir, "/boot") ||
+              /* According to: https://wiki.archlinux.org/title/EFI_system_partition (2025),
+               * this is a common path to mount the EFI partition. */
+              STRPREFIX_DIR_DELIMIT(mnt->mnt_dir, "/efi"))
+          {
             /* Hide share not usable to the user. */
             continue;
           }
-          if (!STRPREFIX(mnt->mnt_fsname, "/dev")) {
+          if (!STRPREFIX_DIR_DELIMIT(mnt->mnt_fsname, "/dev")) {
             continue;
           }
+          /* Use non-delimited prefix since a slash isn't expected after loop. */
           if (STRPREFIX(mnt->mnt_fsname, "/dev/loop")) {
-            /* The dev/loop* entries are SNAPS used by desktop environment
-             * (Gnome) no need for them to show up in the list. */
+            /* The `/dev/loop*` entries are SNAPS used by desktop environment
+             * (GNOME) no need for them to show up in the list. */
             continue;
           }
 
@@ -602,10 +632,12 @@ void fsmenu_read_system(FSMenu *fsmenu, int read_bookmarks)
                               ICON_DISK_DRIVE,
                               FS_INSERT_SORTED);
 
-          found = 1;
+          found = true;
         }
+#    undef STRPREFIX_DIR_DELIMIT
+
         if (endmntent(fp) == 0) {
-          fprintf(stderr, "could not close the list of mounted file-systems\n");
+          CLOG_WARN(&LOG, "Could not close the list of mounted file-systems");
         }
       }
       /* Check `gvfs` shares. */
@@ -637,12 +669,12 @@ void fsmenu_read_system(FSMenu *fsmenu, int read_bookmarks)
             SNPRINTF(line, "%s%s", filepath, dirname);
             fsmenu_insert_entry(
                 fsmenu, FS_CATEGORY_SYSTEM, line, label, ICON_NETWORK_DRIVE, FS_INSERT_SORTED);
-            found = 1;
+            found = true;
           }
           BLI_filelist_free(dirs, dirs_num);
         }
       }
-#  endif
+#  endif /* __linux__ */
 
       /* fallback */
       if (!found) {
@@ -660,11 +692,12 @@ void fsmenu_read_system(FSMenu *fsmenu, int read_bookmarks)
 
 /* For all platforms, we add some directories from User Preferences to
  * the FS_CATEGORY_OTHER category so that these directories
- * have the appropriate icons when they are added to the Bookmarks. */
+ * have the appropriate icons when they are added to the Bookmarks.
+ *
+ * NOTE: of the preferences support as `//` prefix.
+ * Skip them since they depend on the current loaded blend file. */
 #define FS_UDIR_PATH(dir, icon) \
-\
-  if (BLI_strnlen(dir, 3) > 2) { \
-\
+  if (dir[0] && !BLI_path_is_rel(dir)) { \
     fsmenu_insert_entry(fsmenu, FS_CATEGORY_OTHER, dir, nullptr, icon, FS_INSERT_LAST); \
   }
 

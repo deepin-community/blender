@@ -10,8 +10,16 @@
 
 #pragma once
 
-#include "BLI_compiler_attrs.h"
+#include "DNA_windowmanager_enums.h" /* For `wmOperatorStatus`. */
 
+struct bContext;
+struct rcti;
+struct wmEvent;
+struct wmGizmo;
+struct wmGizmoGroup;
+struct wmGizmoGroupType;
+struct wmGizmoProperty;
+struct wmKeyConfig;
 struct wmKeyMap;
 struct wmMsgBus;
 
@@ -34,10 +42,13 @@ using wmGizmoFnSetup = void (*)(wmGizmo *);
 using wmGizmoFnDraw = void (*)(const bContext *, wmGizmo *);
 using wmGizmoFnDrawSelect = void (*)(const bContext *, wmGizmo *, int);
 using wmGizmoFnTestSelect = int (*)(bContext *, wmGizmo *, const int mval[2]);
-using wmGizmoFnModal = int (*)(bContext *, wmGizmo *, const wmEvent *, eWM_GizmoFlagTweak);
+using wmGizmoFnModal = wmOperatorStatus (*)(bContext *,
+                                            wmGizmo *,
+                                            const wmEvent *,
+                                            eWM_GizmoFlagTweak);
 using wmGizmoFnPropertyUpdate = void (*)(wmGizmo *, wmGizmoProperty *);
 using wmGizmoFnMatrixBasisGet = void (*)(const wmGizmo *, float[4][4]);
-using wmGizmoFnInvoke = int (*)(bContext *, wmGizmo *, const wmEvent *);
+using wmGizmoFnInvoke = wmOperatorStatus (*)(bContext *, wmGizmo *, const wmEvent *);
 using wmGizmoFnExit = void (*)(bContext *, wmGizmo *, const bool);
 using wmGizmoFnCursorGet = int (*)(wmGizmo *);
 using wmGizmoFnScreenBoundsGet = bool (*)(bContext *, wmGizmo *, rcti *r_bounding_box);
@@ -57,6 +68,12 @@ using wmGizmoPropertyFnRangeGet = void (*)(const wmGizmo *,
                                            wmGizmoProperty *,
                                            /* Typically `float[2]`. */
                                            void *range);
+/* To inspect the RNA properties gizmos are manipulating (can be multiple). Used e.g. for
+ * autokeying. */
+using wmGizmoPropertyFnForeachRNAProp = void (*)(
+    wmGizmoProperty *,
+    const blender::FunctionRef<void(PointerRNA &ptr, PropertyRNA *prop, int index)> callback);
+
 using wmGizmoPropertyFnFree = void (*)(const wmGizmo *, wmGizmoProperty *);
 
 struct wmGizmoPropertyFnParams {
@@ -64,5 +81,6 @@ struct wmGizmoPropertyFnParams {
   wmGizmoPropertyFnSet value_set_fn;
   wmGizmoPropertyFnRangeGet range_get_fn;
   wmGizmoPropertyFnFree free_fn;
+  wmGizmoPropertyFnForeachRNAProp foreach_rna_prop_fn;
   void *user_data;
 };

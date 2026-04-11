@@ -2,8 +2,6 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include <algorithm>
-
 #include "curves_sculpt_intern.hh"
 
 #include "BLI_math_matrix_types.hh"
@@ -24,10 +22,8 @@
 #include "BKE_paint.hh"
 #include "BKE_report.hh"
 
-#include "DNA_brush_enums.h"
 #include "DNA_curves_types.h"
 #include "DNA_screen_types.h"
-#include "DNA_space_types.h"
 
 #include "ED_screen.hh"
 #include "ED_view3d.hh"
@@ -85,7 +81,7 @@ struct SlideOperationExecutor {
   SlideOperation *self_ = nullptr;
   CurvesSculptCommonContext ctx_;
 
-  const CurvesSculpt *curves_sculpt_ = nullptr;
+  CurvesSculpt *curves_sculpt_ = nullptr;
   const Brush *brush_ = nullptr;
   float brush_radius_base_re_;
   float brush_radius_factor_;
@@ -107,7 +103,7 @@ struct SlideOperationExecutor {
   Span<int> surface_corner_verts_eval_;
   Span<int3> surface_corner_tris_eval_;
   VArraySpan<float2> surface_uv_map_eval_;
-  BVHTreeFromMesh surface_bvh_eval_;
+  bke::BVHTreeFromMesh surface_bvh_eval_;
 
   VArray<float> curve_factors_;
   IndexMaskMemory selected_curve_memory_;
@@ -133,14 +129,14 @@ struct SlideOperationExecutor {
       report_missing_surface(stroke_extension.reports);
       return;
     }
-    if (curves_orig_->curves_num() == 0) {
+    if (curves_orig_->is_empty()) {
       return;
     }
     if (curves_id_orig_->surface_uv_map == nullptr) {
       report_missing_uv_map_on_original_surface(stroke_extension.reports);
       return;
     }
-    if (curves_orig_->surface_uv_coords().is_empty()) {
+    if (!curves_orig_->surface_uv_coords()) {
       BKE_report(stroke_extension.reports,
                  RPT_WARNING,
                  "Curves do not have surface attachment information");
@@ -150,9 +146,9 @@ struct SlideOperationExecutor {
 
     curves_sculpt_ = ctx_.scene->toolsettings->curves_sculpt;
     brush_ = BKE_paint_brush_for_read(&curves_sculpt_->paint);
-    brush_radius_base_re_ = BKE_brush_size_get(ctx_.scene, brush_);
+    brush_radius_base_re_ = BKE_brush_radius_get(&curves_sculpt_->paint, brush_);
     brush_radius_factor_ = brush_radius_factor(*brush_, stroke_extension);
-    brush_strength_ = brush_strength_get(*ctx_.scene, *brush_, stroke_extension);
+    brush_strength_ = BKE_brush_alpha_get(&curves_sculpt_->paint, brush_);
 
     curve_factors_ = *curves_orig_->attributes().lookup_or_default(
         ".selection", bke::AttrDomain::Curve, 1.0f);
@@ -176,7 +172,7 @@ struct SlideOperationExecutor {
       report_missing_uv_map_on_original_surface(stroke_extension.reports);
       return;
     }
-    surface_ob_eval_ = DEG_get_evaluated_object(ctx_.depsgraph, surface_ob_orig_);
+    surface_ob_eval_ = DEG_get_evaluated(ctx_.depsgraph, surface_ob_orig_);
     if (surface_ob_eval_ == nullptr) {
       return;
     }
@@ -197,8 +193,7 @@ struct SlideOperationExecutor {
       report_missing_uv_map_on_evaluated_surface(stroke_extension.reports);
       return;
     }
-    BKE_bvhtree_from_mesh_get(&surface_bvh_eval_, surface_eval_, BVHTREE_FROM_CORNER_TRIS, 2);
-    BLI_SCOPED_DEFER([&]() { free_bvhtree_from_mesh(&surface_bvh_eval_); });
+    surface_bvh_eval_ = surface_eval_->bvh_corner_tris();
 
     if (stroke_extension.is_first) {
       self_->initial_brush_pos_re_ = brush_pos_re_;
@@ -240,6 +235,10 @@ struct SlideOperationExecutor {
     if (!brush_3d.has_value()) {
       return;
     }
+    remember_stroke_position(
+        *curves_sculpt_,
+        math::transform_point(transforms_.curves_to_world, brush_3d->position_cu));
+
     const ReverseUVSampler reverse_uv_sampler_orig{surface_uv_map_orig_,
                                                    surface_corner_tris_orig_};
     for (const float4x4 &brush_transform : brush_transforms) {
@@ -258,7 +257,7 @@ struct SlideOperationExecutor {
                             const ReverseUVSampler &reverse_uv_sampler_orig,
                             Vector<SlideCurveInfo> &r_curves_to_slide)
   {
-    const Span<float2> surface_uv_coords = curves_orig_->surface_uv_coords();
+    const Span<float2> surface_uv_coords = *curves_orig_->surface_uv_coords();
     const float brush_radius_sq_cu = pow2f(brush_radius_cu);
 
     const Span<int> offsets = curves_orig_->offsets();
@@ -440,7 +439,7 @@ struct SlideOperationExecutor {
           if (hit.index < 0) {
             return;
           }
-          const float3 &hit_pos_su = hit.co;
+          const float3 hit_pos_su = hit.co;
           const float dist_sq_su = math::distance_squared(hit_pos_su, point_su);
           if (dist_sq_su < best_dist_sq_su) {
             best_dist_sq_su = dist_sq_su;

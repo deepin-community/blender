@@ -6,11 +6,13 @@
  * \ingroup cmpnodes
  */
 
-#include "UI_interface.hh"
+#include "BLI_math_base.hh"
+#include "BLI_math_numbers.hh"
+
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "GPU_shader.hh"
-#include "GPU_texture.hh"
 
 #include "COM_node_operation.hh"
 #include "COM_utilities.hh"
@@ -23,27 +25,25 @@ namespace blender::nodes::node_composite_split_cc {
 
 static void cmp_node_split_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Image");
-  b.add_input<decl::Color>("Image", "Image_001");
-  b.add_output<decl::Color>("Image");
+  b.add_input<decl::Vector>("Position")
+      .dimensions(2)
+      .subtype(PROP_FACTOR)
+      .default_value({0.5f, 0.5f})
+      .min(0.0f)
+      .max(1.0f)
+      .description("Line position where the image should be split");
+  b.add_input<decl::Float>("Rotation")
+      .default_value(math::numbers::pi_v<float> / 4.0f)
+      .subtype(PROP_ANGLE)
+      .description("Line angle where the image should be split");
+
+  b.add_input<decl::Color>("Image").structure_type(StructureType::Dynamic);
+  b.add_input<decl::Color>("Image", "Image_001").structure_type(StructureType::Dynamic);
+
+  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic);
 }
 
-static void node_composit_init_split(bNodeTree * /*ntree*/, bNode *node)
-{
-  node->custom1 = 50; /* default 50% split */
-}
-
-static void node_composit_buts_split(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
-{
-  uiLayout *row, *col;
-
-  col = uiLayoutColumn(layout, false);
-  row = uiLayoutRow(col, false);
-  uiItemR(row, ptr, "axis", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "factor", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-}
-
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class SplitOperation : public NodeOperation {
  public:
@@ -51,18 +51,32 @@ class SplitOperation : public NodeOperation {
 
   void execute() override
   {
-    GPUShader *shader = get_split_shader();
+    if (this->context().use_gpu()) {
+      this->execute_gpu();
+    }
+    else {
+      this->execute_cpu();
+    }
+  }
+
+  void execute_gpu()
+  {
+    gpu::Shader *shader = this->context().get_shader("compositor_split");
     GPU_shader_bind(shader);
 
-    GPU_shader_uniform_1f(shader, "split_ratio", get_split_ratio());
+    const Domain domain = this->compute_domain();
 
-    const Result &first_image = get_input("Image");
+    GPU_shader_uniform_2fv(shader, "position", this->get_position(domain));
+
+    const float2 normal = {-math::sin(this->get_rotation()), math::cos(this->get_rotation())};
+    GPU_shader_uniform_2fv(shader, "normal", normal);
+
+    const Result &first_image = this->get_input("Image");
     first_image.bind_as_texture(shader, "first_image_tx");
-    const Result &second_image = get_input("Image_001");
+    const Result &second_image = this->get_input("Image_001");
     second_image.bind_as_texture(shader, "second_image_tx");
 
-    const Domain domain = compute_domain();
-    Result &output_image = get_result("Image");
+    Result &output_image = this->get_result("Image");
     output_image.allocate_texture(domain);
     output_image.bind_as_image(shader, "output_img");
 
@@ -74,23 +88,39 @@ class SplitOperation : public NodeOperation {
     GPU_shader_unbind();
   }
 
-  GPUShader *get_split_shader()
+  void execute_cpu()
   {
-    if (get_split_axis() == CMP_NODE_SPLIT_HORIZONTAL) {
-      return context().get_shader("compositor_split_horizontal");
-    }
+    const Result &first_image = this->get_input("Image");
+    const Result &second_image = this->get_input("Image_001");
 
-    return context().get_shader("compositor_split_vertical");
+    const Domain domain = this->compute_domain();
+    Result &output_image = this->get_result("Image");
+    output_image.allocate_texture(domain);
+
+    const math::AngleRadian rotation = this->get_rotation();
+    const float2 normal = {-math::sin(rotation), math::cos(rotation)};
+    const float2 line_point = this->get_position(domain);
+
+    parallel_for(domain.size, [&](const int2 texel) {
+      const float2 direction_to_line_point = line_point - float2(texel);
+      const float projection = math::dot(normal, direction_to_line_point);
+      const bool is_below_line = projection <= 0;
+      output_image.store_pixel(texel,
+                               is_below_line ? first_image.load_pixel<float4, true>(texel) :
+                                               second_image.load_pixel<float4, true>(texel));
+    });
   }
 
-  CMPNodeSplitAxis get_split_axis()
+  float2 get_position(const Domain &domain)
   {
-    return (CMPNodeSplitAxis)bnode().custom2;
+    const float2 relative_position =
+        this->get_input("Position").get_single_value_default(float2(0.5f, 0.5f));
+    return float2(domain.size) * relative_position;
   }
 
-  float get_split_ratio()
+  math::AngleRadian get_rotation()
   {
-    return bnode().custom1 / 100.0f;
+    return this->get_input("Rotation").get_single_value_default(0.0f);
   }
 };
 
@@ -101,20 +131,23 @@ static NodeOperation *get_compositor_operation(Context &context, DNode node)
 
 }  // namespace blender::nodes::node_composite_split_cc
 
-void register_node_type_cmp_split()
+static void register_node_type_cmp_split()
 {
   namespace file_ns = blender::nodes::node_composite_split_cc;
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_SPLIT, "Split", NODE_CLASS_CONVERTER);
+  cmp_node_type_base(&ntype, "CompositorNodeSplit", CMP_NODE_SPLIT);
+  ntype.ui_name = "Split";
+  ntype.ui_description =
+      "Combine two images for side-by-side display. Typically used in combination with a Viewer "
+      "node";
+  ntype.enum_name_legacy = "SPLIT";
+  ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = file_ns::cmp_node_split_declare;
-  ntype.draw_buttons = file_ns::node_composit_buts_split;
   ntype.flag |= NODE_PREVIEW;
-  ntype.initfunc = file_ns::node_composit_init_split;
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  ntype.no_muting = true;
-
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
+NOD_REGISTER_NODE(register_node_type_cmp_split)

@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 4.3.0 Release Candidate (b'7dfe47164a63')\n"
+"Project-Id-Version: Blender 5.0.0 Beta (b'd29f9f6118e5')\n"
 "Report-Msgid-Bugs-To: \n"
-"PO-Revision-Date: 2024-04-29 13:23+0000\n"
+"PO-Revision-Date: 2025-07-23 15:29+0000\n"
 "Last-Translator: Anonymous <noreply@weblate.org>\n"
 "Language-Team: Abkhazian <https://translate.blender.org/projects/blender-ui/ui/ab/>\n"
 "Language: ab\n"
@@ -11,24 +11,12 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 5.0.1\n"
+"X-Generator: Weblate 5.12.1\n"
 "\"POT-Creation-Date: 2019-02-25 20:41:30"
 
 
 msgid "Select"
 msgstr "Алхра"
-
-
-msgid "Add"
-msgstr "Ацҵара"
-
-
-msgid "Subtract"
-msgstr "Ацхра"
-
-
-msgid "Empty"
-msgstr "Аҭацәы"
 
 
 msgctxt "ID"
@@ -69,6 +57,18 @@ msgstr "Метампыл"
 msgctxt "ID"
 msgid "Speaker"
 msgstr "Абжьы Ахыҵхырҭа"
+
+
+msgid "Add"
+msgstr "Ацҵара"
+
+
+msgid "Subtract"
+msgstr "Ацхра"
+
+
+msgid "Empty"
+msgstr "Аҭацәы"
 
 
 msgid "Edge"
@@ -99,52 +99,12 @@ msgid "Main Meshes"
 msgstr "Ихадоу Аҿарԥагақәа"
 
 
-msgid "Armature"
-msgstr "Абаҩ"
-
-
-msgid "Camera"
-msgstr "Акамера"
-
-
-msgid "Curve"
-msgstr "Архәара"
+msgid "Mode"
+msgstr "А́иҿкаашьа"
 
 
 msgid "Image"
 msgstr "Асахьанҵа"
-
-
-msgid "Lattice"
-msgstr "Аҭыџьеихац"
-
-
-msgid "Library"
-msgstr "Ашәҟәыԥхьарҭа"
-
-
-msgid "Light"
-msgstr "Алашара"
-
-
-msgid "Mesh"
-msgstr "Аҿарҧага"
-
-
-msgid "Metaball"
-msgstr "Метампыл"
-
-
-msgid "Speaker"
-msgstr "Абжьы Ахыҵхырҭа"
-
-
-msgid "Text"
-msgstr "Аҳәоу"
-
-
-msgid "Mode"
-msgstr "А́иҿкаашьа"
 
 
 msgid "Rotation"
@@ -155,8 +115,24 @@ msgid "Scale"
 msgstr "Ашәага"
 
 
+msgid "Curve"
+msgstr "Архәара"
+
+
+msgid "View"
+msgstr "Аԥшра"
+
+
 msgid "Difference"
 msgstr "Аиԥшымра"
+
+
+msgid "Armature"
+msgstr "Абаҩ"
+
+
+msgid "Camera"
+msgstr "Акамера"
 
 
 msgid "Location"
@@ -169,10 +145,6 @@ msgstr "Ахырхага"
 
 msgid "Plane"
 msgstr "Аҟьаҟьа"
-
-
-msgid "View"
-msgstr "Аԥшра"
 
 
 msgid "Render"
@@ -189,6 +161,10 @@ msgstr "Ақәыцә"
 
 msgid "Group"
 msgstr "Агәыԥ"
+
+
+msgid "Roughness"
+msgstr "Аџьаџьара"
 
 
 msgid "Cone"
@@ -209,6 +185,10 @@ msgstr "Алагара"
 
 msgid "Window"
 msgstr "Аԥенџьыр"
+
+
+msgid "Library"
+msgstr "Ашәҟәыԥхьарҭа"
 
 
 msgid "Local"
@@ -233,16 +213,16 @@ msgid "Cube"
 msgstr "Акуб"
 
 
-msgid "Roughness"
-msgstr "Аџьаџьара"
-
-
 msgid "Specular"
 msgstr "Ацырцырра"
 
 
 msgid "Edit"
 msgstr "Аиҭакра"
+
+
+msgid "Mesh"
+msgstr "Аҿарҧага"
 
 
 msgid "Circle"
@@ -273,6 +253,10 @@ msgid "Texture Paint"
 msgstr "Атекстура Ашәра"
 
 
+msgid "Lattice"
+msgstr "Аҭыџьеихац"
+
+
 msgctxt "ID"
 msgid "Empty"
 msgstr "Аҭацәы"
@@ -282,12 +266,24 @@ msgid "3D Cursor"
 msgstr "3Д Ахырхага"
 
 
-msgid "Marker"
-msgstr "Ашьҭа"
-
-
 msgid "Keying"
 msgstr " Аиҭаганҵа"
+
+
+msgid "Text"
+msgstr "Аҳәоу"
+
+
+msgid "Metaball"
+msgstr "Метампыл"
+
+
+msgid "Light"
+msgstr "Алашара"
+
+
+msgid "Marker"
+msgstr "Ашьҭа"
 
 
 msgid "File"
@@ -296,6 +292,11 @@ msgstr "Ашәҟәы"
 
 msgid "Help"
 msgstr "Аилыркаа"
+
+
+msgctxt "Operator"
+msgid "Lattice"
+msgstr "Аҭыџьеихац"
 
 
 msgid "Intersect"
@@ -403,14 +404,18 @@ msgid "Circle"
 msgstr "Аицыгьежь"
 
 
-msgctxt "Sequence"
-msgid "Image"
-msgstr "Асахьанҵа"
-
-
 msgctxt "MovieClip"
 msgid "View"
 msgstr "Аԥшра"
+
+
+msgid "Speaker"
+msgstr "Абжьы Ахыҵхырҭа"
+
+
+msgctxt "Sequence"
+msgid "Image"
+msgstr "Асахьанҵа"
 
 
 msgctxt "WindowManager"
@@ -501,11 +506,6 @@ msgstr "Абжьы Ахыҵхырҭа"
 msgctxt "Operator"
 msgid "Armature"
 msgstr "Абаҩ"
-
-
-msgctxt "Operator"
-msgid "Lattice"
-msgstr "Аҭыџьеихац"
 
 
 msgctxt "Action"

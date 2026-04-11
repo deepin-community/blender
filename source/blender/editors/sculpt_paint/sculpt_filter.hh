@@ -12,9 +12,6 @@
 
 #include "BLI_array.hh"
 #include "BLI_index_mask.hh"
-#include "BLI_math_matrix.hh"
-#include "BLI_math_vector.hh"
-#include "BLI_vector.hh"
 
 #include "ED_view3d.hh"
 
@@ -115,7 +112,7 @@ struct Cache {
 
 void cache_init(bContext *C,
                 Object &ob,
-                const Sculpt &sd,
+                Sculpt &sd,
                 undo::Type undo_type,
                 const float mval_fl[2],
                 float area_normal_radius,

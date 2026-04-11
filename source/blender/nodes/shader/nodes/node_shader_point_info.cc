@@ -26,7 +26,7 @@ NODE_SHADER_MATERIALX_BEGIN
 #ifdef WITH_MATERIALX
 {
   /* NOTE: This node isn't supported by MaterialX. */
-  return get_output_default(socket_out_->name, NodeItem::Type::Any);
+  return get_output_default(socket_out_->identifier, NodeItem::Type::Any);
 }
 #endif
 NODE_SHADER_MATERIALX_END
@@ -40,10 +40,14 @@ void register_node_type_sh_point_info()
 
   static blender::bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, SH_NODE_POINT_INFO, "Point Info", NODE_CLASS_INPUT);
+  sh_node_type_base(&ntype, "ShaderNodePointInfo", SH_NODE_POINT_INFO);
+  ntype.ui_name = "Point Info";
+  ntype.ui_description = "Retrieve information about points in a point cloud";
+  ntype.enum_name_legacy = "POINT_INFO";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;
   ntype.gpu_fn = file_ns::node_shader_gpu_point_info;
   ntype.materialx_fn = file_ns::node_shader_materialx;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

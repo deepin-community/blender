@@ -6,8 +6,6 @@
  * \ingroup edmesh
  */
 
-#include "DNA_scene_types.h"
-
 #include "RNA_access.hh"
 
 #include "WM_api.hh"
@@ -35,6 +33,7 @@ void ED_operatortypes_mesh()
   WM_operatortype_append(MESH_OT_hide);
   WM_operatortype_append(MESH_OT_reveal);
   WM_operatortype_append(MESH_OT_select_face_by_sides);
+  WM_operatortype_append(MESH_OT_select_by_pole_count);
   WM_operatortype_append(MESH_OT_select_loose);
   WM_operatortype_append(MESH_OT_select_mirror);
   WM_operatortype_append(MESH_OT_normals_make_consistent);
@@ -179,9 +178,9 @@ void ED_operatortypes_mesh()
   WM_operatortype_append(MESH_OT_symmetrize);
   WM_operatortype_append(MESH_OT_symmetry_snap);
 
-  WM_operatortype_append(MESH_OT_paint_mask_extract);
-  WM_operatortype_append(MESH_OT_face_set_extract);
-  WM_operatortype_append(MESH_OT_paint_mask_slice);
+  WM_operatortype_append(SCULPT_OT_paint_mask_extract);
+  WM_operatortype_append(SCULPT_OT_face_set_extract);
+  WM_operatortype_append(SCULPT_OT_paint_mask_slice);
 
   WM_operatortype_append(MESH_OT_point_normals);
   WM_operatortype_append(MESH_OT_merge_normals);
@@ -192,10 +191,11 @@ void ED_operatortypes_mesh()
   WM_operatortype_append(MESH_OT_smooth_normals);
   WM_operatortype_append(MESH_OT_mod_weighted_strength);
   WM_operatortype_append(MESH_OT_flip_quad_tessellation);
+  WM_operatortype_append(MESH_OT_reorder_vertices_spatial);
 }
 
 #if 0 /* UNUSED, remove? */
-static int ED_operator_editmesh_face_select(bContext *C)
+static int operator_editmesh_face_select(bContext *C)
 {
   Object *obedit = CTX_data_edit_object(C);
   if (obedit && obedit->type == OB_MESH) {

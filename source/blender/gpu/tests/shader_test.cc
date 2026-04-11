@@ -4,6 +4,7 @@
 
 #include "testing/testing.h"
 
+#include "BLI_math_base.h"
 #include "BLI_math_matrix_types.hh"
 #include "GPU_batch.hh"
 #include "GPU_batch_presets.hh"
@@ -14,6 +15,7 @@
 #include "GPU_index_buffer.hh"
 #include "GPU_shader.hh"
 #include "GPU_shader_shared.hh"
+#include "GPU_state.hh"
 #include "GPU_texture.hh"
 #include "GPU_vertex_buffer.hh"
 #include "GPU_vertex_format.hh"
@@ -35,12 +37,17 @@ static void test_shader_compute_2d()
   static constexpr uint SIZE = 512;
 
   /* Build compute shader. */
-  GPUShader *shader = GPU_shader_create_from_info_name("gpu_compute_2d_test");
+  gpu::Shader *shader = GPU_shader_create_from_info_name("gpu_compute_2d_test");
   EXPECT_NE(shader, nullptr);
 
   /* Create texture to store result and attach to shader. */
-  GPUTexture *texture = GPU_texture_create_2d(
-      "gpu_shader_compute_2d", SIZE, SIZE, 1, GPU_RGBA32F, GPU_TEXTURE_USAGE_GENERAL, nullptr);
+  blender::gpu::Texture *texture = GPU_texture_create_2d("gpu_shader_compute_2d",
+                                                         SIZE,
+                                                         SIZE,
+                                                         1,
+                                                         TextureFormat::SFLOAT_32_32_32_32,
+                                                         GPU_TEXTURE_USAGE_GENERAL,
+                                                         nullptr);
   EXPECT_NE(texture, nullptr);
 
   GPU_shader_bind(shader);
@@ -74,12 +81,16 @@ static void test_shader_compute_1d()
   static constexpr uint SIZE = 10;
 
   /* Build compute shader. */
-  GPUShader *shader = GPU_shader_create_from_info_name("gpu_compute_1d_test");
+  gpu::Shader *shader = GPU_shader_create_from_info_name("gpu_compute_1d_test");
   EXPECT_NE(shader, nullptr);
 
   /* Construct Texture. */
-  GPUTexture *texture = GPU_texture_create_1d(
-      "gpu_shader_compute_1d", SIZE, 1, GPU_RGBA32F, GPU_TEXTURE_USAGE_GENERAL, nullptr);
+  blender::gpu::Texture *texture = GPU_texture_create_1d("gpu_shader_compute_1d",
+                                                         SIZE,
+                                                         1,
+                                                         TextureFormat::SFLOAT_32_32_32_32,
+                                                         GPU_TEXTURE_USAGE_GENERAL,
+                                                         nullptr);
   EXPECT_NE(texture, nullptr);
 
   GPU_shader_bind(shader);
@@ -116,13 +127,13 @@ static void test_shader_compute_vbo()
   static constexpr uint SIZE = 128;
 
   /* Build compute shader. */
-  GPUShader *shader = GPU_shader_create_from_info_name("gpu_compute_vbo_test");
+  gpu::Shader *shader = GPU_shader_create_from_info_name("gpu_compute_vbo_test");
   EXPECT_NE(shader, nullptr);
   GPU_shader_bind(shader);
 
   /* Construct VBO. */
   GPUVertFormat format = {0};
-  GPU_vertformat_attr_add(&format, "pos", GPU_COMP_F32, 4, GPU_FETCH_FLOAT);
+  GPU_vertformat_attr_add(&format, "pos", gpu::VertAttrType::SFLOAT_32_32_32_32);
   VertBuf *vbo = GPU_vertbuf_create_with_format_ex(format, GPU_USAGE_DEVICE_ONLY);
   GPU_vertbuf_data_alloc(*vbo, SIZE);
   GPU_vertbuf_bind_as_ssbo(vbo, GPU_shader_get_ssbo_binding(shader, "out_positions"));
@@ -156,7 +167,7 @@ static void test_shader_compute_ibo()
   static constexpr uint SIZE = 128;
 
   /* Build compute shader. */
-  GPUShader *shader = GPU_shader_create_from_info_name("gpu_compute_ibo_test");
+  gpu::Shader *shader = GPU_shader_create_from_info_name("gpu_compute_ibo_test");
   EXPECT_NE(shader, nullptr);
   GPU_shader_bind(shader);
 
@@ -190,12 +201,12 @@ static void test_shader_compute_ssbo()
   static constexpr uint SIZE = 128;
 
   /* Build compute shader. */
-  GPUShader *shader = GPU_shader_create_from_info_name("gpu_compute_ssbo_test");
+  gpu::Shader *shader = GPU_shader_create_from_info_name("gpu_compute_ssbo_test");
   EXPECT_NE(shader, nullptr);
   GPU_shader_bind(shader);
 
   /* Construct SSBO. */
-  GPUStorageBuf *ssbo = GPU_storagebuf_create_ex(
+  StorageBuf *ssbo = GPU_storagebuf_create_ex(
       SIZE * sizeof(uint32_t), nullptr, GPU_USAGE_DEVICE_ONLY, __func__);
   GPU_storagebuf_bind(ssbo, GPU_shader_get_ssbo_binding(shader, "data_out"));
 
@@ -223,7 +234,7 @@ GPU_TEST(shader_compute_ssbo)
 static void test_shader_ssbo_binding()
 {
   /* Build compute shader. */
-  GPUShader *shader = GPU_shader_create_from_info_name("gpu_compute_ssbo_binding_test");
+  gpu::Shader *shader = GPU_shader_create_from_info_name("gpu_compute_ssbo_binding_test");
   EXPECT_NE(shader, nullptr);
 
   /* Perform tests. */
@@ -312,8 +323,9 @@ static std::string print_test_data(const TestOutputRawData &raw, TestType type)
 
 static StringRef print_test_line(StringRefNull test_src, int64_t test_line)
 {
-  /* Start at line one like the line report scheme. */
-  int64_t line = 1;
+  /* Start at line one like the line report scheme.
+   * However, our preprocessor adds a line directive at the top of the file. Skip it. */
+  int64_t line = 1 - 1;
   int64_t last_pos = 0;
   int64_t pos = 0;
   while ((pos = test_src.find('\n', pos)) != std::string::npos) {
@@ -342,7 +354,7 @@ static void gpu_shader_lib_test(const char *test_src_name, const char *additiona
 
   StringRefNull test_src = gpu_shader_dependency_get_source(test_src_name);
 
-  GPUShader *shader = GPU_shader_create_from_info(
+  gpu::Shader *shader = GPU_shader_create_from_info(
       reinterpret_cast<GPUShaderCreateInfo *>(&create_info));
 
   int test_count = 0;
@@ -357,21 +369,16 @@ static void gpu_shader_lib_test(const char *test_src_name, const char *additiona
   int test_output_px_len = divide_ceil_u(sizeof(TestOutput), 4 * 4);
 
   eGPUTextureUsage usage = GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_HOST_READ;
-  GPUTexture *tex = GPU_texture_create_2d(
-      "tx", test_output_px_len, test_count, 1, GPU_RGBA32UI, usage, nullptr);
-  GPUFrameBuffer *fb = GPU_framebuffer_create("test_fb");
+  blender::gpu::Texture *tex = GPU_texture_create_2d(
+      "tx", test_output_px_len, test_count, 1, TextureFormat::UINT_32_32_32_32, usage, nullptr);
+  gpu::FrameBuffer *fb = GPU_framebuffer_create("test_fb");
   GPU_framebuffer_ensure_config(&fb, {GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(tex)});
   GPU_framebuffer_bind(fb);
 
-  /* TODO(fclem): remove this boilerplate. */
-  GPUVertFormat format{};
-  GPU_vertformat_attr_add(&format, "dummy", GPU_COMP_U32, 1, GPU_FETCH_INT);
-  VertBuf *verts = GPU_vertbuf_create_with_format(format);
-  GPU_vertbuf_data_alloc(*verts, 3);
-  Batch *batch = GPU_batch_create_ex(GPU_PRIM_TRIS, verts, nullptr, GPU_BATCH_OWNS_VBO);
+  Batch *batch = GPU_batch_create_procedural(GPU_PRIM_TRIS, 3);
 
   GPU_batch_set_shader(batch, shader);
-  GPU_batch_draw_advanced(batch, 0, 3, 0, 1);
+  GPU_batch_draw(batch);
 
   GPU_batch_discard(batch);
 
@@ -384,7 +391,7 @@ static void gpu_shader_lib_test(const char *test_src_name, const char *additiona
     if (ELEM(test.status, TEST_STATUS_NONE, TEST_STATUS_PASSED)) {
       continue;
     }
-    else if (test.status == TEST_STATUS_FAILED) {
+    if (test.status == TEST_STATUS_FAILED) {
       ADD_FAILURE_AT(test_src_name, test.line)
           << "Value of: " << print_test_line(test_src, test.line) << "\n"
           << "  Actual: " << print_test_data(test.expect, TestType(test.type)) << "\n"
@@ -414,11 +421,15 @@ GPU_TEST(math_lib)
 
 static void test_eevee_lib()
 {
-  // gpu_shader_lib_test("eevee_shadow_test.glsl", "eevee_shared");
+  /* TODO(fclem): Not passing currently. Need to be updated. */
+  // gpu_shader_lib_test("eevee_shadow_test.glsl", "eevee_tests_data");
   gpu_shader_lib_test("eevee_occupancy_test.glsl");
   gpu_shader_lib_test("eevee_horizon_scan_test.glsl");
-  gpu_shader_lib_test("eevee_gbuffer_normal_test.glsl", "eevee_shared");
-  gpu_shader_lib_test("eevee_gbuffer_closure_test.glsl", "eevee_shared");
+#ifndef __APPLE__ /* PSOs fail to compile on Mac. Try to port them to compute shader to see if it \
+                   * fixes the issue. */
+  gpu_shader_lib_test("eevee_gbuffer_normal_test.glsl", "eevee_tests_data");
+  gpu_shader_lib_test("eevee_gbuffer_closure_test.glsl", "eevee_tests_data");
+#endif
 }
 GPU_TEST(eevee_lib)
 

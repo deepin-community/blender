@@ -2,7 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BKE_mesh.hh"
+#include "DNA_mesh_types.h"
+
 #include "BKE_mesh_mapping.hh"
 
 #include "BLI_atomic_disjoint_set.hh"
@@ -19,7 +20,7 @@ static void node_declare(NodeDeclarationBuilder &b)
       .supports_field()
       .description("Edges used to split faces into separate groups");
   b.add_output<decl::Int>("Face Group ID")
-      .dependent_field()
+      .field_source_reference_all()
       .description("Index of the face group inside each boundary edge region");
 }
 
@@ -67,7 +68,7 @@ class FaceSetFromBoundariesInput final : public bke::MeshFieldInput {
     islands.calc_reduced_ids(output);
 
     return mesh.attributes().adapt_domain(
-        VArray<int>::ForContainer(std::move(output)), AttrDomain::Face, domain);
+        VArray<int>::from_container(std::move(output)), AttrDomain::Face, domain);
   }
 
   uint64_t hash() const override
@@ -102,12 +103,15 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(
-      &ntype, GEO_NODE_EDGES_TO_FACE_GROUPS, "Edges to Face Groups", NODE_CLASS_INPUT);
+  geo_node_type_base(&ntype, "GeometryNodeEdgesToFaceGroups", GEO_NODE_EDGES_TO_FACE_GROUPS);
+  ntype.ui_name = "Edges to Face Groups";
+  ntype.ui_description = "Group faces into regions surrounded by the selected boundary edges";
+  ntype.enum_name_legacy = "EDGES_TO_FACE_GROUPS";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.geometry_node_execute = geo_node_exec;
   ntype.declare = node_declare;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

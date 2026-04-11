@@ -20,9 +20,7 @@
 
 #include "../winged_edge/Nature.h"
 
-#ifdef WITH_CXX_GUARDEDALLOC
-#  include "MEM_guardedalloc.h"
-#endif
+#include "MEM_guardedalloc.h"
 
 using namespace std;
 
@@ -46,7 +44,7 @@ class Interface0D {
   Interface0D() {}
 
   /** Destructor */
-  virtual ~Interface0D(){};
+  virtual ~Interface0D() {};
 
   /** Returns the string "Interface0D". */
   virtual string getExactTypeName() const
@@ -102,9 +100,7 @@ class Interface0D {
   /** Cast the Interface0D in TVertex if it can be. */
   virtual TVertex *castToTVertex();
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:Interface0D")
-#endif
 };
 
 //

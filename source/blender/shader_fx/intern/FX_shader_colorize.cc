@@ -6,9 +6,8 @@
  * \ingroup shader_fx
  */
 
-#include <cstdio>
-
 #include "BKE_context.hh"
+#include "BKE_idtype.hh"
 #include "BKE_screen.hh"
 
 #include "BLI_utildefines.h"
@@ -18,7 +17,7 @@
 #include "DNA_screen_types.h"
 #include "DNA_shader_fx_types.h"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "RNA_access.hh"
@@ -48,20 +47,20 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
 
   int mode = RNA_enum_get(ptr, "mode");
 
-  uiLayoutSetPropSep(layout, true);
+  layout->use_property_split_set(true);
 
-  uiItemR(layout, ptr, "mode", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->prop(ptr, "mode", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   if (ELEM(mode, eShaderFxColorizeMode_Custom, eShaderFxColorizeMode_Duotone)) {
     const char *text = (mode == eShaderFxColorizeMode_Duotone) ? IFACE_("Low Color") :
                                                                  IFACE_("Color");
-    uiItemR(layout, ptr, "low_color", UI_ITEM_NONE, text, ICON_NONE);
+    layout->prop(ptr, "low_color", UI_ITEM_NONE, text, ICON_NONE);
   }
   if (mode == eShaderFxColorizeMode_Duotone) {
-    uiItemR(layout, ptr, "high_color", UI_ITEM_NONE, nullptr, ICON_NONE);
+    layout->prop(ptr, "high_color", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 
-  uiItemR(layout, ptr, "factor", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->prop(ptr, "factor", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   shaderfx_panel_end(layout, ptr);
 }
@@ -69,6 +68,14 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
 static void panel_register(ARegionType *region_type)
 {
   shaderfx_panel_register(region_type, eShaderFxType_Colorize, panel_draw);
+}
+
+static void foreach_working_space_color(ShaderFxData *fx,
+                                        const IDTypeForeachColorFunctionCallback &fn)
+{
+  ColorizeShaderFxData *gpfx = (ColorizeShaderFxData *)fx;
+  fn.single(gpfx->low_color);
+  fn.single(gpfx->high_color);
 }
 
 ShaderFxTypeInfo shaderfx_Type_Colorize = {
@@ -86,5 +93,6 @@ ShaderFxTypeInfo shaderfx_Type_Colorize = {
     /*update_depsgraph*/ nullptr,
     /*depends_on_time*/ nullptr,
     /*foreach_ID_link*/ nullptr,
+    /*foreach_working_space_color*/ foreach_working_space_color,
     /*panel_register*/ panel_register,
 };

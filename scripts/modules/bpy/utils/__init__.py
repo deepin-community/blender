@@ -22,6 +22,7 @@ __all__ = (
     "app_template_paths",
     "register_class",
     "register_cli_command",
+    "time_from_frame",
     "unregister_cli_command",
     "register_manual_map",
     "unregister_manual_map",
@@ -45,6 +46,7 @@ __all__ = (
     "unregister_tool",
     "user_resource",
     "execfile",
+    "expose_bundled_modules",
 )
 
 from _bpy import (
@@ -129,7 +131,7 @@ def _test_import(module_name, loaded_modules):
     if module_name in loaded_modules:
         return None
     if "." in module_name:
-        print("Ignoring '{:s}', can't import files containing multiple periods".format(module_name))
+        print("Ignoring '{:s}', cannot import files containing multiple periods".format(module_name))
         return None
 
     if use_time:
@@ -138,7 +140,7 @@ def _test_import(module_name, loaded_modules):
 
     try:
         mod = __import__(module_name)
-    except:
+    except Exception:
         import traceback
         traceback.print_exc()
         return None
@@ -198,7 +200,32 @@ def modules_from_path(path, loaded_modules):
 # Currently used for "startup" modules.
 _registered_module_names = []
 # Keep for comparisons, never ever reload this.
-import bpy_types as _bpy_types
+import _bpy_types
+
+
+def _register_module_call(mod):
+    register = getattr(mod, "register", None)
+    if register:
+        try:
+            register()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+    else:
+        print(
+            "\nWarning! {!r} has no register function, "
+            "this is now a requirement for registerable scripts".format(mod.__file__)
+        )
+
+
+def _unregister_module_call(mod):
+    unregister = getattr(mod, "unregister", None)
+    if unregister:
+        try:
+            unregister()
+        except Exception:
+            import traceback
+            traceback.print_exc()
 
 
 def load_scripts(*, reload_scripts=False, refresh_scripts=False, extensions=True):
@@ -234,29 +261,6 @@ def load_scripts(*, reload_scripts=False, refresh_scripts=False, extensions=True
         for addon_module_name in [ext.module for ext in _preferences.addons]:
             _addon_utils.disable(addon_module_name)
 
-    def register_module_call(mod):
-        register = getattr(mod, "register", None)
-        if register:
-            try:
-                register()
-            except:
-                import traceback
-                traceback.print_exc()
-        else:
-            print(
-                "\nWarning! {!r} has no register function, "
-                "this is now a requirement for registerable scripts".format(mod.__file__)
-            )
-
-    def unregister_module_call(mod):
-        unregister = getattr(mod, "unregister", None)
-        if unregister:
-            try:
-                unregister()
-            except:
-                import traceback
-                traceback.print_exc()
-
     def test_reload(mod):
         import importlib
         # reloading this causes internal errors
@@ -267,7 +271,7 @@ def load_scripts(*, reload_scripts=False, refresh_scripts=False, extensions=True
 
         try:
             return importlib.reload(mod)
-        except:
+        except Exception:
             import traceback
             traceback.print_exc()
 
@@ -281,7 +285,7 @@ def load_scripts(*, reload_scripts=False, refresh_scripts=False, extensions=True
             mod = test_reload(mod)
 
         if mod:
-            register_module_call(mod)
+            _register_module_call(mod)
             _registered_module_names.append(mod.__name__)
 
     if reload_scripts:
@@ -304,7 +308,7 @@ def load_scripts(*, reload_scripts=False, refresh_scripts=False, extensions=True
 
         # Loop over and unload all scripts.
         for mod in registered_modules:
-            unregister_module_call(mod)
+            _unregister_module_call(mod)
 
         for mod in registered_modules:
             test_reload(mod)
@@ -317,7 +321,7 @@ def load_scripts(*, reload_scripts=False, refresh_scripts=False, extensions=True
         # Without this, add-on register functions accessing key-map properties can crash, see: #111702.
         _bpy.context.window_manager.keyconfigs.update(keep_properties=True)
 
-    from bpy_restrict_state import RestrictBlend
+    from _bpy_restrict_state import RestrictBlend
 
     with RestrictBlend():
         for base_path in script_paths(use_user=use_user):
@@ -354,6 +358,22 @@ def load_scripts(*, reload_scripts=False, refresh_scripts=False, extensions=True
                 for subcls in cls.__subclasses__():
                     if not subcls.is_registered:
                         print("Warning, unregistered class: {:s}({:s})".format(subcls.__name__, cls.__name__))
+
+
+# Internal only, called on exit by `WM_exit_ex`.
+def _on_exit():
+    # Disable all add-ons.
+    _addon_utils.disable_all()
+
+    # Call `unregister` function on internal startup module.
+    # Must only be used as part of Blender 'exit' process.
+    from _bpy_restrict_state import RestrictBlend
+    with RestrictBlend():
+        for mod_name in reversed(_registered_module_names):
+            if (mod := _sys.modules.get(mod_name)) is None:
+                print("Warning: module", repr(mod_name), "not found in sys.modules")
+                continue
+            _unregister_module_call(mod)
 
 
 def load_scripts_extensions(*, reload_scripts=False):
@@ -399,8 +419,8 @@ def script_paths_pref():
 
 def script_paths_system_environment():
     """Returns a list of system script directories from environment variables."""
-    if env_system_path := _os.environ.get("BLENDER_SYSTEM_SCRIPTS"):
-        return [_os.path.normpath(env_system_path)]
+    if env_system_paths := _os.environ.get("BLENDER_SYSTEM_SCRIPTS"):
+        return [_os.path.normpath(p) for p in env_system_paths.split(_os.pathsep) if p]
     return []
 
 
@@ -830,7 +850,7 @@ def keyconfig_set(filepath, *, report=None):
     try:
         error_msg = ""
         execfile(filepath)
-    except:
+    except Exception:
         import traceback
         error_msg = traceback.format_exc()
 
@@ -877,7 +897,7 @@ def user_resource(resource_type, *, path="", create=False):
             if not _os.path.exists(target_path):
                 try:
                     _os.makedirs(target_path)
-                except:
+                except Exception:
                     import traceback
                     traceback.print_exc()
                     target_path = ""
@@ -894,7 +914,7 @@ def extension_path_user(package, *, path="", create=False):
 
     .. note::
 
-       This allows each extension to have it's own user directory to store files.
+       This allows each extension to have its own user directory to store files.
 
        The location of the extension it self is not a suitable place to store files
        because it is cleared each upgrade and the users may not have write permissions
@@ -926,7 +946,7 @@ def extension_path_user(package, *, path="", create=False):
             if not _os.path.exists(target_path):
                 try:
                     _os.makedirs(target_path)
-                except:
+                except Exception:
                     import traceback
                     traceback.print_exc()
                     target_path = ""
@@ -1002,9 +1022,9 @@ def register_tool(tool_cls, *, after=None, separator=False, group=False):
     Register a tool in the toolbar.
 
     :arg tool_cls: A tool subclass.
-    :type tool_cls: :class:`bpy.types.WorkSpaceTool`
+    :type tool_cls: type[:class:`bpy.types.WorkSpaceTool`]
     :arg after: Optional identifiers this tool will be added after.
-    :type after: Sequence[str] | None
+    :type after: Sequence[str] | set[str] | None
     :arg separator: When true, add a separator before this tool.
     :type separator: bool
     :arg group: When true, add a new nested group of tools.
@@ -1211,7 +1231,7 @@ def _blender_default_map():
     # NOTE(@ideasman42): Avoid importing this as there is no need to keep the lookup table in memory.
     # As this runs when the user accesses the "Online Manual", the overhead loading the file is acceptable.
     # In my tests it's under 1/100th of a second loading from a `pyc`.
-    ref_mod = execfile(_os.path.join(_script_base_dir, "modules", "rna_manual_reference.py"))
+    ref_mod = execfile(_os.path.join(_script_base_dir, "modules", "_rna_manual_reference.py"))
     return (ref_mod.url_manual_prefix, ref_mod.url_manual_mapping)
 
 
@@ -1232,7 +1252,7 @@ def manual_map():
     for cb in reversed(_manual_map):
         try:
             prefix, url_manual_mapping = cb()
-        except:
+        except Exception:
             print("Error calling {!r}".format(cb))
             import traceback
             traceback.print_exc()
@@ -1336,3 +1356,27 @@ def make_rna_paths(struct_name, prop_name, enum_name):
         else:
             src = src_rna = struct_name
     return src, src_rna, src_enum
+
+
+def expose_bundled_modules():
+    """
+    For Blender as a Python module, add bundled VFX library python bindings
+    to ``sys.path``. These may be used instead of dedicated packages, to ensure
+    the libraries are compatible with Blender.
+    """
+    # For Blender executable there is nothing to do, already exposed.
+    if not _bpy.app.module:
+        return
+    # System installations do not bundle additional modules,
+    # these are expected to be installed on the system too.
+    if not _bpy.app.portable:
+        return
+
+    version_dir = _os.path.normpath(_os.path.join(_bpy.__file__, "..", "..", "..", ".."))
+    packages_dir = _os.path.join(version_dir, "python", "lib")
+    if _sys.platform != "win32":
+        packages_dir = _os.path.join(packages_dir, "python{:d}.{:d}".format(*_sys.version_info[:2]))
+    packages_dir = _os.path.join(packages_dir, "site-packages")
+
+    if packages_dir not in _sys.path:
+        _sys.path.insert(0, packages_dir)

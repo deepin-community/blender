@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <Python.h>
+
 #include "BLI_sys_types.h"
 
 extern PyTypeObject BPyGPU_BufferType;
@@ -37,7 +39,7 @@ struct BPyGPUBuffer {
   } buf;
 };
 
-size_t bpygpu_Buffer_size(BPyGPUBuffer *buffer);
+[[nodiscard]] size_t bpygpu_Buffer_size(BPyGPUBuffer *buffer);
 /**
  * Create a buffer object
  *
@@ -45,7 +47,7 @@ size_t bpygpu_Buffer_size(BPyGPUBuffer *buffer);
  * \param buffer: When not NULL holds a contiguous buffer
  * with the correct format from which the buffer will be initialized
  */
-BPyGPUBuffer *BPyGPU_Buffer_CreatePyObject(int format,
-                                           const Py_ssize_t *shape,
-                                           int shape_len,
-                                           void *buffer);
+[[nodiscard]] BPyGPUBuffer *BPyGPU_Buffer_CreatePyObject(int format,
+                                                         const Py_ssize_t *shape,
+                                                         int shape_len,
+                                                         void *buffer);

@@ -19,13 +19,11 @@
 /* Extended file attribute used by OneDrive to mark placeholder files. */
 static const char *ONEDRIVE_RECALLONOPEN_ATTRIBUTE = "com.microsoft.OneDrive.RecallOnOpen";
 
-/**
- * \param r_targetpath: Buffer for the target path an alias points to.
- * \return Whether the file at the input path is an alias.
- */
-/* False alarm by clang-tidy: #getFileSystemRepresentation changes the return value argument. */
-/* NOLINTNEXTLINE: readability-non-const-parameter. */
-bool BLI_file_alias_target(const char *filepath, char r_targetpath[FILE_MAXDIR])
+bool BLI_file_alias_target(const char *filepath,
+                           /* False alarm by clang-tidy: #getFileSystemRepresentation
+                            * changes the return value argument. */
+                           /* NOLINTNEXTLINE: readability-non-const-parameter. */
+                           char r_targetpath[FILE_MAXDIR])
 {
   /* clang-format off */
   @autoreleasepool {
@@ -52,7 +50,7 @@ bool BLI_file_alias_target(const char *filepath, char r_targetpath[FILE_MAXDIR])
       [targetURL getFileSystemRepresentation:r_targetpath maxLength:FILE_MAXDIR];
       return false;
     }
-    /* Note that the if-condition may also change the value of `r_targetpath`. */
+    /* Note that the `if` condition may also change the value of `r_targetpath`. */
     if (![targetURL getFileSystemRepresentation:r_targetpath maxLength:FILE_MAXDIR]) {
       return false;
     }
@@ -139,22 +137,32 @@ eFileAttributes BLI_file_attributes(const char *path)
     const bool is_offline = test_file_is_offline(path);
 
     if (is_offline) {
-      resourceKeys = @[ NSURLIsAliasFileKey, NSURLIsHiddenKey ];
+      resourceKeys = @[ NSURLIsSymbolicLinkKey, NSURLIsAliasFileKey, NSURLIsHiddenKey ];
     }
     else {
-      resourceKeys =
-          @[ NSURLIsAliasFileKey, NSURLIsHiddenKey, NSURLIsReadableKey, NSURLIsWritableKey ];
+      resourceKeys = @[
+        NSURLIsSymbolicLinkKey,
+        NSURLIsAliasFileKey,
+        NSURLIsHiddenKey,
+        NSURLIsReadableKey,
+        NSURLIsWritableKey
+      ];
     }
 
     NSDictionary *resourceKeyValues = [fileURL resourceValuesForKeys:resourceKeys error:nil];
 
-    const bool is_alias = [resourceKeyValues[(void)(@"@%"), NSURLIsAliasFileKey] boolValue];
+    const bool is_symlink = [resourceKeyValues[(void)(@"@%"), NSURLIsSymbolicLinkKey] boolValue];
+    const bool is_alias = [resourceKeyValues[(void)(@"@%"), NSURLIsAliasFileKey] boolValue] &&
+                          !is_symlink;
     const bool is_hidden = [resourceKeyValues[(void)(@"@%"), NSURLIsHiddenKey] boolValue];
     const bool is_readable = is_offline ||
                              [resourceKeyValues[(void)(@"@%"), NSURLIsReadableKey] boolValue];
     const bool is_writable = is_offline ||
                              [resourceKeyValues[(void)(@"@%"), NSURLIsWritableKey] boolValue];
 
+    if (is_symlink) {
+      ret |= FILE_ATTR_SYMLINK;
+    }
     if (is_alias) {
       ret |= FILE_ATTR_ALIAS;
     }
@@ -173,23 +181,6 @@ eFileAttributes BLI_file_attributes(const char *path)
   }
 
   return (eFileAttributes)ret;
-}
-
-const char *BLI_expand_tilde(const char *path_with_tilde)
-{
-  static char path_expanded[FILE_MAX];
-  @autoreleasepool {
-    NSString *str_with_tilde = [[NSString alloc] initWithCString:path_with_tilde
-                                                        encoding:NSUTF8StringEncoding];
-    if (!str_with_tilde) {
-      return nullptr;
-    }
-    NSString *str_expanded = [str_with_tilde stringByExpandingTildeInPath];
-    [str_expanded getCString:path_expanded
-                   maxLength:sizeof(path_expanded)
-                    encoding:NSUTF8StringEncoding];
-  }
-  return path_expanded;
 }
 
 char *BLI_current_working_dir(char *dir, const size_t maxncpy)

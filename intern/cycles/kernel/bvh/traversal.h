@@ -22,7 +22,7 @@
  */
 
 ccl_device_noinline bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals kg,
-                                                     ccl_private const Ray *ray,
+                                                     const ccl_private Ray *ray,
                                                      ccl_private Intersection *isect,
                                                      const uint visibility)
 {
@@ -182,7 +182,9 @@ ccl_device_noinline bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals kg,
               case PRIMITIVE_CURVE_THICK:
               case PRIMITIVE_MOTION_CURVE_THICK:
               case PRIMITIVE_CURVE_RIBBON:
-              case PRIMITIVE_MOTION_CURVE_RIBBON: {
+              case PRIMITIVE_MOTION_CURVE_RIBBON:
+              case PRIMITIVE_CURVE_THICK_LINEAR:
+              case PRIMITIVE_MOTION_CURVE_THICK_LINEAR: {
                 if ((type & PRIMITIVE_MOTION) && kernel_data.bvh.use_bvh_steps) {
                   const float2 prim_time = kernel_data_fetch(prim_time, prim_addr);
                   if (ray->time < prim_time.x || ray->time > prim_time.y) {
@@ -260,7 +262,7 @@ ccl_device_noinline bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals kg,
 }
 
 ccl_device_inline bool BVH_FUNCTION_NAME(KernelGlobals kg,
-                                         ccl_private const Ray *ray,
+                                         const ccl_private Ray *ray,
                                          ccl_private Intersection *isect,
                                          const uint visibility)
 {

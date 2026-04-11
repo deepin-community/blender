@@ -11,10 +11,10 @@
 #include "DNA_modifier_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector.h"
-#include "BLI_utildefines.h"
+#include "BLI_string.h"
 
 #include "BKE_armature.hh"
 #include "BKE_constraint.h"
@@ -22,7 +22,6 @@
 #include "BKE_curves.h"
 #include "BKE_displist.h"
 #include "BKE_editmesh.hh"
-#include "BKE_gpencil_legacy.h"
 #include "BKE_grease_pencil.h"
 #include "BKE_grease_pencil.hh"
 #include "BKE_lattice.hh"
@@ -30,7 +29,6 @@
 #include "BKE_mball.hh"
 #include "BKE_mesh.hh"
 #include "BKE_object.hh"
-#include "BKE_object_types.hh"
 #include "BKE_particle.h"
 #include "BKE_pointcache.h"
 #include "BKE_pointcloud.hh"
@@ -144,13 +142,6 @@ void BKE_object_handle_data_update(Depsgraph *depsgraph, Scene *scene, Object *o
       cddata_masks.fmask |= CD_MASK_PROP_ALL;
       cddata_masks.pmask |= CD_MASK_PROP_ALL;
       cddata_masks.lmask |= CD_MASK_PROP_ALL;
-
-      /* Make sure Freestyle edge/face marks appear in evaluated mesh (see #40315).
-       * Due to Line Art implementation, edge marks should also be shown in viewport. */
-#ifdef WITH_FREESTYLE
-      cddata_masks.emask |= CD_MASK_FREESTYLE_EDGE;
-      cddata_masks.pmask |= CD_MASK_FREESTYLE_FACE;
-#endif
       if (DEG_get_mode(depsgraph) == DAG_EVAL_RENDER) {
         /* Always compute orcos for render. */
         cddata_masks.vmask |= CD_MASK_ORCO;
@@ -187,7 +178,7 @@ void BKE_object_handle_data_update(Depsgraph *depsgraph, Scene *scene, Object *o
       BKE_volume_data_update(depsgraph, scene, ob);
       break;
     case OB_GREASE_PENCIL:
-      BKE_grease_pencil_data_update(depsgraph, scene, ob);
+      BKE_object_eval_grease_pencil(depsgraph, scene, ob);
       break;
   }
 
@@ -223,7 +214,7 @@ void BKE_object_handle_data_update(Depsgraph *depsgraph, Scene *scene, Object *o
   }
 
   if (DEG_is_active(depsgraph)) {
-    Object *object_orig = DEG_get_original_object(ob);
+    Object *object_orig = DEG_get_original(ob);
     object_orig->runtime->bounds_eval = BKE_object_evaluated_geometry_bounds(ob);
   }
 }
@@ -233,9 +224,10 @@ void BKE_object_sync_to_original(Depsgraph *depsgraph, Object *object)
   if (!DEG_is_active(depsgraph)) {
     return;
   }
-  Object *object_orig = DEG_get_original_object(object);
+  Object *object_orig = DEG_get_original(object);
   /* Base flags. */
   object_orig->base_flag = object->base_flag;
+  object_orig->base_local_view_bits = object->base_local_view_bits;
   /* Transformation flags. */
   copy_m4_m4(object_orig->runtime->object_to_world.ptr(), object->object_to_world().ptr());
   copy_m4_m4(object_orig->runtime->world_to_object.ptr(), object->world_to_object().ptr());

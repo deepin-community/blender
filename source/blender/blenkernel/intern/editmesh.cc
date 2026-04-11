@@ -8,7 +8,6 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "DNA_listBase.h"
 #include "DNA_mesh_types.h"
 #include "DNA_object_types.h"
 
@@ -23,7 +22,6 @@
 #include "BKE_mesh_runtime.hh"
 #include "BKE_mesh_wrapper.hh"
 #include "BKE_object.hh"
-#include "BKE_object_types.hh"
 
 #include "DEG_depsgraph_query.hh"
 
@@ -64,6 +62,20 @@ BMEditMesh *BKE_editmesh_from_object(Object *ob)
 {
   BLI_assert(ob->type == OB_MESH);
   return ((Mesh *)ob->data)->runtime->edit_mesh.get();
+}
+
+bool BKE_editmesh_eval_orig_map_available(const Mesh &mesh_eval, const Mesh *mesh_orig)
+{
+  if (!mesh_orig) {
+    return false;
+  }
+  if (&mesh_eval == mesh_orig) {
+    return true;
+  }
+  if (mesh_eval.runtime->edit_mesh) {
+    return mesh_eval.runtime->edit_mesh == mesh_orig->runtime->edit_mesh;
+  }
+  return false;
 }
 
 void BKE_editmesh_looptris_calc_ex(BMEditMesh *em, const BMeshCalcTessellation_Params *params)
@@ -173,7 +185,7 @@ Span<float3> BKE_editmesh_vert_coords_when_deformed(
     Depsgraph *depsgraph, BMEditMesh *em, Scene *scene, Object *ob, Array<float3> &r_alloc)
 {
 
-  const Object *object_eval = DEG_get_evaluated_object(depsgraph, ob);
+  const Object *object_eval = DEG_get_evaluated(depsgraph, ob);
   const Mesh *editmesh_eval_final = BKE_object_get_editmesh_eval_final(object_eval);
   const Mesh *mesh_cage = BKE_object_get_editmesh_eval_cage(ob);
 

@@ -22,9 +22,13 @@ class USDSkeletonReader : public USDXformReader {
   {
   }
 
-  bool valid() const override;
-  void create_object(Main *bmain, double motionSampleTime) override;
-  void read_object_data(Main *bmain, double motionSampleTime) override;
+  bool valid() const override
+  {
+    return bool(skel_);
+  }
+
+  void create_object(Main *bmain) override;
+  void read_object_data(Main *bmain, pxr::UsdTimeCode time) override;
 };
 
 }  // namespace blender::io::usd

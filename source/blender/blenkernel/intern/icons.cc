@@ -6,11 +6,9 @@
  * \ingroup bke
  */
 
-#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
-#include <mutex>
 
 #include "CLG_log.h"
 
@@ -22,6 +20,7 @@
 #include "BLI_fileops.h"
 #include "BLI_ghash.h"
 #include "BLI_linklist_lockfree.h"
+#include "BLI_mutex.hh"
 #include "BLI_threads.h"
 #include "BLI_utildefines.h"
 
@@ -45,7 +44,7 @@ enum {
 
 /* GLOBALS */
 
-static CLG_LogRef LOG = {"bke.icons"};
+static CLG_LogRef LOG = {"lib.icons"};
 
 /* Protected by gIconMutex. */
 static GHash *gIcons = nullptr;
@@ -56,7 +55,7 @@ static int gNextIconId = 1;
 /* Protected by gIconMutex. */
 static int gFirstIconId = 1;
 
-static std::mutex gIconMutex;
+static blender::Mutex gIconMutex;
 
 /* Queue of icons for deferred deletion. */
 struct DeferredIconDeleteNode {
@@ -77,11 +76,11 @@ static void icon_free(void *val)
     Icon_Geom *obj = (Icon_Geom *)icon->obj;
     if (obj->mem) {
       /* coords & colors are part of this memory. */
-      MEM_freeN((void *)obj->mem);
+      MEM_freeN(const_cast<void *>(obj->mem));
     }
     else {
-      MEM_freeN((void *)obj->coords);
-      MEM_freeN((void *)obj->colors);
+      MEM_freeN(obj->coords);
+      MEM_freeN(obj->colors);
     }
     MEM_freeN(icon->obj);
   }
@@ -235,7 +234,7 @@ void BKE_icon_changed(const int icon_id)
 
 static Icon *icon_create(int icon_id, int obj_type, void *obj)
 {
-  Icon *new_icon = (Icon *)MEM_mallocN(sizeof(Icon), __func__);
+  Icon *new_icon = MEM_mallocN<Icon>(__func__);
 
   new_icon->obj_type = obj_type;
   new_icon->obj = obj;
@@ -414,18 +413,6 @@ Icon *BKE_icon_get(const int icon_id)
   return icon;
 }
 
-bool BKE_icon_is_preview(const int icon_id)
-{
-  const Icon *icon = BKE_icon_get(icon_id);
-  return icon != nullptr && icon->obj_type == ICON_DATA_PREVIEW;
-}
-
-bool BKE_icon_is_image(const int icon_id)
-{
-  const Icon *icon = BKE_icon_get(icon_id);
-  return icon != nullptr && icon->obj_type == ICON_DATA_IMBUF;
-}
-
 void BKE_icon_set(const int icon_id, Icon *icon)
 {
   void **val_p;
@@ -441,8 +428,7 @@ void BKE_icon_set(const int icon_id, Icon *icon)
 
 static void icon_add_to_deferred_delete_queue(int icon_id)
 {
-  DeferredIconDeleteNode *node = (DeferredIconDeleteNode *)MEM_mallocN(
-      sizeof(DeferredIconDeleteNode), __func__);
+  DeferredIconDeleteNode *node = MEM_mallocN<DeferredIconDeleteNode>(__func__);
   node->icon_id = icon_id;
   /* Doesn't need lock. */
   BLI_linklist_lockfree_insert(&g_icon_delete_queue, (LockfreeLinkNode *)node);
@@ -551,7 +537,7 @@ Icon_Geom *BKE_icon_geom_from_memory(uchar *data, size_t data_len)
   }
   p += 4;
 
-  Icon_Geom *geom = (Icon_Geom *)MEM_mallocN(sizeof(*geom), __func__);
+  Icon_Geom *geom = MEM_mallocN<Icon_Geom>(__func__);
   geom->coords_range[0] = int(*p++);
   geom->coords_range[1] = int(*p++);
   /* x, y ignored for now */

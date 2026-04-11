@@ -4,6 +4,9 @@
 
 import bpy
 from bpy.types import Panel, Menu, Operator
+from bpy.app.translations import (
+    pgettext_n as n_,
+)
 
 
 class ModifierButtonsPanel:
@@ -25,15 +28,28 @@ class ModifierAddMenu:
     MODIFIER_TYPES_I18N_CONTEXT = bpy.types.Modifier.bl_rna.properties["type"].translation_context
 
     @classmethod
-    def operator_modifier_add(cls, layout, mod_type):
+    def operator_modifier_add(cls, layout, mod_type, text=None, no_icon=False):
+        label = text if text else cls.MODIFIER_TYPES_TO_LABELS[mod_type]
         layout.operator(
             "object.modifier_add",
-            text=cls.MODIFIER_TYPES_TO_LABELS[mod_type],
+            text=label,
             # Although these are operators, the label actually comes from an (enum) property,
             # so the property's translation context must be used here.
             text_ctxt=cls.MODIFIER_TYPES_I18N_CONTEXT,
-            icon=cls.MODIFIER_TYPES_TO_ICONS[mod_type],
+            icon='NONE' if no_icon else cls.MODIFIER_TYPES_TO_ICONS[mod_type],
         ).type = mod_type
+
+    @classmethod
+    def operator_modifier_add_asset(cls, layout, name, icon='NONE'):
+        props = layout.operator(
+            "object.modifier_add_node_group",
+            text=name,
+            text_ctxt=cls.MODIFIER_TYPES_I18N_CONTEXT,
+            icon=icon,
+        )
+        props.asset_library_type = 'ESSENTIALS'
+        props.asset_library_identifier = ""
+        props.relative_asset_identifier = "nodes/geometry_nodes_essentials.blend/NodeTree/" + name
 
 
 class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
@@ -42,7 +58,7 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
     @classmethod
     def poll(cls, context):
         ob = context.object
-        return ob and ob.type != 'GPENCIL'
+        return ob
 
     def draw(self, _context):
         layout = self.layout
@@ -67,15 +83,15 @@ class OBJECT_MT_modifier_add(ModifierAddMenu, Menu):
 
         if layout.operator_context == 'EXEC_REGION_WIN':
             layout.operator_context = 'INVOKE_REGION_WIN'
-            layout.operator("WM_OT_search_single_menu", text="Search...",
-                            icon='VIEWZOOM').menu_idname = "OBJECT_MT_modifier_add"
+            layout.operator(
+                "WM_OT_search_single_menu",
+                text="Search...",
+                icon='VIEWZOOM',
+            ).menu_idname = "OBJECT_MT_modifier_add"
             layout.separator()
 
         layout.operator_context = 'INVOKE_REGION_WIN'
 
-        if geometry_nodes_supported:
-            self.operator_modifier_add(layout, 'NODES')
-            layout.separator()
         if ob_type in {'MESH', 'CURVE', 'CURVES', 'FONT', 'SURFACE', 'LATTICE', 'GREASEPENCIL', 'POINTCLOUD'}:
             layout.menu("OBJECT_MT_modifier_add_edit")
         if ob_type in {'MESH', 'CURVE', 'FONT', 'SURFACE', 'VOLUME', 'GREASEPENCIL'}:
@@ -92,6 +108,10 @@ class OBJECT_MT_modifier_add(ModifierAddMenu, Menu):
         if geometry_nodes_supported:
             layout.menu_contents("OBJECT_MT_modifier_add_root_catalogs")
 
+        if geometry_nodes_supported:
+            layout.separator()
+            self.operator_modifier_add(layout, 'NODES')
+
 
 class OBJECT_MT_modifier_add_edit(ModifierAddMenu, Menu):
     bl_label = "Edit"
@@ -104,7 +124,7 @@ class OBJECT_MT_modifier_add_edit(ModifierAddMenu, Menu):
             self.operator_modifier_add(layout, 'DATA_TRANSFER')
         if ob_type in {'MESH', 'CURVE', 'FONT', 'SURFACE', 'LATTICE'}:
             self.operator_modifier_add(layout, 'MESH_CACHE')
-        if ob_type in {'MESH', 'CURVE', 'CURVES', 'FONT', 'SURFACE', 'POINTCLOUD'}:
+        if ob_type in {'MESH', 'CURVE', 'CURVES', 'FONT', 'POINTCLOUD'}:
             self.operator_modifier_add(layout, 'MESH_SEQUENCE_CACHE')
         if ob_type == 'MESH':
             self.operator_modifier_add(layout, 'UV_PROJECT')
@@ -128,12 +148,14 @@ class OBJECT_MT_modifier_add_generate(ModifierAddMenu, Menu):
         layout = self.layout
         ob_type = context.object.type
         if ob_type in {'MESH', 'CURVE', 'FONT', 'SURFACE'}:
-            self.operator_modifier_add(layout, 'ARRAY')
+            self.operator_modifier_add_asset(layout, 'Array', icon='MOD_ARRAY')
+            self.operator_modifier_add(layout, 'ARRAY', text=n_("Array (Legacy)"), no_icon=True)
             self.operator_modifier_add(layout, 'BEVEL')
         if ob_type == 'MESH':
             self.operator_modifier_add(layout, 'BOOLEAN')
         if ob_type in {'MESH', 'CURVE', 'FONT', 'SURFACE'}:
             self.operator_modifier_add(layout, 'BUILD')
+            self.operator_modifier_add_asset(layout, n_('Curve to Tube'), icon='MOD_CURVE_TO_TUBE')
             self.operator_modifier_add(layout, 'DECIMATE')
             self.operator_modifier_add(layout, 'EDGE_SPLIT')
         if ob_type == 'MESH':
@@ -146,6 +168,7 @@ class OBJECT_MT_modifier_add_generate(ModifierAddMenu, Menu):
             self.operator_modifier_add(layout, 'MULTIRES')
         if ob_type in {'MESH', 'CURVE', 'FONT', 'SURFACE'}:
             self.operator_modifier_add(layout, 'REMESH')
+            self.operator_modifier_add_asset(layout, n_('Scatter on Surface'), icon='MOD_SCATTER_ON_SURFACE')
             self.operator_modifier_add(layout, 'SCREW')
         if ob_type == 'MESH':
             self.operator_modifier_add(layout, 'SKIN')
@@ -171,7 +194,7 @@ class OBJECT_MT_modifier_add_generate(ModifierAddMenu, Menu):
             self.operator_modifier_add(layout, 'GREASE_PENCIL_OUTLINE')
             self.operator_modifier_add(layout, 'GREASE_PENCIL_SIMPLIFY')
             self.operator_modifier_add(layout, 'GREASE_PENCIL_SUBDIV')
-        layout.template_modifier_asset_menu_items(catalog_path=self.bl_label)
+        layout.template_modifier_asset_menu_items(catalog_path=self.bl_label, skip_essentials=True)
 
 
 class OBJECT_MT_modifier_add_deform(ModifierAddMenu, Menu):
@@ -267,20 +290,6 @@ class OBJECT_MT_modifier_add_color(ModifierAddMenu, Menu):
         layout.template_modifier_asset_menu_items(catalog_path=self.bl_label)
 
 
-class DATA_PT_gpencil_modifiers(ModifierButtonsPanel, Panel):
-    bl_label = "Modifiers"
-
-    @classmethod
-    def poll(cls, context):
-        ob = context.object
-        return ob and ob.type == 'GPENCIL'
-
-    def draw(self, _context):
-        layout = self.layout
-        layout.operator_menu_enum("object.gpencil_modifier_add", "type")
-        layout.template_grease_pencil_modifiers()
-
-
 class AddModifierMenu(Operator):
     bl_idname = "object.add_modifier_menu"
     bl_label = "Add Modifier"
@@ -288,13 +297,10 @@ class AddModifierMenu(Operator):
     @classmethod
     def poll(cls, context):
         # NOTE: This operator only exists to add a poll to the add modifier shortcut in the property editor.
-        object = context.object
         space = context.space_data
-        if object and object.type == 'GPENCIL':
-            return False
         return space and space.type == 'PROPERTIES' and space.context == 'MODIFIER'
 
-    def invoke(self, context, event):
+    def invoke(self, _context, _event):
         return bpy.ops.wm.call_menu(name="OBJECT_MT_modifier_add")
 
 
@@ -307,7 +313,6 @@ classes = (
     OBJECT_MT_modifier_add_normals,
     OBJECT_MT_modifier_add_physics,
     OBJECT_MT_modifier_add_color,
-    DATA_PT_gpencil_modifiers,
     AddModifierMenu,
 )
 

@@ -12,7 +12,14 @@
 # so avoid making changes all over the place.
 
 import bpy
-from bpy.types import Panel
+
+from bpy.types import (
+    Panel,
+)
+from bpy.app.translations import (
+    pgettext_iface as iface_,
+    pgettext_tip as tip_,
+)
 
 from bl_ui.space_toolsystem_common import (
     ToolSelectPanelHelper,
@@ -21,7 +28,6 @@ from bl_ui.space_toolsystem_common import (
 from bl_ui.properties_paint_common import (
     BrushAssetShelf,
 )
-from bpy.app.translations import pgettext_tip as tip_
 
 
 def kmi_to_string_or_none(kmi):
@@ -1335,6 +1341,21 @@ class _defs_edit_curves:
             draw_settings=curve_draw,
         )
 
+    @ToolDef.from_fn
+    def pen():
+        def draw_settings(context, layout, tool):
+            props = tool.operator_properties("curves.pen")
+            layout.prop(props, "size")
+        return dict(
+            idname="builtin.pen",
+            label="Pen",
+            cursor='CROSSHAIR',
+            icon="ops.curve.pen",
+            widget=None,
+            keymap=(),
+            draw_settings=draw_settings,
+        )
+
 
 class _defs_edit_text:
 
@@ -2036,9 +2057,10 @@ class _defs_weight_paint:
         if context is None:
             return VIEW3D_PT_tools_active._tools_select
         ob = context.active_object
-        if (ob and ob.type == 'MESH' and
-            (ob.data.use_paint_mask or
-             ob.data.use_paint_mask_vertex)):
+        if (
+                ob and ob.type == 'MESH' and
+                (ob.data.use_paint_mask or ob.data.use_paint_mask_vertex)
+        ):
             return VIEW3D_PT_tools_active._tools_select
         elif context.pose_object:
             return VIEW3D_PT_tools_active._tools_select
@@ -2077,13 +2099,14 @@ class _defs_weight_paint:
     @ToolDef.from_fn
     def sample_weight():
         def draw_settings(context, layout, _tool):
-            if context.tool_settings.unified_paint_settings.use_unified_weight:
-                weight = context.tool_settings.unified_paint_settings.weight
+            ups = context.tool_settings.weight_paint.unified_paint_settings
+            if ups.use_unified_weight:
+                weight = ups.weight
             elif context.tool_settings.weight_paint.brush:
                 weight = context.tool_settings.weight_paint.brush.weight
             else:
                 return
-            layout.label(text="Weight: {:.3f}".format(weight))
+            layout.label(text=iface_("Weight: {:.3f}").format(weight), translate=False)
         return dict(
             idname="builtin.sample_weight",
             label="Sample Weight",
@@ -2108,6 +2131,8 @@ class _defs_weight_paint:
     @ToolDef.from_fn
     def gradient():
         def draw_settings(context, layout, tool):
+            # TODO: Ideally, this should not depend on there being a current brush
+            # See #131061
             brush = context.tool_settings.weight_paint.brush
             if brush is not None:
                 from bl_ui.properties_paint_common import UnifiedPaintPanel
@@ -2116,6 +2141,7 @@ class _defs_weight_paint:
                     context,
                     brush,
                     "weight",
+                    unified_paint_settings_override=context.tool_settings.weight_paint.unified_paint_settings,
                     unified_name="use_unified_weight",
                     slider=True,
                     header=True,
@@ -2125,6 +2151,7 @@ class _defs_weight_paint:
                     context,
                     brush,
                     "strength",
+                    unified_paint_settings_override=context.tool_settings.weight_paint.unified_paint_settings,
                     unified_name="use_unified_strength",
                     header=True,
                 )
@@ -2351,10 +2378,10 @@ class _defs_grease_pencil_paint:
             row.use_property_split = False
             row.prop(props, "mode", expand=True)
 
-            if props.mode == "MATERIAL":
+            if props.mode == 'MATERIAL':
                 col = layout.column()
                 col.prop(props, "material_mode")
-            elif props.mode == "PALETTE":
+            elif props.mode == 'PALETTE':
                 tool_settings = context.tool_settings
                 settings = tool_settings.gpencil_paint
 
@@ -2377,6 +2404,19 @@ class _defs_grease_pencil_paint:
 
 
 class _defs_grease_pencil_edit:
+    @ToolDef.from_fn
+    def shear():
+        def draw_settings(context, layout, _tool):
+            _template_widget.VIEW3D_GGT_xform_gizmo.draw_settings_with_index(context, layout, 2)
+        return dict(
+            idname="builtin.shear",
+            label="Shear",
+            icon="ops.gpencil.edit_shear",
+            widget="VIEW3D_GGT_xform_shear",
+            keymap="3D View Tool: Shear",
+            draw_settings=draw_settings,
+        )
+
     @ToolDef.from_fn
     def interpolate():
         def draw_settings(_context, layout, tool):
@@ -2405,6 +2445,41 @@ class _defs_grease_pencil_edit:
             icon="ops.paint.weight_gradient",
             widget=None,
             keymap=(),
+        )
+
+    @ToolDef.from_fn
+    def pen():
+        def draw_settings(context, layout, tool):
+            props = tool.operator_properties("grease_pencil.pen")
+            layout.prop(props, "size")
+
+            layout.separator()
+            tool_settings = context.tool_settings
+
+            sub = layout.row(align=True)
+            sub.prop_with_popover(
+                tool_settings,
+                "gpencil_stroke_placement_view3d",
+                text="",
+                panel="VIEW3D_PT_grease_pencil_origin",
+            )
+
+            sub = layout.row(align=True)
+            sub.active = tool_settings.gpencil_stroke_placement_view3d != 'SURFACE'
+            sub.prop_with_popover(
+                tool_settings.gpencil_sculpt,
+                "lock_axis",
+                text="",
+                panel="VIEW3D_PT_grease_pencil_lock",
+            )
+        return dict(
+            idname="builtin.pen",
+            label="Pen",
+            cursor='CROSSHAIR',
+            icon="ops.curve.pen",
+            widget=None,
+            keymap=(),
+            draw_settings=draw_settings,
         )
 
 
@@ -2449,6 +2524,164 @@ class _defs_image_generic:
             icon="ops.paint.weight_sample",  # XXX, needs own icon.
             keymap="Image Editor Tool: Sample",
             draw_settings=draw_settings,
+        )
+
+
+class _defs_image_mask_transform:
+
+    @ToolDef.from_fn
+    def translate():
+        return dict(
+            idname="builtin.move",
+            label="Move",
+            icon="ops.transform.translate",
+            widget="IMAGE_GGT_gizmo2d_translate",
+            operator="transform.translate",
+            keymap="Image Editor Tool: Mask, Move"
+        )
+
+    @ToolDef.from_fn
+    def rotate():
+        return dict(
+            idname="builtin.rotate",
+            label="Rotate",
+            icon="ops.transform.rotate",
+            widget="IMAGE_GGT_gizmo2d_rotate",
+            operator="transform.rotate",
+            keymap="Image Editor Tool: Mask, Rotate",
+        )
+
+    @ToolDef.from_fn
+    def scale():
+        return dict(
+            idname="builtin.scale",
+            label="Scale",
+            icon="ops.transform.resize",
+            widget="IMAGE_GGT_gizmo2d_resize",
+            operator="transform.resize",
+            keymap="Image Editor Tool: Mask, Scale",
+        )
+
+    @ToolDef.from_fn
+    def transform():
+        return dict(
+            idname="builtin.transform",
+            label="Transform",
+            description=(
+                "Supports any combination of grab, rotate, and scale at once"
+            ),
+            icon="ops.transform.transform",
+            widget="IMAGE_GGT_gizmo2d",
+            # No keymap default action, only for gizmo!
+        )
+
+
+class _defs_image_mask_select:
+
+    @ToolDef.from_fn
+    def select():
+        return dict(
+            idname="builtin.select",
+            label="Tweak",
+            icon="ops.generic.select",
+            widget=None,
+            keymap=(),
+        )
+
+    @ToolDef.from_fn
+    def box():
+        def draw_settings(_context, layout, tool):
+            props = tool.operator_properties("mask.select_box")
+            row = layout.row()
+            row.use_property_split = False
+            row.prop(props, "mode", text="", expand=True, icon_only=True)
+
+        return dict(
+            idname="builtin.select_box",
+            label="Select Box",
+            icon="ops.generic.select_box",
+            widget=None,
+            keymap=(),
+            draw_settings=draw_settings,
+        )
+
+    @ToolDef.from_fn
+    def lasso():
+        def draw_settings(_context, layout, tool):
+            props = tool.operator_properties("mask.select_lasso")
+            row = layout.row()
+            row.use_property_split = False
+            row.prop(props, "mode", text="", expand=True, icon_only=True)
+
+        return dict(
+            idname="builtin.select_lasso",
+            label="Select Lasso",
+            icon="ops.generic.select_lasso",
+            widget=None,
+            keymap=(),
+            draw_settings=draw_settings,
+        )
+
+    @ToolDef.from_fn
+    def circle():
+        def draw_settings(_context, layout, tool):
+            props = tool.operator_properties("mask.select_circle")
+            row = layout.row()
+            row.use_property_split = False
+            row.prop(props, "mode", text="", expand=True, icon_only=True)
+            layout.prop(props, "radius")
+
+        def draw_cursor(_context, tool, xy):
+            from gpu_extras.presets import draw_circle_2d
+            props = tool.operator_properties("mask.select_circle")
+            radius = props.radius
+            draw_circle_2d(xy, (1.0,) * 4, radius, segments=32)
+
+        return dict(
+            idname="builtin.select_circle",
+            label="Select Circle",
+            icon="ops.generic.select_circle",
+            widget=None,
+            keymap=(),
+            draw_settings=draw_settings,
+            draw_cursor=draw_cursor,
+        )
+
+
+class _defs_image_mask_primitive:
+
+    @ToolDef.from_fn
+    def box():
+        def draw_settings(_context, layout, tool):
+            props = tool.operator_properties("mask.primitive_square_add")
+            layout.prop(props, "size")
+            layout.prop(props, "location")
+
+        return dict(
+            idname="builtin.box",
+            label="Box",
+            icon="ops.gpencil.primitive_box",
+            cursor='CROSSHAIR',
+            draw_settings=draw_settings,
+            widget=None,
+            keymap="Image Editor Tool: Mask, Box",
+        )
+
+    @ToolDef.from_fn
+    def circle():
+        def draw_settings(_context, layout, tool):
+            props = tool.operator_properties("mask.primitive_circle_add")
+            layout.prop(props, "size")
+            layout.prop(props, "location")
+
+        return dict(
+            idname="builtin.circle",
+            label="Circle",
+            icon="ops.gpencil.primitive_circle",
+            cursor='CROSSHAIR',
+            draw_settings=draw_settings,
+            widget=None,
+            keymap="Image Editor Tool: Mask, Circle",
         )
 
 
@@ -2694,11 +2927,6 @@ class _defs_grease_pencil_sculpt:
         )
 
 
-class _defs_gpencil_weight:
-    # No mode specific tools currently (only general ones).
-    pass
-
-
 class _defs_grease_pencil_weight:
     @ToolDef.from_fn
     def blur():
@@ -2914,6 +3142,28 @@ class _defs_node_edit:
             options={'KEYMAP_FALLBACK'},
         )
 
+    @ToolDef.from_fn
+    def links_mute():
+        return dict(
+            idname="builtin.links_mute",
+            label="Mute Links",
+            icon="ops.node.links_mute",
+            widget=None,
+            keymap="Node Tool: Mute Links",
+            options={'KEYMAP_FALLBACK'},
+        )
+
+    @ToolDef.from_fn
+    def add_reroute():
+        return dict(
+            idname="builtin.add_reroute",
+            label="Add Reroute",
+            icon="ops.node.add_reroute",
+            widget=None,
+            keymap="Node Tool: Add Reroute",
+            options={'KEYMAP_FALLBACK'},
+        )
+
 
 class _defs_sequencer_generic:
 
@@ -2926,7 +3176,7 @@ class _defs_sequencer_generic:
                 "Set the cursor location, drag to transform"
             ),
             icon="ops.generic.cursor",
-            keymap="Sequencer Tool: Cursor",
+            keymap="Preview Tool: Cursor",
         )
 
     @ToolDef.from_fn
@@ -2947,6 +3197,18 @@ class _defs_sequencer_generic:
         )
 
     @ToolDef.from_fn
+    def slip():
+        return dict(
+            idname="builtin.slip",
+            label="Slip",
+            description=(
+                "Shift underlying strip content without affecting handles"
+            ),
+            icon="ops.sequencer.slip",
+            keymap="Sequencer Tool: Slip",
+        )
+
+    @ToolDef.from_fn
     def sample():
         return dict(
             idname="builtin.sample",
@@ -2955,7 +3217,7 @@ class _defs_sequencer_generic:
                 "Sample pixel values under the cursor"
             ),
             icon="ops.paint.weight_sample",  # XXX, needs own icon.
-            keymap="Sequencer Tool: Sample",
+            keymap="Preview Tool: Sample",
         )
 
     @ToolDef.from_fn
@@ -2966,7 +3228,7 @@ class _defs_sequencer_generic:
             icon="ops.transform.translate",
             widget="SEQUENCER_GGT_gizmo2d_translate",
             operator="transform.translate",
-            keymap="Sequencer Tool: Move",
+            keymap="Preview Tool: Move",
         )
 
     @ToolDef.from_fn
@@ -2977,7 +3239,7 @@ class _defs_sequencer_generic:
             icon="ops.transform.rotate",
             widget="SEQUENCER_GGT_gizmo2d_rotate",
             operator="transform.rotate",
-            keymap="Sequencer Tool: Rotate",
+            keymap="Preview Tool: Rotate",
         )
 
     @ToolDef.from_fn
@@ -2988,7 +3250,7 @@ class _defs_sequencer_generic:
             icon="ops.transform.resize",
             widget="SEQUENCER_GGT_gizmo2d_resize",
             operator="transform.resize",
-            keymap="Sequencer Tool: Scale",
+            keymap="Preview Tool: Scale",
         )
 
     @ToolDef.from_fn
@@ -3013,7 +3275,7 @@ class _defs_sequencer_select:
             label="Tweak",
             icon="ops.generic.select",
             widget=None,
-            keymap="Sequencer Preview Tool: Tweak",
+            keymap="Preview Tool: Tweak",
         )
 
     @ToolDef.from_fn
@@ -3028,7 +3290,7 @@ class _defs_sequencer_select:
             label="Select Box",
             icon="ops.generic.select_box",
             widget=None,
-            keymap="Sequencer Timeline Tool: Select Box",
+            keymap="Sequencer Tool: Select Box",
             draw_settings=draw_settings,
         )
 
@@ -3044,8 +3306,88 @@ class _defs_sequencer_select:
             label="Select Box",
             icon="ops.generic.select_box",
             widget=None,
-            keymap="Sequencer Preview Tool: Select Box",
+            keymap="Preview Tool: Select Box",
             draw_settings=draw_settings,
+        )
+
+    @ToolDef.from_fn
+    def lasso_timeline():
+        def draw_settings(_context, layout, tool):
+            props = tool.operator_properties("sequencer.select_lasso")
+            row = layout.row()
+            row.use_property_split = False
+            row.prop(props, "mode", text="", expand=True, icon_only=True)
+        return dict(
+            idname="sequencer.select_lasso",
+            label="Select Lasso",
+            icon="ops.generic.select_lasso",
+            widget=None,
+            keymap="Sequencer Tool: Select Lasso",
+            draw_settings=draw_settings,
+        )
+
+    @ToolDef.from_fn
+    def lasso_preview():
+        def draw_settings(_context, layout, tool):
+            props = tool.operator_properties("sequencer.select_lasso")
+            row = layout.row()
+            row.use_property_split = False
+            row.prop(props, "mode", text="", expand=True, icon_only=True)
+        return dict(
+            idname="sequencer.select_lasso",
+            label="Select Lasso",
+            icon="ops.generic.select_lasso",
+            widget=None,
+            keymap="Preview Tool: Select Lasso",
+            draw_settings=draw_settings,
+        )
+
+    @ToolDef.from_fn
+    def circle_timeline():
+        def draw_settings(_context, layout, tool):
+            props = tool.operator_properties("sequencer.select_circle")
+            row = layout.row()
+            row.use_property_split = False
+            row.prop(props, "mode", text="", expand=True, icon_only=True)
+            layout.prop(props, "radius")
+
+        def draw_cursor(_context, tool, xy):
+            from gpu_extras.presets import draw_circle_2d
+            props = tool.operator_properties("sequencer.select_circle")
+            radius = props.radius
+            draw_circle_2d(xy, (1.0,) * 4, radius, segments=32)
+        return dict(
+            idname="sequencer.select_circle",
+            label="Select Circle",
+            icon="ops.generic.select_circle",
+            widget=None,
+            keymap="Sequencer Tool: Select Circle",
+            draw_settings=draw_settings,
+            draw_cursor=draw_cursor,
+        )
+
+    @ToolDef.from_fn
+    def circle_preview():
+        def draw_settings(_context, layout, tool):
+            props = tool.operator_properties("sequencer.select_circle")
+            row = layout.row()
+            row.use_property_split = False
+            row.prop(props, "mode", text="", expand=True, icon_only=True)
+            layout.prop(props, "radius")
+
+        def draw_cursor(_context, tool, xy):
+            from gpu_extras.presets import draw_circle_2d
+            props = tool.operator_properties("sequencer.select_circle")
+            radius = props.radius
+            draw_circle_2d(xy, (1.0,) * 4, radius, segments=32)
+        return dict(
+            idname="sequencer.select_circle",
+            label="Select Circle",
+            icon="ops.generic.select_circle",
+            widget=None,
+            keymap="Preview Tool: Select Circle",
+            draw_settings=draw_settings,
+            draw_cursor=draw_cursor,
         )
 
 
@@ -3106,6 +3448,29 @@ class IMAGE_PT_tools_active(ToolSelectPanelHelper, Panel):
         ),
     )
 
+    _tools_mask_transform = (
+        _defs_image_mask_transform.translate,
+        _defs_image_mask_transform.rotate,
+        _defs_image_mask_transform.scale,
+        _defs_image_mask_transform.transform,
+    )
+
+    _tools_mask_select = (
+        (
+            _defs_image_mask_select.select,
+            _defs_image_mask_select.box,
+            _defs_image_mask_select.circle,
+            _defs_image_mask_select.lasso,
+        ),
+    )
+
+    _tools_mask_primitive = (
+        (
+            _defs_image_mask_primitive.circle,
+            _defs_image_mask_primitive.box,
+        ),
+    )
+
     _tools_annotate = (
         (
             _defs_annotate.scribble,
@@ -3141,7 +3506,15 @@ class IMAGE_PT_tools_active(ToolSelectPanelHelper, Panel):
             _defs_image_uv_sculpt.pinch,
         ],
         'MASK': [
+            *_tools_mask_select,
+            _defs_image_generic.cursor,
             None,
+            *_tools_mask_transform,
+            None,
+            *_tools_annotate,
+            None,
+            # TODO: Make interactive placement before adding primitive tools
+            # *_tools_mask_primitive,
         ],
         'PAINT': [
             _brush_tool,
@@ -3216,6 +3589,8 @@ class NODE_PT_tools_active(ToolSelectPanelHelper, Panel):
             *_tools_annotate,
             None,
             _defs_node_edit.links_cut,
+            _defs_node_edit.links_mute,
+            _defs_node_edit.add_reroute,
         ],
     }
 
@@ -3419,6 +3794,7 @@ class VIEW3D_PT_tools_active(ToolSelectPanelHelper, Panel):
             *_tools_default,
             None,
             _defs_edit_curves.draw,
+            _defs_edit_curves.pen,
             None,
             _defs_edit_curve.curve_radius,
             _defs_edit_curve.tilt,
@@ -3451,10 +3827,12 @@ class VIEW3D_PT_tools_active(ToolSelectPanelHelper, Panel):
             None,
             *_tools_transform,
             None,
+            _defs_grease_pencil_edit.pen,
+            None,
             _defs_edit_curve.curve_radius,
             _defs_transform.bend,
             (
-                _defs_transform.shear,
+                _defs_grease_pencil_edit.shear,
                 _defs_edit_mesh.tosphere,
             ),
             None,
@@ -3463,6 +3841,15 @@ class VIEW3D_PT_tools_active(ToolSelectPanelHelper, Panel):
             _defs_grease_pencil_edit.texture_gradient,
             None,
             *_tools_annotate,
+        ],
+        'EDIT_POINTCLOUD': [
+            *_tools_select,
+            _defs_view3d_generic.cursor,
+            None,
+            *_tools_transform,
+            None,
+            *_tools_annotate,
+            _defs_view3d_generic.ruler,
         ],
         'PARTICLE': [
             *_tools_select,
@@ -3692,6 +4079,8 @@ class SEQUENCER_PT_tools_active(ToolSelectPanelHelper, Panel):
             (
                 _defs_sequencer_select.select_preview,
                 _defs_sequencer_select.box_preview,
+                _defs_sequencer_select.lasso_preview,
+                _defs_sequencer_select.circle_preview,
             ),
             _defs_sequencer_generic.cursor,
             None,
@@ -3704,8 +4093,13 @@ class SEQUENCER_PT_tools_active(ToolSelectPanelHelper, Panel):
             *_tools_annotate,
         ],
         'SEQUENCER': [
-            _defs_sequencer_select.box_timeline,
+            (
+                _defs_sequencer_select.box_timeline,
+                _defs_sequencer_select.lasso_timeline,
+                _defs_sequencer_select.circle_timeline,
+            ),
             _defs_sequencer_generic.blade,
+            _defs_sequencer_generic.slip
         ],
         'SEQUENCER_PREVIEW': [
             _defs_sequencer_select.box_timeline,

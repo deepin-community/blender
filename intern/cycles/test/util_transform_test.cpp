@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0 */
 
-#include "testing/testing.h"
+#include <gtest/gtest.h>
 
 #include "util/transform.h"
 #include "util/vector.h"
@@ -16,7 +16,7 @@ TEST(transform_motion_decompose, Degenerated)
     vector<Transform> motion = {transform_scale(0.0f, 0.0f, 0.0f)};
     vector<DecomposedTransform> decomp(motion.size());
     transform_motion_decompose(decomp.data(), motion.data(), motion.size());
-    EXPECT_TRUE(transform_decomposed_isfinite_safe(&decomp[0]));
+    EXPECT_TRUE(transform_decomposed_isfinite_safe(decomp.data()));
   }
 
   // Copy from previous to current.

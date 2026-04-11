@@ -8,8 +8,6 @@
 
 #include <cstring>
 
-#include "MEM_guardedalloc.h"
-
 #include "BLI_utildefines.h"
 
 #include "BLT_translation.hh"
@@ -20,10 +18,11 @@
 #include "BKE_mesh.hh"
 #include "BKE_modifier.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "RNA_prototypes.hh"
+#include "RNA_types.hh"
 
 #include "bmesh.hh"
 #include "bmesh_tools.hh"
@@ -36,6 +35,7 @@ static Mesh *triangulate_mesh(Mesh *mesh,
                               const int min_vertices,
                               const int flag)
 {
+  using namespace blender;
   Mesh *result;
   BMesh *bm;
   CustomData_MeshMasks cd_mask_extra{};
@@ -67,10 +67,12 @@ static Mesh *triangulate_mesh(Mesh *mesh,
   BM_mesh_free(bm);
 
   if (keep_clnors) {
-    float(*corner_normals)[3] = static_cast<float(*)[3]>(
-        CustomData_get_layer_for_write(&result->corner_data, CD_NORMAL, result->corners_num));
-    BKE_mesh_set_custom_normals_normalized(result, corner_normals);
-    CustomData_free_layers(&result->corner_data, CD_NORMAL, result->corners_num);
+    bke::mesh_set_custom_normals_normalized(
+        *result,
+        {static_cast<float3 *>(
+             CustomData_get_layer_for_write(&result->corner_data, CD_NORMAL, result->corners_num)),
+         result->corners_num});
+    CustomData_free_layers(&result->corner_data, CD_NORMAL);
   }
 
   return result;
@@ -91,14 +93,9 @@ static void init_data(ModifierData *md)
 static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext * /*ctx*/, Mesh *mesh)
 {
   TriangulateModifierData *tmd = (TriangulateModifierData *)md;
-  Mesh *result;
-  if (!(result = triangulate_mesh(
-            mesh, tmd->quad_method, tmd->ngon_method, tmd->min_vertices, tmd->flag)))
-  {
-    return mesh;
-  }
-
-  return result;
+  Mesh *result = triangulate_mesh(
+      mesh, tmd->quad_method, tmd->ngon_method, tmd->min_vertices, tmd->flag);
+  return (result) ? result : mesh;
 }
 
 static void panel_draw(const bContext * /*C*/, Panel *panel)
@@ -108,14 +105,14 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
   PointerRNA ob_ptr;
   PointerRNA *ptr = modifier_panel_get_property_pointers(panel, &ob_ptr);
 
-  uiLayoutSetPropSep(layout, true);
+  layout->use_property_split_set(true);
 
-  uiItemR(layout, ptr, "quad_method", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "ngon_method", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "min_vertices", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "keep_custom_normals", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->prop(ptr, "quad_method", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  layout->prop(ptr, "ngon_method", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  layout->prop(ptr, "min_vertices", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  layout->prop(ptr, "keep_custom_normals", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  modifier_panel_end(layout, ptr);
+  modifier_error_message_draw(layout, ptr);
 }
 
 static void panel_register(ARegionType *region_type)
@@ -158,4 +155,5 @@ ModifierTypeInfo modifierType_Triangulate = {
     /*blend_write*/ nullptr,
     /*blend_read*/ nullptr,
     /*foreach_cache*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
 };

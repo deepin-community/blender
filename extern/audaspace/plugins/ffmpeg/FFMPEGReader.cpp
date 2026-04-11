@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright 2009-2016 Jörg Müller
+ * Copyright 2009-2024 Jörg Müller
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,8 +27,13 @@ extern "C" {
 
 AUD_NAMESPACE_BEGIN
 
+/* FFmpeg < 4.0 */
 #if LIBAVCODEC_VERSION_MAJOR < 58
 #define FFMPEG_OLD_CODE
+#endif
+/* FFmpeg < 5.0 */
+#if LIBAVCODEC_VERSION_MAJOR < 59
+#define FFMPEG_OLD_CH_LAYOUT
 #endif
 
 SampleFormat FFMPEGReader::convertSampleFormat(AVSampleFormat format)
@@ -112,7 +117,13 @@ int FFMPEGReader::decode(AVPacket& packet, Buffer& buffer)
 		if(ret != 0)
 			break;
 
-		int data_size = av_samples_get_buffer_size(nullptr, m_codecCtx->channels, m_frame->nb_samples, m_codecCtx->sample_fmt, 1);
+		#ifdef FFMPEG_OLD_CH_LAYOUT
+			int channels = m_codecCtx->channels;
+		#else
+			int channels = m_codecCtx->ch_layout.nb_channels;
+		#endif
+
+		int data_size = av_samples_get_buffer_size(nullptr, channels, m_frame->nb_samples, m_codecCtx->sample_fmt, 1);
 
 		if(buf_size - buf_pos < data_size)
 		{
@@ -122,12 +133,12 @@ int FFMPEGReader::decode(AVPacket& packet, Buffer& buffer)
 
 		if(m_tointerleave)
 		{
-			int single_size = data_size / m_codecCtx->channels / m_frame->nb_samples;
-			for(int channel = 0; channel < m_codecCtx->channels; channel++)
+			int single_size = data_size / channels / m_frame->nb_samples;
+			for(int channel = 0; channel < channels; channel++)
 			{
 				for(int i = 0; i < m_frame->nb_samples; i++)
 				{
-					std::memcpy(((data_t*)buffer.getBuffer()) + buf_pos + ((m_codecCtx->channels * i) + channel) * single_size,
+					std::memcpy(((data_t*)buffer.getBuffer()) + buf_pos + ((channels * i) + channel) * single_size,
 						   m_frame->data[channel] + i * single_size, single_size);
 				}
 			}
@@ -207,7 +218,12 @@ void FFMPEGReader::init(int stream)
 	if(avcodec_open2(m_codecCtx, aCodec, nullptr) < 0)
 		AUD_THROW(FileException, "File couldn't be read, ffmpeg codec couldn't be opened.");
 
-	m_specs.channels = (Channels) m_codecCtx->channels;
+	#ifdef FFMPEG_OLD_CH_LAYOUT
+		int channels = m_codecCtx->channels;
+	#else
+		int channels = m_codecCtx->ch_layout.nb_channels;
+	#endif
+	m_specs.channels = (Channels) channels;
 	m_tointerleave = av_sample_fmt_is_planar(m_codecCtx->sample_fmt);
 
 	switch(av_get_packed_sample_fmt(m_codecCtx->sample_fmt))
@@ -239,13 +255,7 @@ void FFMPEGReader::init(int stream)
 	m_specs.rate = (SampleRate) m_codecCtx->sample_rate;
 }
 
-FFMPEGReader::FFMPEGReader(const std::string &filename, int stream) :
-	m_pkgbuf(),
-	m_formatCtx(nullptr),
-	m_codecCtx(nullptr),
-	m_frame(nullptr),
-	m_aviocontext(nullptr),
-	m_membuf(nullptr)
+FFMPEGReader::FFMPEGReader(const std::string& filename, int stream) : m_pkgbuf(), m_formatCtx(nullptr), m_codecCtx(nullptr), m_frame(nullptr), m_aviocontext(nullptr)
 {
 	// open file
 	if(avformat_open_input(&m_formatCtx, filename.c_str(), nullptr, nullptr)!=0)
@@ -269,13 +279,15 @@ FFMPEGReader::FFMPEGReader(std::shared_ptr<Buffer> buffer, int stream) :
 		m_membuffer(buffer),
 		m_membufferpos(0)
 {
-	m_membuf = reinterpret_cast<data_t*>(av_malloc(AV_INPUT_BUFFER_MIN_SIZE + AV_INPUT_BUFFER_PADDING_SIZE));
+	constexpr int BUFFER_SIZE{4096};
 
-	m_aviocontext = avio_alloc_context(m_membuf, AV_INPUT_BUFFER_MIN_SIZE, 0, this, read_packet, nullptr, seek_packet);
+	auto membuf = reinterpret_cast<data_t*>(av_malloc(BUFFER_SIZE));
+
+	m_aviocontext = avio_alloc_context(membuf, BUFFER_SIZE, 0, this, read_packet, nullptr, seek_packet);
 
 	if(!m_aviocontext)
 	{
-		av_free(m_aviocontext);
+		av_free(membuf);
 		AUD_THROW(FileException, "Buffer reading context couldn't be created with ffmpeg.");
 	}
 
@@ -283,6 +295,8 @@ FFMPEGReader::FFMPEGReader(std::shared_ptr<Buffer> buffer, int stream) :
 	m_formatCtx->pb = m_aviocontext;
 	if(avformat_open_input(&m_formatCtx, "", nullptr, nullptr)!=0)
 	{
+		if(m_aviocontext->buffer)
+			av_free(m_aviocontext->buffer);
 		av_free(m_aviocontext);
 		AUD_THROW(FileException, "Buffer couldn't be read with ffmpeg.");
 	}
@@ -294,6 +308,8 @@ FFMPEGReader::FFMPEGReader(std::shared_ptr<Buffer> buffer, int stream) :
 	catch(Exception&)
 	{
 		avformat_close_input(&m_formatCtx);
+		if(m_aviocontext->buffer)
+			av_free(m_aviocontext->buffer);
 		av_free(m_aviocontext);
 		throw;
 	}
@@ -309,6 +325,13 @@ FFMPEGReader::~FFMPEGReader()
 	if(m_codecCtx)
 		avcodec_free_context(&m_codecCtx);
 #endif
+	if(m_aviocontext)
+	{
+		if(m_aviocontext->buffer)
+			av_free(m_aviocontext->buffer);
+		av_free(m_aviocontext);
+	}
+
 	avformat_close_input(&m_formatCtx);
 }
 
@@ -345,7 +368,12 @@ std::vector<StreamInfo> FFMPEGReader::queryStreams()
 			info.specs.rate = m_formatCtx->streams[i]->codec->sample_rate;
 			info.specs.format = convertSampleFormat(m_formatCtx->streams[i]->codec->sample_fmt);
 #else
-			info.specs.channels = Channels(m_formatCtx->streams[i]->codecpar->channels);
+			#ifdef FFMPEG_OLD_CH_LAYOUT
+				int channels = m_formatCtx->streams[i]->codecpar->channels;
+			#else
+				int channels = m_formatCtx->streams[i]->codecpar->ch_layout.nb_channels;
+			#endif
+			info.specs.channels = Channels(channels);
 			info.specs.rate = m_formatCtx->streams[i]->codecpar->sample_rate;
 			info.specs.format = convertSampleFormat(AVSampleFormat(m_formatCtx->streams[i]->codecpar->format));
 #endif

@@ -11,6 +11,9 @@ While it can be called directly, you may prefer to run this from Blender's root 
    make format
 
 """
+__all__ = (
+    "main",
+)
 
 import argparse
 import multiprocessing
@@ -18,16 +21,12 @@ import os
 import sys
 import subprocess
 
-from typing import (
-    List,
-    Optional,
+from collections.abc import (
     Sequence,
-    Set,
-    Tuple,
 )
 
-VERSION_MIN = (17, 0, 6)
-VERSION_MAX_RECOMMENDED = (17, 0, 6)
+VERSION_MIN = (20, 1, 8)
+VERSION_MAX_RECOMMENDED = (20, 1, 8)
 CLANG_FORMAT_CMD = "clang-format"
 
 BASE_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -49,7 +48,7 @@ extensions_only_retab = (
 )
 
 # Add files which are too large/heavy to format.
-ignore_files: Set[str] = set([
+ignore_files: set[str] = set([
     # Currently empty, looks like.
     # "intern/cycles/render/sobol.cpp",
 ])
@@ -66,7 +65,7 @@ ignore_directories = {
 }
 
 
-def compute_paths(paths: List[str], use_default_paths: bool) -> List[str]:
+def compute_paths(paths: list[str], use_default_paths: bool) -> list[str]:
     # The resulting paths:
     # - Use forward slashes on all systems.
     # - Are relative to the GIT repository without any `.` or `./` prefix.
@@ -91,13 +90,13 @@ def compute_paths(paths: List[str], use_default_paths: bool) -> List[str]:
     return paths
 
 
-def source_files_from_git(paths: Sequence[str], changed_only: bool) -> List[str]:
+def source_files_from_git(paths: Sequence[str], changed_only: bool) -> list[str]:
     if changed_only:
         cmd = ("git", "diff", "HEAD", "--name-only", "-z", "--", *paths)
     else:
         cmd = ("git", "ls-tree", "-r", "HEAD", *paths, "--name-only", "-z")
     files = subprocess.check_output(cmd).split(b'\0')
-    return [f.decode('ascii') for f in files]
+    return [f.decode('utf-8') for f in files]
 
 
 def convert_tabs_to_spaces(files: Sequence[str]) -> None:
@@ -105,28 +104,26 @@ def convert_tabs_to_spaces(files: Sequence[str]) -> None:
         print("TabExpand", f)
         with open(f, 'r', encoding="utf-8") as fh:
             data = fh.read()
-            if False:
-                # Simple 4 space
-                data = data.expandtabs(4)
-            else:
-                # Complex 2 space
-                # because some comments have tabs for alignment.
-                def handle(l: str) -> str:
-                    ls = l.lstrip("\t")
-                    d = len(l) - len(ls)
-                    if d != 0:
-                        return ("  " * d) + ls.expandtabs(4)
-                    else:
-                        return l.expandtabs(4)
+            # Simple 4 space (but we're using 2 spaces).
+            # `data = data.expandtabs(4)`
 
-                lines = data.splitlines(keepends=True)
-                lines = [handle(l) for l in lines]
-                data = "".join(lines)
+            # Complex 2 space
+            # because some comments have tabs for alignment.
+            def handle(line: str) -> str:
+                line_strip = line.lstrip("\t")
+                d = len(line) - len(line_strip)
+                if d != 0:
+                    return ("  " * d) + line_strip.expandtabs(4)
+                return line.expandtabs(4)
+
+            lines = data.splitlines(keepends=True)
+            lines = [handle(line) for line in lines]
+            data = "".join(lines)
         with open(f, 'w', encoding="utf-8") as fh:
             fh.write(data)
 
 
-def clang_format_ensure_version() -> Optional[Tuple[int, int, int]]:
+def clang_format_ensure_version() -> tuple[int, int, int] | None:
     global CLANG_FORMAT_CMD
     clang_format_cmd = None
     version_output = ""
@@ -142,18 +139,18 @@ def clang_format_ensure_version() -> Optional[Tuple[int, int, int]]:
             continue
         CLANG_FORMAT_CMD = clang_format_cmd
         break
-    version: Optional[str] = next(iter(v for v in version_output.split() if v[0].isdigit()), None)
+    version: str | None = next(iter(v for v in version_output.split() if v[0].isdigit()), None)
     if version is None:
         return None
 
     version = version.split("-")[0]
     # Ensure exactly 3 numbers.
-    version_num: Tuple[int, int, int] = (tuple(int(n) for n in version.split(".")) + (0, 0, 0))[:3]  # type: ignore
+    version_num: tuple[int, int, int] = (tuple(int(n) for n in version.split(".")) + (0, 0, 0))[:3]  # type: ignore
     print("Using {:s} ({:d}.{:d}.{:d})...".format(CLANG_FORMAT_CMD, version_num[0], version_num[1], version_num[2]))
     return version_num
 
 
-def clang_format_file(files: List[str]) -> bytes:
+def clang_format_file(files: list[str]) -> bytes:
     cmd = [
         CLANG_FORMAT_CMD,
         # Update the files in-place.
@@ -168,7 +165,7 @@ def clang_print_output(output: bytes) -> None:
     print(output.decode('utf8', errors='ignore').strip())
 
 
-def clang_format(files: List[str]) -> None:
+def clang_format(files: list[str]) -> None:
     pool = multiprocessing.Pool()
 
     # Process in chunks to reduce overhead of starting processes.

@@ -10,11 +10,11 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <fmt/format.h>
+
 #include "MEM_guardedalloc.h"
 
 #include "DNA_collection_types.h"
-#include "DNA_gpencil_legacy_types.h"
-#include "DNA_linestyle_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
@@ -24,9 +24,9 @@
 #include "DNA_workspace_types.h"
 
 #include "DEG_depsgraph.hh"
+#include "DEG_depsgraph_query.hh"
 
 #include "BLI_listbase.h"
-#include "BLI_string.h"
 #include "BLI_threads.h"
 #include "BLI_utildefines.h"
 
@@ -48,13 +48,16 @@
 
 #include "CLG_log.h"
 
+/* Logging. */
+CLG_LOGREF_DECLARE_GLOBAL(BKE_LOG_CONTEXT, "context");
+
 #ifdef WITH_PYTHON
 #  include "BPY_extern.hh"
 #endif
 
 using blender::Vector;
 
-static CLG_LogRef LOG = {"bke.context"};
+static CLG_LogRef LOG = {"context"};
 
 /* struct */
 
@@ -99,6 +102,10 @@ struct bContext {
      * (keep this to check if the copy needs freeing).
      */
     void *py_context_orig;
+    /** True if logging is enabled for context members (can be set programmatically). */
+    bool log_access;
+    /** Optional flag to disallow writing via RNA. */
+    const bool *rna_disallow_writes;
   } data;
 };
 
@@ -106,14 +113,14 @@ struct bContext {
 
 bContext *CTX_create()
 {
-  bContext *C = MEM_cnew<bContext>(__func__);
+  bContext *C = MEM_callocN<bContext>(__func__);
 
   return C;
 }
 
 bContext *CTX_copy(const bContext *C)
 {
-  bContext *newC = MEM_cnew<bContext>(__func__);
+  bContext *newC = MEM_callocN<bContext>(__func__);
   *newC = *C;
 
   memset(&newC->wm.operator_poll_msg_dyn_params, 0, sizeof(newC->wm.operator_poll_msg_dyn_params));
@@ -150,7 +157,7 @@ static bContextStore *ctx_store_extend(Vector<std::unique_ptr<bContextStore>> &c
 }
 
 bContextStore *CTX_store_add(Vector<std::unique_ptr<bContextStore>> &contexts,
-                             const blender::StringRefNull name,
+                             const blender::StringRef name,
                              const PointerRNA *ptr)
 {
   bContextStore *ctx = ctx_store_extend(contexts);
@@ -159,11 +166,20 @@ bContextStore *CTX_store_add(Vector<std::unique_ptr<bContextStore>> &contexts,
 }
 
 bContextStore *CTX_store_add(Vector<std::unique_ptr<bContextStore>> &contexts,
-                             const blender::StringRefNull name,
+                             const blender::StringRef name,
                              const blender::StringRef str)
 {
   bContextStore *ctx = ctx_store_extend(contexts);
   ctx->entries.append(bContextStoreEntry{name, std::string{str}});
+  return ctx;
+}
+
+bContextStore *CTX_store_add(Vector<std::unique_ptr<bContextStore>> &contexts,
+                             const blender::StringRef name,
+                             const int64_t value)
+{
+  bContextStore *ctx = ctx_store_extend(contexts);
+  ctx->entries.append(bContextStoreEntry{name, value});
   return ctx;
 }
 
@@ -188,7 +204,7 @@ void CTX_store_set(bContext *C, const bContextStore *store)
 }
 
 const PointerRNA *CTX_store_ptr_lookup(const bContextStore *store,
-                                       const blender::StringRefNull name,
+                                       const blender::StringRef name,
                                        const StructRNA *type)
 {
   for (auto entry = store->entries.rbegin(); entry != store->entries.rend(); ++entry) {
@@ -202,20 +218,38 @@ const PointerRNA *CTX_store_ptr_lookup(const bContextStore *store,
   return nullptr;
 }
 
-std::optional<blender::StringRefNull> CTX_store_string_lookup(const bContextStore *store,
-                                                              const blender::StringRefNull name)
+template<typename T>
+const T *ctx_store_lookup_impl(const bContextStore *store, const blender::StringRef name)
 {
   for (auto entry = store->entries.rbegin(); entry != store->entries.rend(); ++entry) {
-    if (entry->name == name && std::holds_alternative<std::string>(entry->value)) {
-      return std::get<std::string>(entry->value);
+    if (entry->name == name && std::holds_alternative<T>(entry->value)) {
+      return &std::get<T>(entry->value);
     }
+  }
+  return nullptr;
+}
+
+std::optional<blender::StringRefNull> CTX_store_string_lookup(const bContextStore *store,
+                                                              const blender::StringRef name)
+{
+  if (const std::string *value = ctx_store_lookup_impl<std::string>(store, name)) {
+    return *value;
+  }
+  return {};
+}
+
+std::optional<int64_t> CTX_store_int_lookup(const bContextStore *store,
+                                            const blender::StringRef name)
+{
+  if (const int64_t *value = ctx_store_lookup_impl<int64_t>(store, name)) {
+    return *value;
   }
   return {};
 }
 
 /* is python initialized? */
 
-bool CTX_py_init_get(bContext *C)
+bool CTX_py_init_get(const bContext *C)
 {
   return C->data.py_init;
 }
@@ -247,6 +281,11 @@ void CTX_py_state_pop(bContext *C, bContext_PyState *pystate)
   C->data.py_context_orig = pystate->py_context_orig;
 }
 
+void CTX_rna_disallow_write_set_p(bContext *C, const bool *rna_disallow_writes)
+{
+  C->data.rna_disallow_writes = rna_disallow_writes;
+}
+
 /* data context utility functions */
 
 struct bContextDataResult {
@@ -255,42 +294,183 @@ struct bContextDataResult {
   PropertyRNA *prop;
   int index;
   blender::StringRefNull str;
+  std::optional<int64_t> int_value;
   const char **dir;
-  short type; /* 0: normal, 1: seq */
+  ContextDataType type;
 };
+
+/** Create a brief string representation of a context data result. */
+static std::string ctx_result_brief_repr(const bContextDataResult &result)
+{
+  switch (result.type) {
+    case ContextDataType::Pointer:
+      if (result.ptr.data) {
+        const char *rna_type_name = result.ptr.type ? RNA_struct_identifier(result.ptr.type) :
+                                                      "Unknown";
+        /* Try to get the name property if it exists. */
+        std::string member_name;
+        if (result.ptr.type) {
+          PropertyRNA *name_prop = RNA_struct_name_property(result.ptr.type);
+          if (name_prop) {
+            char name_buf[256];
+            PointerRNA ptr_copy = result.ptr; /* Make a non-const copy. */
+            char *name = RNA_property_string_get_alloc(
+                &ptr_copy, name_prop, name_buf, sizeof(name_buf), nullptr);
+            if (name && name[0] != '\0') {
+              member_name = name;
+              if (name != name_buf) {
+                MEM_freeN(name);
+              }
+            }
+          }
+        }
+        /* Format like PyRNA: '<Type("name") at 0xAddress>' or '<Type at 0xAddress>'. */
+        if (!member_name.empty()) {
+          return fmt::format("<{}(\"{}\") at 0x{:x}>",
+                             rna_type_name,
+                             member_name,
+                             reinterpret_cast<uintptr_t>(result.ptr.data));
+        }
+        else {
+          return fmt::format(
+              "<{} at 0x{:x}>", rna_type_name, reinterpret_cast<uintptr_t>(result.ptr.data));
+        }
+      }
+      else {
+        return "None";
+      }
+
+    case ContextDataType::Collection:
+      return fmt::format("[{} item(s)]", result.list.size());
+
+    case ContextDataType::String:
+      if (!result.str.is_empty()) {
+        return "\"" + result.str + "\"";
+      }
+      else {
+        return "\"\"";
+      }
+
+    case ContextDataType::Property:
+      if (result.prop && result.ptr.data) {
+        const char *prop_name = RNA_property_identifier(result.prop);
+        const char *rna_type_name = result.ptr.type ? RNA_struct_identifier(result.ptr.type) :
+                                                      "Unknown";
+        if (result.index >= 0) {
+          return fmt::format("<Property({}.{}[{}])>", rna_type_name, prop_name, result.index);
+        }
+        else {
+          return fmt::format("<Property({}.{})>", rna_type_name, prop_name);
+        }
+      }
+      else {
+        return "<Property(None)>";
+      }
+
+    case ContextDataType::Int64:
+      if (result.int_value.has_value()) {
+        return std::to_string(result.int_value.value());
+      }
+      else {
+        return "None";
+      }
+  }
+  /* Unhandled context type. Update if new types are added. */
+  BLI_assert_unreachable();
+  return "<UNKNOWN>";
+}
+
+/** Simple logging for context data results. */
+static void ctx_member_log_access(const bContext *C,
+                                  const char *member,
+                                  const bContextDataResult &result)
+{
+  const bool use_logging = CLOG_CHECK(BKE_LOG_CONTEXT, CLG_LEVEL_TRACE) ||
+                           (C && CTX_member_logging_get(C));
+
+  if (!use_logging) {
+    return;
+  }
+
+  std::string value_repr = ctx_result_brief_repr(result);
+  const char *value_desc = value_repr.c_str();
+
+#ifdef WITH_PYTHON
+  /* Get current Python location if available and Python is properly initialized. */
+  std::optional<std::string> python_location;
+  if (C && CTX_py_init_get(C)) {
+    python_location = BPY_python_current_file_and_line();
+  }
+  const char *location = python_location ? python_location->c_str() : "unknown:0";
+#else
+  const char *location = "unknown:0";
+#endif
+
+  /* Use TRACE level when available, otherwise force output when Python logging is enabled. */
+  const char *format = "%s: %s=%s";
+  if (CLOG_CHECK(BKE_LOG_CONTEXT, CLG_LEVEL_TRACE)) {
+    CLOG_TRACE(BKE_LOG_CONTEXT, format, location, member, value_desc);
+  }
+  else if (C && CTX_member_logging_get(C)) {
+    /* Force output at TRACE level even if not enabled via command line. */
+    CLOG_AT_LEVEL_NOCHECK(BKE_LOG_CONTEXT, CLG_LEVEL_TRACE, format, location, member, value_desc);
+  }
+}
 
 static void *ctx_wm_python_context_get(const bContext *C,
                                        const char *member,
                                        const StructRNA *member_type,
                                        void *fall_through)
 {
+  void *return_data = nullptr;
+  bool found_member = false;
+
 #ifdef WITH_PYTHON
   if (UNLIKELY(C && CTX_py_dict_get(C))) {
     bContextDataResult result{};
-    BPY_context_member_get((bContext *)C, member, &result);
+    if (BPY_context_member_get((bContext *)C, member, &result)) {
+      found_member = true;
 
-    if (result.ptr.data) {
-      if (RNA_struct_is_a(result.ptr.type, member_type)) {
-        return result.ptr.data;
+      if (result.ptr.data) {
+        if (RNA_struct_is_a(result.ptr.type, member_type)) {
+          return_data = result.ptr.data;
+        }
+        else {
+          CLOG_WARN(&LOG,
+                    "PyContext '%s' is a '%s', expected a '%s'",
+                    member,
+                    RNA_struct_identifier(result.ptr.type),
+                    RNA_struct_identifier(member_type));
+        }
       }
 
-      CLOG_WARN(&LOG,
-                "PyContext '%s' is a '%s', expected a '%s'",
-                member,
-                RNA_struct_identifier(result.ptr.type),
-                RNA_struct_identifier(member_type));
+      /* Log context member access directly without storing a copy. */
+      ctx_member_log_access(C, member, result);
     }
   }
 #else
   UNUSED_VARS(C, member, member_type);
 #endif
 
-  /* don't allow UI context access from non-main threads */
+  /* If no member was found, use the fallback value and create a simple result for logging. */
+  if (!found_member) {
+    bContextDataResult fallback_result{};
+    fallback_result.ptr.data = fall_through;
+    fallback_result.ptr.type = const_cast<StructRNA *>(
+        member_type); /* Use the expected RNA type */
+    fallback_result.type = ContextDataType::Pointer;
+    return_data = fall_through;
+
+    /* Log fallback context member access. */
+    ctx_member_log_access(C, member, fallback_result);
+  }
+
+  /* Don't allow UI context access from non-main threads. */
   if (!BLI_thread_is_main()) {
     return nullptr;
   }
 
-  return fall_through;
+  return return_data;
 }
 
 static eContextResult ctx_data_get(bContext *C, const char *member, bContextDataResult *result)
@@ -302,15 +482,20 @@ static eContextResult ctx_data_get(bContext *C, const char *member, bContextData
   int ret = 0;
 
   *result = {};
+
+  /* NOTE: We'll log access when we have actual results. */
+
 #ifdef WITH_PYTHON
   if (CTX_py_dict_get(C)) {
     if (BPY_context_member_get(C, member, result)) {
+      /* Log the Python context result if we're in a temp_override. */
+      ctx_member_log_access(C, member, *result);
       return CTX_RESULT_OK;
     }
   }
 #endif
 
-  /* don't allow UI context access from non-main threads */
+  /* Don't allow UI context access from non-main threads. */
   if (!BLI_thread_is_main()) {
     return CTX_RESULT_MEMBER_NOT_FOUND;
   }
@@ -327,26 +512,27 @@ static eContextResult ctx_data_get(bContext *C, const char *member, bContextData
   if (done != 1 && recursion < 1 && C->wm.store) {
     C->data.recursion = 1;
 
-    const PointerRNA *ptr = CTX_store_ptr_lookup(C->wm.store, member, nullptr);
-
-    if (ptr) {
+    if (const PointerRNA *ptr = CTX_store_ptr_lookup(C->wm.store, member, nullptr)) {
       result->ptr = *ptr;
       done = 1;
     }
-    else {
-      std::optional<blender::StringRefNull> str = CTX_store_string_lookup(C->wm.store, member);
-
-      if (str) {
-        result->str = *str;
-        result->type = CTX_DATA_TYPE_STRING;
-        done = 1;
-      }
+    else if (std::optional<blender::StringRefNull> str = CTX_store_string_lookup(C->wm.store,
+                                                                                 member))
+    {
+      result->str = *str;
+      result->type = ContextDataType::String;
+      done = 1;
+    }
+    else if (std::optional<int64_t> int_value = CTX_store_int_lookup(C->wm.store, member)) {
+      result->int_value = int_value;
+      result->type = ContextDataType::Int64;
+      done = 1;
     }
   }
   if (done != 1 && recursion < 2 && (region = CTX_wm_region(C))) {
     C->data.recursion = 2;
-    if (region->type && region->type->context) {
-      ret = region->type->context(C, member, result);
+    if (region->runtime->type && region->runtime->type->context) {
+      ret = region->runtime->type->context(C, member, result);
       if (ret) {
         done = -(-ret | -done);
       }
@@ -375,14 +561,21 @@ static eContextResult ctx_data_get(bContext *C, const char *member, bContextData
 
   C->data.recursion = recursion;
 
-  return eContextResult(done);
+  eContextResult final_result = eContextResult(done);
+
+  /* Log context result if we're in a temp_override and we got a successful or no-data result. */
+  if (ELEM(final_result, CTX_RESULT_OK, CTX_RESULT_NO_DATA)) {
+    ctx_member_log_access(C, member, *result);
+  }
+
+  return final_result;
 }
 
 static void *ctx_data_pointer_get(const bContext *C, const char *member)
 {
   bContextDataResult result;
   if (C && ctx_data_get((bContext *)C, member, &result) == CTX_RESULT_OK) {
-    BLI_assert(result.type == CTX_DATA_TYPE_POINTER);
+    BLI_assert(result.type == ContextDataType::Pointer);
     return result.ptr.data;
   }
 
@@ -399,7 +592,7 @@ static bool ctx_data_pointer_verify(const bContext *C, const char *member, void 
 
   bContextDataResult result;
   if (ctx_data_get((bContext *)C, member, &result) == CTX_RESULT_OK) {
-    BLI_assert(result.type == CTX_DATA_TYPE_POINTER);
+    BLI_assert(result.type == ContextDataType::Pointer);
     *pointer = result.ptr.data;
     return true;
   }
@@ -414,7 +607,7 @@ static bool ctx_data_collection_get(const bContext *C,
 {
   bContextDataResult result;
   if (ctx_data_get((bContext *)C, member, &result) == CTX_RESULT_OK) {
-    BLI_assert(result.type == CTX_DATA_TYPE_COLLECTION);
+    BLI_assert(result.type == ContextDataType::Collection);
     *list = std::move(result.list);
     return true;
   }
@@ -451,7 +644,7 @@ static bool ctx_data_base_collection_get(const bContext *C,
       ok = true;
     }
   }
-  CTX_data_type_set(&result, CTX_DATA_TYPE_COLLECTION);
+  CTX_data_type_set(&result, ContextDataType::Collection);
 
   *list = std::move(result.list);
   return ok;
@@ -461,7 +654,7 @@ PointerRNA CTX_data_pointer_get(const bContext *C, const char *member)
 {
   bContextDataResult result;
   if (ctx_data_get((bContext *)C, member, &result) == CTX_RESULT_OK) {
-    BLI_assert(result.type == CTX_DATA_TYPE_POINTER);
+    BLI_assert(result.type == ContextDataType::Pointer);
     return result.ptr;
   }
 
@@ -502,7 +695,7 @@ Vector<PointerRNA> CTX_data_collection_get(const bContext *C, const char *member
 {
   bContextDataResult result;
   if (ctx_data_get((bContext *)C, member, &result) == CTX_RESULT_OK) {
-    BLI_assert(result.type == CTX_DATA_TYPE_COLLECTION);
+    BLI_assert(result.type == ContextDataType::Collection);
     return result.list;
   }
   return {};
@@ -520,8 +713,19 @@ std::optional<blender::StringRefNull> CTX_data_string_get(const bContext *C, con
 {
   bContextDataResult result;
   if (ctx_data_get((bContext *)C, member, &result) == CTX_RESULT_OK) {
-    BLI_assert(result.type == CTX_DATA_TYPE_STRING);
+    BLI_assert(result.type == ContextDataType::String);
     return result.str;
+  }
+
+  return {};
+}
+
+std::optional<int64_t> CTX_data_int_get(const bContext *C, const char *member)
+{
+  bContextDataResult result;
+  if (ctx_data_get((bContext *)C, member, &result) == CTX_RESULT_OK) {
+    BLI_assert(result.type == ContextDataType::Int64);
+    return result.int_value;
   }
 
   return {};
@@ -534,7 +738,8 @@ int /*eContextResult*/ CTX_data_get(const bContext *C,
                                     PropertyRNA **r_prop,
                                     int *r_index,
                                     blender::StringRef *r_str,
-                                    short *r_type)
+                                    std::optional<int64_t> *r_int_value,
+                                    ContextDataType *r_type)
 {
   bContextDataResult result;
   eContextResult ret = ctx_data_get((bContext *)C, member, &result);
@@ -545,13 +750,15 @@ int /*eContextResult*/ CTX_data_get(const bContext *C,
     *r_prop = result.prop;
     *r_index = result.index;
     *r_str = result.str;
+    *r_int_value = result.int_value;
     *r_type = result.type;
   }
   else {
     *r_ptr = {};
     r_lb->clear();
     *r_str = "";
-    *r_type = 0;
+    *r_int_value = {};
+    *r_type = ContextDataType::Pointer;
   }
 
   return ret;
@@ -569,7 +776,7 @@ static void data_dir_add(ListBase *lb, const char *member, const bool use_all)
     return;
   }
 
-  link = MEM_cnew<LinkData>(__func__);
+  link = MEM_callocN<LinkData>(__func__);
   link->data = (void *)member;
   BLI_addtail(lb, link);
 }
@@ -593,7 +800,7 @@ ListBase CTX_data_dir_get_ex(const bContext *C,
     int namelen;
 
     PropertyRNA *iterprop;
-    PointerRNA ctx_ptr = RNA_pointer_create(nullptr, &RNA_Context, (void *)C);
+    PointerRNA ctx_ptr = RNA_pointer_create_discrete(nullptr, &RNA_Context, (void *)C);
 
     iterprop = RNA_struct_iterator_property(ctx_ptr.type);
 
@@ -611,8 +818,8 @@ ListBase CTX_data_dir_get_ex(const bContext *C,
       data_dir_add(&lb, entry.name.c_str(), use_all);
     }
   }
-  if ((region = CTX_wm_region(C)) && region->type && region->type->context) {
-    region->type->context(C, "", &result);
+  if ((region = CTX_wm_region(C)) && region->runtime->type && region->runtime->type->context) {
+    region->runtime->type->context(C, "", &result);
 
     if (result.dir) {
       for (a = 0; result.dir[a]; a++) {
@@ -665,7 +872,7 @@ void CTX_data_id_pointer_set(bContextDataResult *result, ID *id)
 
 void CTX_data_pointer_set(bContextDataResult *result, ID *id, StructRNA *type, void *data)
 {
-  result->ptr = RNA_pointer_create(id, type, data);
+  result->ptr = RNA_pointer_create_discrete(id, type, data);
 }
 
 void CTX_data_pointer_set_ptr(bContextDataResult *result, const PointerRNA *ptr)
@@ -680,7 +887,7 @@ void CTX_data_id_list_add(bContextDataResult *result, ID *id)
 
 void CTX_data_list_add(bContextDataResult *result, ID *id, StructRNA *type, void *data)
 {
-  result->list.append(RNA_pointer_create(id, type, data));
+  result->list.append(RNA_pointer_create_discrete(id, type, data));
 }
 
 void CTX_data_list_add_ptr(bContextDataResult *result, const PointerRNA *ptr)
@@ -709,12 +916,12 @@ void CTX_data_dir_set(bContextDataResult *result, const char **dir)
   result->dir = dir;
 }
 
-void CTX_data_type_set(bContextDataResult *result, short type)
+void CTX_data_type_set(bContextDataResult *result, ContextDataType type)
 {
   result->type = type;
 }
 
-short CTX_data_type_get(bContextDataResult *result)
+ContextDataType CTX_data_type_get(bContextDataResult *result)
 {
   return result->type;
 }
@@ -782,7 +989,7 @@ wmGizmoGroup *CTX_wm_gizmo_group(const bContext *C)
 
 wmMsgBus *CTX_wm_message_bus(const bContext *C)
 {
-  return C->wm.manager ? C->wm.manager->message_bus : nullptr;
+  return C->wm.manager ? C->wm.manager->runtime->message_bus : nullptr;
 }
 
 ReportList *CTX_wm_reports(const bContext *C)
@@ -1105,7 +1312,7 @@ Main *CTX_data_main(const bContext *C)
 void CTX_data_main_set(bContext *C, Main *bmain)
 {
   C->data.main = bmain;
-  BKE_sound_init_main(bmain);
+  BKE_sound_refresh_callback_bmain(bmain);
 }
 
 Scene *CTX_data_scene(const bContext *C)
@@ -1116,6 +1323,19 @@ Scene *CTX_data_scene(const bContext *C)
   }
 
   return C->data.scene;
+}
+
+Scene *CTX_data_sequencer_scene(const bContext *C)
+{
+  Scene *scene;
+  if (ctx_data_pointer_verify(C, "sequencer_scene", (void **)&scene)) {
+    return scene;
+  }
+  WorkSpace *workspace = CTX_wm_workspace(C);
+  if (workspace) {
+    return workspace->sequencer_scene;
+  }
+  return nullptr;
 }
 
 ViewLayer *CTX_data_view_layer(const bContext *C)
@@ -1202,7 +1422,7 @@ enum eContextObjectMode CTX_data_mode_enum_ex(const Object *obedit,
       case OB_GREASE_PENCIL:
         return CTX_MODE_EDIT_GREASE_PENCIL;
       case OB_POINTCLOUD:
-        return CTX_MODE_EDIT_POINT_CLOUD;
+        return CTX_MODE_EDIT_POINTCLOUD;
     }
   }
   else {
@@ -1227,9 +1447,6 @@ enum eContextObjectMode CTX_data_mode_enum_ex(const Object *obedit,
         return CTX_MODE_PARTICLE;
       }
       if (object_mode & OB_MODE_PAINT_GREASE_PENCIL) {
-        if (ob->type == OB_GPENCIL_LEGACY) {
-          return CTX_MODE_PAINT_GPENCIL_LEGACY;
-        }
         if (ob->type == OB_GREASE_PENCIL) {
           return CTX_MODE_PAINT_GREASE_PENCIL;
         }
@@ -1238,25 +1455,16 @@ enum eContextObjectMode CTX_data_mode_enum_ex(const Object *obedit,
         return CTX_MODE_EDIT_GPENCIL_LEGACY;
       }
       if (object_mode & OB_MODE_SCULPT_GREASE_PENCIL) {
-        if (ob->type == OB_GPENCIL_LEGACY) {
-          return CTX_MODE_SCULPT_GPENCIL_LEGACY;
-        }
         if (ob->type == OB_GREASE_PENCIL) {
           return CTX_MODE_SCULPT_GREASE_PENCIL;
         }
       }
       if (object_mode & OB_MODE_WEIGHT_GREASE_PENCIL) {
-        if (ob->type == OB_GPENCIL_LEGACY) {
-          return CTX_MODE_WEIGHT_GPENCIL_LEGACY;
-        }
         if (ob->type == OB_GREASE_PENCIL) {
           return CTX_MODE_WEIGHT_GREASE_PENCIL;
         }
       }
       if (object_mode & OB_MODE_VERTEX_GREASE_PENCIL) {
-        if (ob->type == OB_GPENCIL_LEGACY) {
-          return CTX_MODE_VERTEX_GPENCIL_LEGACY;
-        }
         if (ob->type == OB_GREASE_PENCIL) {
           return CTX_MODE_VERTEX_GREASE_PENCIL;
         }
@@ -1292,7 +1500,7 @@ static const char *data_mode_strings[] = {
     "lattice_edit",
     "curves_edit",
     "grease_pencil_edit",
-    "point_cloud_edit",
+    "pointcloud_edit",
     "posemode",
     "sculpt_mode",
     "weightpaint",
@@ -1333,8 +1541,12 @@ void CTX_data_scene_set(bContext *C, Scene *scene)
 
 ToolSettings *CTX_data_tool_settings(const bContext *C)
 {
-  Scene *scene = CTX_data_scene(C);
+  ToolSettings *toolsettings;
+  if (ctx_data_pointer_verify(C, "tool_settings", (void **)&toolsettings)) {
+    return toolsettings;
+  }
 
+  Scene *scene = CTX_data_scene(C);
   if (scene) {
     return scene->toolsettings;
   }
@@ -1501,47 +1713,10 @@ const AssetLibraryReference *CTX_wm_asset_library_ref(const bContext *C)
   return static_cast<AssetLibraryReference *>(ctx_data_pointer_get(C, "asset_library_reference"));
 }
 
-static AssetHandle ctx_wm_asset_handle(const bContext *C, bool *r_is_valid)
-{
-  AssetHandle *asset_handle_p =
-      (AssetHandle *)CTX_data_pointer_get_type(C, "asset_handle", &RNA_AssetHandle).data;
-  if (asset_handle_p) {
-    *r_is_valid = true;
-    return *asset_handle_p;
-  }
-
-  /* If the asset handle was not found in context directly, try if there's an active file with
-   * asset data there instead. Not nice to have this here, would be better to have this in
-   * `ED_asset.hh`, but we can't include that in BKE. Even better would be not needing this at all
-   * and being able to have editors return this in the usual `context` callback. But that would
-   * require returning a non-owning pointer, which we don't have in the Asset Browser (yet). */
-  FileDirEntry *file =
-      (FileDirEntry *)CTX_data_pointer_get_type(C, "active_file", &RNA_FileSelectEntry).data;
-  if (file && file->asset) {
-    *r_is_valid = true;
-    return AssetHandle{file};
-  }
-
-  *r_is_valid = false;
-  return AssetHandle{nullptr};
-}
-
 blender::asset_system::AssetRepresentation *CTX_wm_asset(const bContext *C)
 {
-  if (auto *asset = static_cast<blender::asset_system::AssetRepresentation *>(
-          ctx_data_pointer_get(C, "asset")))
-  {
-    return asset;
-  }
-
-  /* Expose the asset representation from the asset-handle.
-   * TODO(Julian): #AssetHandle should be properly replaced by #AssetRepresentation. */
-  bool is_valid;
-  if (AssetHandle handle = ctx_wm_asset_handle(C, &is_valid); is_valid) {
-    return handle.file_data->asset;
-  }
-
-  return nullptr;
+  return static_cast<blender::asset_system::AssetRepresentation *>(
+      ctx_data_pointer_get(C, "asset"));
 }
 
 Depsgraph *CTX_data_depsgraph_pointer(const bContext *C)
@@ -1567,9 +1742,14 @@ Depsgraph *CTX_data_expect_evaluated_depsgraph(const bContext *C)
   return depsgraph;
 }
 
-Depsgraph *CTX_data_ensure_evaluated_depsgraph(const bContext *C)
+Depsgraph *CTX_data_ensure_evaluated_depsgraph(const bContext *C, bool rna_write_check)
 {
   Depsgraph *depsgraph = CTX_data_depsgraph_pointer(C);
+  if (rna_write_check && !CTX_member_rna_write_check(C)) {
+    return depsgraph;
+  }
+  BLI_assert(CTX_member_rna_write_check(C) || DEG_is_fully_evaluated(depsgraph));
+
   Main *bmain = CTX_data_main(C);
   BKE_scene_graph_evaluated_ensure(depsgraph, bmain);
   return depsgraph;
@@ -1580,4 +1760,19 @@ Depsgraph *CTX_data_depsgraph_on_load(const bContext *C)
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   return BKE_scene_get_depsgraph(scene, view_layer);
+}
+
+void CTX_member_logging_set(bContext *C, bool enable)
+{
+  C->data.log_access = enable;
+}
+
+bool CTX_member_logging_get(const bContext *C)
+{
+  return C->data.log_access;
+}
+
+bool CTX_member_rna_write_check(const bContext *C)
+{
+  return C->data.rna_disallow_writes ? !(*C->data.rna_disallow_writes) : true;
 }

@@ -17,8 +17,8 @@
 #include "mtl_shader_interface.hh"
 #include "mtl_shader_interface_type.hh"
 
-#include "BLI_blenlib.h"
 #include "BLI_math_base.h"
+#include "BLI_string.h"
 #include "BLI_utildefines.h"
 #include "MEM_guardedalloc.h"
 
@@ -172,7 +172,9 @@ void MTLShaderInterface::add_push_constant_block(uint32_t name_offset)
   push_constant_block_.stage_mask = ShaderStage::ANY;
 }
 
-void MTLShaderInterface::add_uniform(uint32_t name_offset, eMTLDataType type, int array_len)
+void MTLShaderInterface::add_uniform(uint32_t name_offset,
+                                     MTLInterfaceDataType type,
+                                     int array_len)
 {
   BLI_assert(array_len > 0);
   BLI_assert(total_uniforms_ < MTL_MAX_UNIFORMS_PER_BLOCK);
@@ -223,8 +225,8 @@ void MTLShaderInterface::add_uniform(uint32_t name_offset, eMTLDataType type, in
 void MTLShaderInterface::add_texture(uint32_t name_offset,
                                      uint32_t texture_slot,
                                      uint32_t location,
-                                     eGPUTextureType tex_binding_type,
-                                     eGPUSamplerFormat sampler_format,
+                                     GPUTextureType tex_binding_type,
+                                     GPUSamplerFormat sampler_format,
                                      bool is_texture_sampler,
                                      ShaderStage stage_mask,
                                      int tex_buffer_ssbo_location)
@@ -282,10 +284,10 @@ void MTLShaderInterface::map_builtins()
       BLI_assert(uni->location >= 0);
       if (uni->location >= 0) {
         builtins_[u] = uni->location;
-        MTL_LOG_INFO("Mapped builtin uniform '%s' NB: '%s' to location: %d",
-                     builtin_uniform_name((GPUUniformBuiltin)u),
-                     get_name_at_offset(uni->name_offset),
-                     uni->location);
+        MTL_LOG_DEBUG("Mapped builtin uniform '%s' NB: '%s' to location: %d",
+                      builtin_uniform_name((GPUUniformBuiltin)u),
+                      get_name_at_offset(uni->name_offset),
+                      uni->location);
       }
     }
   }
@@ -298,9 +300,9 @@ void MTLShaderInterface::map_builtins()
       BLI_assert(uni->location >= 0);
       if (uni->location >= 0) {
         builtin_blocks_[u] = uni->binding;
-        MTL_LOG_INFO("Mapped builtin uniform block '%s' to location %d",
-                     builtin_uniform_block_name((GPUUniformBlockBuiltin)u),
-                     uni->location);
+        MTL_LOG_DEBUG("Mapped builtin uniform block '%s' to location %d",
+                      builtin_uniform_block_name((GPUUniformBlockBuiltin)u),
+                      uni->location);
       }
     }
   }
@@ -325,7 +327,7 @@ void MTLShaderInterface::prepare_common_shader_inputs(const shader::ShaderCreate
   /* Calculate total inputs and allocate #ShaderInput array. */
   /* NOTE: We use the existing `name_buffer_` allocated for internal input structs. */
   int input_tot_len = attr_len_ + ubo_len_ + uniform_len_ + ssbo_len_ + constant_len_;
-  inputs_ = (ShaderInput *)MEM_callocN(sizeof(ShaderInput) * input_tot_len, __func__);
+  inputs_ = MEM_calloc_arrayN<ShaderInput>(input_tot_len, __func__);
   ShaderInput *current_input = inputs_;
 
   /* Attributes. */
@@ -402,6 +404,9 @@ void MTLShaderInterface::prepare_common_shader_inputs(const shader::ShaderCreate
       current_input->binding = shd_tex.location;
       current_input++;
     }
+  }
+  if (info != nullptr) {
+    set_image_formats_from_info(*info);
   }
 
   /* SSBO bindings. */
@@ -626,7 +631,7 @@ void MTLShaderInterface::insert_argument_encoder(int buffer_index, id encoder)
   MTL_LOG_WARNING("could not insert encoder into cache!");
 }
 
-MTLVertexFormat mtl_datatype_to_vertex_type(eMTLDataType type)
+MTLVertexFormat mtl_datatype_to_vertex_type(MTLInterfaceDataType type)
 {
   switch (type) {
     case MTL_DATATYPE_CHAR:

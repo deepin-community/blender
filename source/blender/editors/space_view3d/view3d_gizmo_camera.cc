@@ -6,8 +6,10 @@
  * \ingroup spview3d
  */
 
+#include "BLI_listbase.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector.h"
+#include "BLI_rect.h"
 #include "BLI_utildefines.h"
 
 #include "BKE_camera.h"
@@ -83,8 +85,7 @@ static void WIDGETGROUP_camera_setup(const bContext *C, wmGizmoGroup *gzgroup)
 
   const wmGizmoType *gzt_arrow = WM_gizmotype_find("GIZMO_GT_arrow_3d", true);
 
-  CameraWidgetGroup *cagzgroup = static_cast<CameraWidgetGroup *>(
-      MEM_callocN(sizeof(CameraWidgetGroup), __func__));
+  CameraWidgetGroup *cagzgroup = MEM_callocN<CameraWidgetGroup>(__func__);
   gzgroup->customdata = cagzgroup;
 
   negate_v3_v3(dir, ob->object_to_world().ptr()[2]);
@@ -142,7 +143,9 @@ static void WIDGETGROUP_camera_refresh(const bContext *C, wmGizmoGroup *gzgroup)
   Camera *ca = static_cast<Camera *>(ob->data);
   float dir[3];
 
-  PointerRNA camera_ptr = RNA_pointer_create(&ca->id, &RNA_Camera, ca);
+  PointerRNA camera_ptr = RNA_pointer_create_discrete(&ca->id, &RNA_Camera, ca);
+
+  const bool is_modal = WM_gizmo_group_is_modal(gzgroup);
 
   negate_v3_v3(dir, ob->object_to_world().ptr()[2]);
 
@@ -154,7 +157,8 @@ static void WIDGETGROUP_camera_refresh(const bContext *C, wmGizmoGroup *gzgroup)
     WM_gizmo_set_flag(cagzgroup->dop_dist, WM_GIZMO_HIDDEN, false);
 
     /* Need to set property here for undo. TODO: would prefer to do this in _init. */
-    PointerRNA camera_dof_ptr = RNA_pointer_create(&ca->id, &RNA_CameraDOFSettings, &ca->dof);
+    PointerRNA camera_dof_ptr = RNA_pointer_create_discrete(
+        &ca->id, &RNA_CameraDOFSettings, &ca->dof);
     WM_gizmo_target_property_def_rna(
         cagzgroup->dop_dist, "offset", &camera_dof_ptr, "focus_distance", -1);
   }
@@ -213,8 +217,11 @@ static void WIDGETGROUP_camera_refresh(const bContext *C, wmGizmoGroup *gzgroup)
     WM_gizmo_set_matrix_offset_location(widget, offset);
   }
 
-  /* define & update properties */
-  {
+  /* Define & update properties.
+   *
+   * Check modal to prevent feedback loop for orthographic cameras,
+   * where the range is based on the scale, see: #141667. */
+  if (!is_modal) {
     const char *propname = is_ortho ? "ortho_scale" : "lens";
     PropertyRNA *prop = RNA_struct_find_property(&camera_ptr, propname);
     const wmGizmoPropertyType *gz_prop_type = WM_gizmotype_target_property_find(widget->type,
@@ -334,7 +341,7 @@ static void gizmo_render_border_prop_matrix_get(const wmGizmo * /*gz*/,
                                                 wmGizmoProperty *gz_prop,
                                                 void *value_p)
 {
-  float(*matrix)[4] = static_cast<float(*)[4]>(value_p);
+  float (*matrix)[4] = static_cast<float (*)[4]>(value_p);
   BLI_assert(gz_prop->type->array_length == 16);
   CameraViewWidgetGroup *viewgroup = static_cast<CameraViewWidgetGroup *>(
       gz_prop->custom_func.user_data);
@@ -351,7 +358,7 @@ static void gizmo_render_border_prop_matrix_set(const wmGizmo * /*gz*/,
                                                 wmGizmoProperty *gz_prop,
                                                 const void *value_p)
 {
-  const float(*matrix)[4] = static_cast<const float(*)[4]>(value_p);
+  const float (*matrix)[4] = static_cast<const float (*)[4]>(value_p);
   CameraViewWidgetGroup *viewgroup = static_cast<CameraViewWidgetGroup *>(
       gz_prop->custom_func.user_data);
   rctf *border = viewgroup->state.edit_border;
@@ -409,8 +416,7 @@ static bool WIDGETGROUP_camera_view_poll(const bContext *C, wmGizmoGroupType * /
 
 static void WIDGETGROUP_camera_view_setup(const bContext * /*C*/, wmGizmoGroup *gzgroup)
 {
-  CameraViewWidgetGroup *viewgroup = static_cast<CameraViewWidgetGroup *>(
-      MEM_mallocN(sizeof(CameraViewWidgetGroup), __func__));
+  CameraViewWidgetGroup *viewgroup = MEM_mallocN<CameraViewWidgetGroup>(__func__);
 
   viewgroup->border = WM_gizmo_new("GIZMO_GT_cage_2d", gzgroup, nullptr);
 

@@ -14,7 +14,6 @@
 #include "CLG_log.h"
 
 #include "vk_backend.hh"
-#include "vk_memory.hh"
 #include "vk_pipeline_pool.hh"
 
 #ifdef WITH_BUILDINFO
@@ -54,6 +53,7 @@ VKPipelinePool::VKPipelinePool()
       &vk_pipeline_vertex_input_state_create_info_;
   vk_graphics_pipeline_create_info_.pRasterizationState =
       &vk_pipeline_rasterization_state_create_info_;
+  vk_graphics_pipeline_create_info_.pDynamicState = &vk_pipeline_dynamic_state_create_info_;
   vk_graphics_pipeline_create_info_.pViewportState = &vk_pipeline_viewport_state_create_info_;
   vk_graphics_pipeline_create_info_.pMultisampleState =
       &vk_pipeline_multisample_state_create_info_;
@@ -92,6 +92,20 @@ VKPipelinePool::VKPipelinePool()
       VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
   vk_pipeline_rasterization_state_create_info_.lineWidth = 1.0f;
   vk_pipeline_rasterization_state_create_info_.frontFace = VK_FRONT_FACE_CLOCKWISE;
+  vk_pipeline_rasterization_state_create_info_.pNext =
+      &vk_pipeline_rasterization_provoking_vertex_state_info_;
+
+  vk_pipeline_rasterization_provoking_vertex_state_info_ = {};
+  vk_pipeline_rasterization_provoking_vertex_state_info_.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT;
+  vk_pipeline_rasterization_provoking_vertex_state_info_.provokingVertexMode =
+      VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT;
+
+  vk_dynamic_states_ = {
+      VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH};
+  vk_pipeline_dynamic_state_create_info_ = {};
+  vk_pipeline_dynamic_state_create_info_.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 
   vk_pipeline_viewport_state_create_info_ = {};
   vk_pipeline_viewport_state_create_info_.sType =
@@ -129,14 +143,13 @@ VKPipelinePool::VKPipelinePool()
 }
 void VKPipelinePool::init()
 {
-  VK_ALLOCATION_CALLBACKS;
   VKDevice &device = VKBackend::get().device;
   VkPipelineCacheCreateInfo create_info = {};
   create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-  vkCreatePipelineCache(
-      device.vk_handle(), &create_info, vk_allocation_callbacks, &vk_pipeline_cache_static_);
-  vkCreatePipelineCache(
-      device.vk_handle(), &create_info, vk_allocation_callbacks, &vk_pipeline_cache_non_static_);
+  vkCreatePipelineCache(device.vk_handle(), &create_info, nullptr, &vk_pipeline_cache_static_);
+  debug::object_label(vk_pipeline_cache_static_, "VkPipelineCache.Static");
+  vkCreatePipelineCache(device.vk_handle(), &create_info, nullptr, &vk_pipeline_cache_non_static_);
+  debug::object_label(vk_pipeline_cache_non_static_, "VkPipelineCache.Dynamic");
 }
 
 VkSpecializationInfo *VKPipelinePool::specialization_info_update(
@@ -190,7 +203,9 @@ VkPipeline VKPipelinePool::get_or_create_compute_pipeline(VKComputeInfo &compute
   /* Build pipeline. */
   VKBackend &backend = VKBackend::get();
   VKDevice &device = backend.device;
-  VK_ALLOCATION_CALLBACKS;
+  if (device.extensions_get().descriptor_buffer) {
+    vk_compute_pipeline_create_info_.flags |= VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+  }
 
   VkPipeline pipeline = VK_NULL_HANDLE;
   vkCreateComputePipelines(device.vk_handle(),
@@ -198,11 +213,12 @@ VkPipeline VKPipelinePool::get_or_create_compute_pipeline(VKComputeInfo &compute
                                               vk_pipeline_cache_non_static_,
                            1,
                            &vk_compute_pipeline_create_info_,
-                           vk_allocation_callbacks,
+                           nullptr,
                            &pipeline);
   compute_pipelines_.add(compute_info, pipeline);
 
   /* Reset values to initial value. */
+  vk_compute_pipeline_create_info_.flags = 0;
   vk_compute_pipeline_create_info_.layout = VK_NULL_HANDLE;
   vk_compute_pipeline_create_info_.stage.module = VK_NULL_HANDLE;
   vk_compute_pipeline_create_info_.stage.pSpecializationInfo = nullptr;
@@ -266,7 +282,7 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
                                                                VK_FRONT_FACE_COUNTER_CLOCKWISE :
                                                                VK_FRONT_FACE_CLOCKWISE;
   vk_pipeline_rasterization_state_create_info_.cullMode = to_vk_cull_mode_flags(
-      static_cast<eGPUFaceCullTest>(graphics_info.state.culling_test));
+      static_cast<GPUFaceCullTest>(graphics_info.state.culling_test));
   if (graphics_info.state.shadow_bias) {
     vk_pipeline_rasterization_state_create_info_.depthBiasEnable = VK_TRUE;
     vk_pipeline_rasterization_state_create_info_.depthBiasSlopeFactor = 2.0f;
@@ -279,18 +295,31 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
   vk_pipeline_rasterization_state_create_info_.frontFace = graphics_info.state.invert_facing ?
                                                                VK_FRONT_FACE_COUNTER_CLOCKWISE :
                                                                VK_FRONT_FACE_CLOCKWISE;
+  vk_pipeline_rasterization_provoking_vertex_state_info_.provokingVertexMode =
+      graphics_info.state.provoking_vert == GPU_VERTEX_LAST ?
+          VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT :
+          VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT;
+
+  /* Dynamic state */
+  const bool is_line_topology = ELEM(graphics_info.vertex_in.vk_topology,
+                                     VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
+                                     VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY,
+                                     VK_PRIMITIVE_TOPOLOGY_LINE_STRIP);
+  vk_pipeline_dynamic_state_create_info_.dynamicStateCount = is_line_topology ?
+                                                                 vk_dynamic_states_.size() :
+                                                                 vk_dynamic_states_.size() - 1;
+  vk_pipeline_dynamic_state_create_info_.pDynamicStates = vk_dynamic_states_.data();
 
   /* Viewport state */
-  vk_pipeline_viewport_state_create_info_.pViewports =
-      graphics_info.fragment_shader.viewports.data();
+  vk_pipeline_viewport_state_create_info_.pViewports = nullptr;
   vk_pipeline_viewport_state_create_info_.viewportCount =
       graphics_info.fragment_shader.viewports.size();
-  vk_pipeline_viewport_state_create_info_.pScissors =
-      graphics_info.fragment_shader.scissors.data();
+  vk_pipeline_viewport_state_create_info_.pScissors = nullptr;
   vk_pipeline_viewport_state_create_info_.scissorCount =
       graphics_info.fragment_shader.scissors.size();
 
   /* Color blending */
+  const VKExtensions &extensions = VKBackend::get().device.extensions_get();
   {
     VkPipelineColorBlendStateCreateInfo &cb = vk_pipeline_color_blend_state_create_info_;
     VkPipelineColorBlendAttachmentState &att_state =
@@ -365,7 +394,7 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
         att_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
         att_state.dstColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         att_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-        att_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        att_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         break;
 
       case GPU_BLEND_ALPHA_UNDER_PREMUL:
@@ -380,6 +409,13 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
         att_state.dstColorBlendFactor = VK_BLEND_FACTOR_SRC1_COLOR;
         att_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         att_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_SRC1_ALPHA;
+        break;
+
+      case GPU_BLEND_OVERLAY_MASK_FROM_ALPHA:
+        att_state.srcColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+        att_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        att_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        att_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         break;
     }
 
@@ -413,10 +449,16 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
       att_state.colorWriteMask |= VK_COLOR_COMPONENT_A_BIT;
     }
 
+    /* Logic ops. */
+    if (graphics_info.state.logic_op_xor && extensions.logic_ops) {
+      cb.logicOpEnable = VK_TRUE;
+      cb.logicOp = VK_LOGIC_OP_XOR;
+    }
+
     vk_pipeline_color_blend_attachment_states_.clear();
     vk_pipeline_color_blend_attachment_states_.append_n_times(
         vk_pipeline_color_blend_attachment_state_template_,
-        graphics_info.fragment_out.color_attachment_formats.size());
+        graphics_info.fragment_out.color_attachment_size);
     vk_pipeline_color_blend_state_create_info_.attachmentCount =
         vk_pipeline_color_blend_attachment_states_.size();
     vk_pipeline_color_blend_state_create_info_.pAttachments =
@@ -535,7 +577,7 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
   vk_pipeline_rendering_create_info_.stencilAttachmentFormat =
       graphics_info.fragment_out.stencil_attachment_format;
   vk_pipeline_rendering_create_info_.colorAttachmentCount =
-      graphics_info.fragment_out.color_attachment_formats.size();
+      graphics_info.fragment_out.color_attachment_size;
   vk_pipeline_rendering_create_info_.pColorAttachmentFormats =
       graphics_info.fragment_out.color_attachment_formats.data();
 
@@ -547,7 +589,9 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
   /* Build pipeline. */
   VKBackend &backend = VKBackend::get();
   VKDevice &device = backend.device;
-  VK_ALLOCATION_CALLBACKS;
+  if (device.extensions_get().descriptor_buffer) {
+    vk_graphics_pipeline_create_info_.flags |= VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+  }
 
   VkPipeline pipeline = VK_NULL_HANDLE;
   vkCreateGraphicsPipelines(device.vk_handle(),
@@ -555,12 +599,13 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
                                                vk_pipeline_cache_non_static_,
                             1,
                             &vk_graphics_pipeline_create_info_,
-                            vk_allocation_callbacks,
+                            nullptr,
                             &pipeline);
   graphic_pipelines_.add(graphics_info, pipeline);
 
   /* Reset values to initial value. */
   specialization_info_reset();
+  vk_graphics_pipeline_create_info_.flags = 0;
   vk_graphics_pipeline_create_info_.stageCount = 0;
   vk_graphics_pipeline_create_info_.layout = VK_NULL_HANDLE;
   vk_graphics_pipeline_create_info_.basePipelineHandle = VK_NULL_HANDLE;
@@ -583,11 +628,14 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
   vk_pipeline_rasterization_state_create_info_.depthBiasConstantFactor = 0.0f;
   vk_pipeline_rasterization_state_create_info_.depthBiasClamp = 0.0f;
   vk_pipeline_rasterization_state_create_info_.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+  vk_pipeline_rasterization_provoking_vertex_state_info_.provokingVertexMode =
+      VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT;
   vk_pipeline_viewport_state_create_info_.pScissors = nullptr;
   vk_pipeline_viewport_state_create_info_.scissorCount = 0;
   vk_pipeline_viewport_state_create_info_.pViewports = nullptr;
   vk_pipeline_viewport_state_create_info_.viewportCount = 0;
   vk_pipeline_color_blend_state_create_info_.attachmentCount = 0;
+  vk_pipeline_color_blend_state_create_info_.logicOpEnable = VK_FALSE;
   vk_pipeline_color_blend_state_create_info_.pAttachments = nullptr;
   vk_pipeline_rendering_create_info_.colorAttachmentCount = 0;
   vk_pipeline_rendering_create_info_.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
@@ -604,52 +652,40 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
   return pipeline;
 }
 
-void VKPipelinePool::remove(Span<VkShaderModule> vk_shader_modules)
+void VKPipelinePool::discard(VKDiscardPool &discard_pool, VkPipelineLayout vk_pipeline_layout)
 {
   std::scoped_lock lock(mutex_);
-  Vector<VkPipeline> pipelines_to_destroy;
   compute_pipelines_.remove_if([&](auto item) {
-    if (vk_shader_modules.contains(item.key.vk_shader_module)) {
-      pipelines_to_destroy.append(item.value);
+    if (item.key.vk_pipeline_layout == vk_pipeline_layout) {
+      discard_pool.discard_pipeline(item.value);
       return true;
     }
     return false;
   });
   graphic_pipelines_.remove_if([&](auto item) {
-    if (vk_shader_modules.contains(item.key.pre_rasterization.vk_vertex_module) ||
-        vk_shader_modules.contains(item.key.pre_rasterization.vk_geometry_module) ||
-        vk_shader_modules.contains(item.key.fragment_shader.vk_fragment_module))
-    {
-      pipelines_to_destroy.append(item.value);
+    if (item.key.vk_pipeline_layout == vk_pipeline_layout) {
+      discard_pool.discard_pipeline(item.value);
       return true;
     }
     return false;
   });
-
-  VKDevice &device = VKBackend::get().device;
-  VK_ALLOCATION_CALLBACKS;
-  for (VkPipeline vk_pipeline : pipelines_to_destroy) {
-    vkDestroyPipeline(device.vk_handle(), vk_pipeline, vk_allocation_callbacks);
-  }
 }
 
 void VKPipelinePool::free_data()
 {
   std::scoped_lock lock(mutex_);
   VKDevice &device = VKBackend::get().device;
-  VK_ALLOCATION_CALLBACKS;
   for (VkPipeline &vk_pipeline : graphic_pipelines_.values()) {
-    vkDestroyPipeline(device.vk_handle(), vk_pipeline, vk_allocation_callbacks);
+    vkDestroyPipeline(device.vk_handle(), vk_pipeline, nullptr);
   }
   graphic_pipelines_.clear();
   for (VkPipeline &vk_pipeline : compute_pipelines_.values()) {
-    vkDestroyPipeline(device.vk_handle(), vk_pipeline, vk_allocation_callbacks);
+    vkDestroyPipeline(device.vk_handle(), vk_pipeline, nullptr);
   }
   compute_pipelines_.clear();
 
-  vkDestroyPipelineCache(device.vk_handle(), vk_pipeline_cache_static_, vk_allocation_callbacks);
-  vkDestroyPipelineCache(
-      device.vk_handle(), vk_pipeline_cache_non_static_, vk_allocation_callbacks);
+  vkDestroyPipelineCache(device.vk_handle(), vk_pipeline_cache_static_, nullptr);
+  vkDestroyPipelineCache(device.vk_handle(), vk_pipeline_cache_non_static_, nullptr);
 }
 
 /* -------------------------------------------------------------------- */
@@ -658,10 +694,10 @@ void VKPipelinePool::free_data()
 
 #ifdef WITH_BUILDINFO
 struct VKPipelineCachePrefixHeader {
-  /* 'B'lender 'C'ache + 2 bytes for file versioning. */
+  /* `BC` stands for "Blender Cache" + 2 bytes for file versioning. */
   uint32_t magic = 0xBC00;
   uint32_t blender_version = BLENDER_VERSION;
-  uint32_t blender_subversion = BLENDER_VERSION_PATCH;
+  uint32_t blender_version_patch = BLENDER_VERSION_PATCH;
   char commit_hash[8];
   uint32_t data_size;
   uint32_t vendor_id;
@@ -730,14 +766,13 @@ void VKPipelinePool::read_from_disk()
      */
     MEM_freeN(buffer);
     CLOG_INFO(&LOG,
-              1,
               "Pipeline cache on disk [%s] is ignored as it was written by a different driver or "
               "Blender version. Cache will be overwritten when exiting.",
               cache_file.c_str());
     return;
   }
 
-  CLOG_INFO(&LOG, 1, "Initialize static pipeline cache from disk [%s].", cache_file.c_str());
+  CLOG_INFO(&LOG, "Initialize static pipeline cache from disk [%s].", cache_file.c_str());
   VKDevice &device = VKBackend::get().device;
   VkPipelineCacheCreateInfo create_info = {};
   create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
@@ -768,7 +803,7 @@ void VKPipelinePool::write_to_disk()
   vkGetPipelineCacheData(device.vk_handle(), vk_pipeline_cache_static_, &data_size, buffer);
 
   std::string cache_file = pipeline_cache_filepath_get();
-  CLOG_INFO(&LOG, 1, "Writing static pipeline cache to disk [%s].", cache_file.c_str());
+  CLOG_INFO(&LOG, "Writing static pipeline cache to disk [%s].", cache_file.c_str());
 
   fstream file(cache_file, std::ios::binary | std::ios::out);
 
@@ -781,6 +816,6 @@ void VKPipelinePool::write_to_disk()
 #endif
 }
 
-/* \} */
+/** \} */
 
 }  // namespace blender::gpu

@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 set(OIDN_EXTRA_ARGS
+  -DCMAKE_BUILD_TYPE=Release
   -DOIDN_APPS=OFF
   -DTBB_ROOT=${LIBDIR}/tbb
   -DISPC_EXECUTABLE=${LIBDIR}/ispc/bin/ispc
@@ -45,6 +46,15 @@ if(WIN32 AND NOT BLENDER_PLATFORM_ARM)
     -DCMAKE_C_COMPILER=${LIBDIR}/dpcpp/bin/clang.exe
     -DCMAKE_DEBUG_POSTFIX=_d
   )
+  if(DEFINED ENV{ROCM_PATH})
+    # Older ROCM shipped a /bin/hipconfig (no extension) and oidn
+    # uses it to validate a valid rocm folder, given this file
+    # is no longer shipped work around it for now by passing the
+    # path ourselves, so we don't have to rely on their find rocm
+    # functionality.
+    cmake_path(CONVERT $ENV{ROCM_PATH} TO_CMAKE_PATH_LIST ROCM_PATH NORMALIZE)
+    list(APPEND OIDN_EXTRA_ARGS -DROCM_PATH=${ROCM_PATH})
+  endif()
   set(OIDN_CMAKE_FLAGS ${DEFAULT_CLANG_CMAKE_FLAGS}
     -DCMAKE_CXX_COMPILER=${LIBDIR}/dpcpp/bin/clang++.exe
     -DCMAKE_C_COMPILER=${LIBDIR}/dpcpp/bin/clang.exe
@@ -52,7 +62,7 @@ if(WIN32 AND NOT BLENDER_PLATFORM_ARM)
     -DCMAKE_EXE_LINKER_FLAGS=-L"${LIBDIR}/dpcpp/lib"
   )
 else()
-  if(NOT (APPLE OR WIN32))
+  if(NOT (APPLE OR WIN32 OR BLENDER_PLATFORM_ARM))
     set(OIDN_EXTRA_ARGS
       ${OIDN_EXTRA_ARGS}
       -DCMAKE_CXX_COMPILER=${LIBDIR}/dpcpp/bin/clang++
@@ -103,7 +113,7 @@ add_dependencies(
   external_python
 )
 
-if(NOT (APPLE OR WIN32))
+if(NOT (APPLE OR WIN32 OR BLENDER_PLATFORM_ARM))
   add_dependencies(
     external_openimagedenoise
     external_dpcpp
@@ -111,7 +121,7 @@ if(NOT (APPLE OR WIN32))
   )
 endif()
 
-if(NOT APPLE)
+if(NOT (APPLE OR BLENDER_PLATFORM_ARM))
   add_dependencies(
     external_openimagedenoise
     external_level-zero

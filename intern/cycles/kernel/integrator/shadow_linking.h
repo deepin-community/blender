@@ -4,8 +4,7 @@
 
 #pragma once
 
-#include "kernel/integrator/path_state.h"
-#include "kernel/integrator/state_util.h"
+#include "kernel/integrator/state_flow.h"
 
 CCL_NAMESPACE_BEGIN
 
@@ -60,8 +59,7 @@ ccl_device_inline bool shadow_linking_schedule_intersection_kernel(KernelGlobals
     return false;
   }
 
-  integrator_path_next(
-      kg, state, current_kernel, DEVICE_KERNEL_INTEGRATOR_INTERSECT_DEDICATED_LIGHT);
+  integrator_path_next(state, current_kernel, DEVICE_KERNEL_INTEGRATOR_INTERSECT_DEDICATED_LIGHT);
 
   return true;
 }

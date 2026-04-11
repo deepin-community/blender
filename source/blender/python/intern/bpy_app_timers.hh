@@ -8,4 +8,6 @@
 
 #pragma once
 
-PyObject *BPY_app_timers_module();
+#include <Python.h>
+
+[[nodiscard]] PyObject *BPY_app_timers_module();

@@ -5,7 +5,6 @@
 #include "node_geometry_util.hh"
 
 #include "BKE_attribute.hh"
-#include "BKE_attribute_math.hh"
 #include "BKE_curves.hh"
 
 #include "BLI_array_utils.hh"
@@ -15,6 +14,7 @@
 #include "BLI_sort.hh"
 #include "BLI_task.hh"
 
+#include "GEO_foreach_geometry.hh"
 #include "GEO_randomize.hh"
 
 #include "BKE_geometry_set.hh"
@@ -175,14 +175,14 @@ static void node_geo_exec(GeoNodeExecParams params)
   const Field<float> weight_field = params.extract_input<Field<float>>("Weight");
 
   const NodeAttributeFilter attribute_filter = params.get_attribute_filter("Curves");
-  geometry_set.modify_geometry_sets([&](GeometrySet &geometry_set) {
+  geometry::foreach_real_geometry(geometry_set, [&](GeometrySet &geometry_set) {
     geometry_set.replace_curves(nullptr);
     if (const PointCloud *points = geometry_set.get_pointcloud()) {
       Curves *curves_id = curves_from_points(
           *points, group_id_field, weight_field, attribute_filter);
       geometry_set.replace_curves(curves_id);
     }
-    geometry_set.keep_only_during_modify({GeometryComponent::Type::Curve});
+    geometry_set.keep_only({GeometryComponent::Type::Curve, GeometryComponent::Type::Edit});
   });
 
   params.set_output("Curves", std::move(geometry_set));
@@ -192,10 +192,14 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_POINTS_TO_CURVES, "Points to Curves", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodePointsToCurves", GEO_NODE_POINTS_TO_CURVES);
+  ntype.ui_name = "Points to Curves";
+  ntype.ui_description = "Split all points to curve by its group ID and reorder by weight";
+  ntype.enum_name_legacy = "POINTS_TO_CURVES";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

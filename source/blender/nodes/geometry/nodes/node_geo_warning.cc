@@ -4,11 +4,13 @@
 
 #include "node_geometry_util.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
-#include "NOD_rna_define.hh"
+#include "BLI_string_utf8.h"
 
+#include "NOD_rna_define.hh"
+#include "RNA_access.hh"
 #include "RNA_enum_types.hh"
 
 namespace blender::nodes::node_geo_warning_cc {
@@ -18,9 +20,11 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
 
+  b.add_default_layout();
+
   b.add_input<decl::Bool>("Show").default_value(true).hide_value();
   b.add_output<decl::Bool>("Show").align_with_previous();
-  b.add_input<decl::String>("Message").hide_label();
+  b.add_input<decl::String>("Message").optional_label();
 }
 
 class LazyFunctionForWarningNode : public LazyFunction {
@@ -29,6 +33,7 @@ class LazyFunctionForWarningNode : public LazyFunction {
  public:
   LazyFunctionForWarningNode(const bNode &node) : node_(node)
   {
+    debug_name_ = "Warning";
     const CPPType &type = CPPType::get<SocketValueVariant>();
     inputs_.append_as("Show", type, lf::ValueUsage::Used);
     inputs_.append_as("Message", type);
@@ -50,8 +55,8 @@ class LazyFunctionForWarningNode : public LazyFunction {
       return;
     }
     std::string message = message_variant->extract<std::string>();
-    GeoNodesLFUserData &user_data = *static_cast<GeoNodesLFUserData *>(context.user_data);
-    GeoNodesLFLocalUserData &local_user_data = *static_cast<GeoNodesLFLocalUserData *>(
+    GeoNodesUserData &user_data = *static_cast<GeoNodesUserData *>(context.user_data);
+    GeoNodesLocalUserData &local_user_data = *static_cast<GeoNodesLocalUserData *>(
         context.local_user_data);
     if (geo_eval_log::GeoTreeLogger *tree_logger = local_user_data.try_get_tree_logger(user_data))
     {
@@ -66,9 +71,9 @@ class LazyFunctionForWarningNode : public LazyFunction {
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiLayoutSetPropSep(layout, true);
-  uiLayoutSetPropDecorate(layout, false);
-  uiItemR(layout, ptr, "warning_type", UI_ITEM_NONE, "", ICON_NONE);
+  layout->use_property_split_set(true);
+  layout->use_property_decorate_set(false);
+  layout->prop(ptr, "warning_type", UI_ITEM_NONE, "", ICON_NONE);
 }
 
 static void node_rna(StructRNA *srna)
@@ -81,14 +86,32 @@ static void node_rna(StructRNA *srna)
                     NOD_inline_enum_accessors(custom1));
 }
 
+static void node_label(const bNodeTree * /*ntree*/,
+                       const bNode *node,
+                       char *label,
+                       int label_maxncpy)
+{
+  const char *name;
+  bool enum_label = RNA_enum_name(rna_enum_node_warning_type_items, node->custom1, &name);
+  if (!enum_label) {
+    name = N_("Unknown");
+  }
+  BLI_strncpy_utf8(label, IFACE_(name), label_maxncpy);
+}
+
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_WARNING, "Warning", NODE_CLASS_INTERFACE);
+  geo_node_type_base(&ntype, "GeometryNodeWarning", GEO_NODE_WARNING);
+  ntype.ui_name = "Warning";
+  ntype.ui_description = "Create custom warnings in node groups";
+  ntype.enum_name_legacy = "WARNING";
+  ntype.nclass = NODE_CLASS_INTERFACE;
   ntype.declare = node_declare;
+  ntype.labelfunc = node_label;
   ntype.draw_buttons = node_layout;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }
@@ -101,7 +124,7 @@ namespace blender::nodes {
 std::unique_ptr<LazyFunction> get_warning_node_lazy_function(const bNode &node)
 {
   using namespace node_geo_warning_cc;
-  BLI_assert(node.type == GEO_NODE_WARNING);
+  BLI_assert(node.type_legacy == GEO_NODE_WARNING);
   return std::make_unique<LazyFunctionForWarningNode>(node);
 }
 

@@ -7,6 +7,7 @@
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.h"
 #include "BLI_ordered_edge.hh"
+#include "BLI_rect.h"
 
 #include "pbvh_uv_islands.hh"
 
@@ -26,7 +27,7 @@ static void uv_edge_append_to_uv_vertices(UVEdge &uv_edge)
 static void uv_primitive_append_to_uv_edges(UVPrimitive &uv_primitive)
 {
   for (UVEdge *uv_edge : uv_primitive.edges) {
-    uv_edge->uv_primitives.append_non_duplicates(&uv_primitive);
+    uv_edge->uv_primitive_indices.append_non_duplicates(uv_primitive.primitive_i);
   }
 }
 
@@ -246,8 +247,8 @@ static Vector<int> connecting_mesh_primitive_indices(const UVVertex &uv_vertex)
 {
   Vector<int> primitives_around_uv_vertex;
   for (const UVEdge *uv_edge : uv_vertex.uv_edges) {
-    for (const UVPrimitive *uv_primitive : uv_edge->uv_primitives) {
-      primitives_around_uv_vertex.append_non_duplicates(uv_primitive->primitive_i);
+    for (const int uv_primitive_index : uv_edge->uv_primitive_indices) {
+      primitives_around_uv_vertex.append_non_duplicates(uv_primitive_index);
     }
   }
   return primitives_around_uv_vertex;
@@ -295,7 +296,7 @@ bool UVEdge::has_same_vertices(const int2 &edge) const
 
 bool UVEdge::is_border_edge() const
 {
-  return uv_primitives.size() == 1;
+  return uv_primitive_indices.size() == 1;
 }
 
 UVVertex *UVEdge::get_other_uv_vertex(const int vertex)
@@ -364,7 +365,7 @@ UVEdge *UVIsland::lookup_or_create(const UVEdge &edge)
 
   uv_edges.append(edge);
   UVEdge *result = &uv_edges.last();
-  result->uv_primitives.clear();
+  result->uv_primitive_indices.clear();
   return result;
 }
 
@@ -379,17 +380,15 @@ void UVIsland::append(const UVPrimitive &primitive)
     uv_edge_template.vertices[1] = lookup_or_create(*other_edge->vertices[1]);
     new_prim_ptr->edges[i] = lookup_or_create(uv_edge_template);
     uv_edge_append_to_uv_vertices(*new_prim_ptr->edges[i]);
-    new_prim_ptr->edges[i]->uv_primitives.append(new_prim_ptr);
+    new_prim_ptr->edges[i]->uv_primitive_indices.append(new_prim_ptr->primitive_i);
   }
 }
 
 bool UVIsland::has_shared_edge(const UVPrimitive &primitive) const
 {
-  for (const VectorList<UVPrimitive>::UsedVector &prims : uv_primitives) {
-    for (const UVPrimitive &prim : prims) {
-      if (prim.has_shared_edge(primitive)) {
-        return true;
-      }
+  for (const UVPrimitive &prim : uv_primitives) {
+    if (prim.has_shared_edge(primitive)) {
+      return true;
     }
   }
   return false;
@@ -397,11 +396,9 @@ bool UVIsland::has_shared_edge(const UVPrimitive &primitive) const
 
 bool UVIsland::has_shared_edge(const MeshData &mesh_data, const int primitive_i) const
 {
-  for (const VectorList<UVPrimitive>::UsedVector &primitives : uv_primitives) {
-    for (const UVPrimitive &prim : primitives) {
-      if (prim.has_shared_edge(mesh_data, primitive_i)) {
-        return true;
-      }
+  for (const UVPrimitive &prim : uv_primitives) {
+    if (prim.has_shared_edge(mesh_data, primitive_i)) {
+      return true;
     }
   }
   return false;
@@ -409,11 +406,9 @@ bool UVIsland::has_shared_edge(const MeshData &mesh_data, const int primitive_i)
 
 void UVIsland::extend_border(const UVPrimitive &primitive)
 {
-  for (const VectorList<UVPrimitive>::UsedVector &primitives : uv_primitives) {
-    for (const UVPrimitive &prim : primitives) {
-      if (prim.has_shared_edge(primitive)) {
-        this->append(primitive);
-      }
+  for (const UVPrimitive &prim : uv_primitives) {
+    if (prim.has_shared_edge(primitive)) {
+      this->append(primitive);
     }
   }
 }
@@ -436,7 +431,7 @@ static UVPrimitive *add_primitive(const MeshData &mesh_data,
     UVEdge *uv_edge = uv_island.lookup_or_create(uv_edge_template);
     uv_primitive_ptr->edges.append(uv_edge);
     uv_edge_append_to_uv_vertices(*uv_edge);
-    uv_edge->uv_primitives.append(uv_primitive_ptr);
+    uv_edge->uv_primitive_indices.append(uv_primitive_ptr->primitive_i);
   }
   return uv_primitive_ptr;
 }
@@ -445,12 +440,10 @@ void UVIsland::extract_borders()
 {
   /* Lookup all borders of the island. */
   Vector<UVBorderEdge> edges;
-  for (VectorList<UVPrimitive>::UsedVector &prims : uv_primitives) {
-    for (UVPrimitive &prim : prims) {
-      for (UVEdge *edge : prim.edges) {
-        if (edge->is_border_edge()) {
-          edges.append(UVBorderEdge(edge, &prim));
-        }
+  for (UVPrimitive &prim : uv_primitives) {
+    for (UVEdge *edge : prim.edges) {
+      if (edge->is_border_edge()) {
+        edges.append(UVBorderEdge(edge, &prim));
       }
     }
   }
@@ -1028,11 +1021,9 @@ static void extend_at_vert(const MeshData &mesh_data,
 /* Marks vertices that can be extended. Only vertices that are part of a border can be extended. */
 static void reset_extendability_flags(UVIsland &island)
 {
-  for (VectorList<UVVertex>::UsedVector &uv_vertices : island.uv_vertices) {
-    for (UVVertex &uv_vertex : uv_vertices) {
-      uv_vertex.flags.is_border = false;
-      uv_vertex.flags.is_extended = false;
-    }
+  for (UVVertex &uv_vertex : island.uv_vertices) {
+    uv_vertex.flags.is_border = false;
+    uv_vertex.flags.is_extended = false;
   }
   for (const UVBorder &border : island.borders) {
     for (const UVBorderEdge &border_edge : border.edges) {
@@ -1089,32 +1080,28 @@ void UVIsland::print_debug(const MeshData &mesh_data) const
   ss << "uvisland_edges = []\n";
 
   ss << "uvisland_faces = [\n";
-  for (const VectorList<UVPrimitive>::UsedVector &uvprimitives : uv_primitives) {
-    for (const UVPrimitive &uvprimitive : uvprimitives) {
-      ss << "  [" << uvprimitive.edges[0]->vertices[0]->vertex << ", "
-         << uvprimitive.edges[0]->vertices[1]->vertex << ", "
-         << uvprimitive
-                .get_other_uv_vertex(uvprimitive.edges[0]->vertices[0],
-                                     uvprimitive.edges[0]->vertices[1])
-                ->vertex
-         << "],\n";
-    }
+  for (const UVPrimitive &uvprimitive : uv_primitives) {
+    ss << "  [" << uvprimitive.edges[0]->vertices[0]->vertex << ", "
+       << uvprimitive.edges[0]->vertices[1]->vertex << ", "
+       << uvprimitive
+              .get_other_uv_vertex(uvprimitive.edges[0]->vertices[0],
+                                   uvprimitive.edges[0]->vertices[1])
+              ->vertex
+       << "],\n";
   }
   ss << "]\n";
 
   ss << "uvisland_uvs = [\n";
-  for (const VectorList<UVPrimitive>::UsedVector &uvprimitives : uv_primitives) {
-    for (const UVPrimitive &uvprimitive : uvprimitives) {
-      float2 uv = uvprimitive.edges[0]->vertices[0]->uv;
-      ss << "  " << uv.x << ", " << uv.y << ",\n";
-      uv = uvprimitive.edges[0]->vertices[1]->uv;
-      ss << "  " << uv.x << ", " << uv.y << ",\n";
-      uv = uvprimitive
-               .get_other_uv_vertex(uvprimitive.edges[0]->vertices[0],
-                                    uvprimitive.edges[0]->vertices[1])
-               ->uv;
-      ss << "  " << uv.x << ", " << uv.y << ",\n";
-    }
+  for (const UVPrimitive &uvprimitive : uv_primitives) {
+    float2 uv = uvprimitive.edges[0]->vertices[0]->uv;
+    ss << "  " << uv.x << ", " << uv.y << ",\n";
+    uv = uvprimitive.edges[0]->vertices[1]->uv;
+    ss << "  " << uv.x << ", " << uv.y << ",\n";
+    uv = uvprimitive
+             .get_other_uv_vertex(uvprimitive.edges[0]->vertices[0],
+                                  uvprimitive.edges[0]->vertices[1])
+             ->uv;
+    ss << "  " << uv.x << ", " << uv.y << ",\n";
   }
   ss << "]\n";
 
@@ -1309,10 +1296,10 @@ bool UVPrimitive::has_shared_edge(const UVPrimitive &other) const
   return false;
 }
 
-bool UVPrimitive::has_shared_edge(const MeshData &mesh_data, const int primitive_i) const
+bool UVPrimitive::has_shared_edge(const MeshData &mesh_data, const int other_triangle_index) const
 {
   for (const UVEdge *uv_edge : edges) {
-    const int3 &tri = mesh_data.corner_tris[primitive_i];
+    const int3 &tri = mesh_data.corner_tris[other_triangle_index];
     int loop_1 = tri[2];
     for (int i = 0; i < 3; i++) {
       int loop_2 = tri[i];
@@ -1517,39 +1504,37 @@ static void add_uv_island(const MeshData &mesh_data,
                           const UVIsland &uv_island,
                           int16_t island_index)
 {
-  for (const VectorList<UVPrimitive>::UsedVector &uv_primitives : uv_island.uv_primitives) {
-    for (const UVPrimitive &uv_primitive : uv_primitives) {
-      const int3 &tri = mesh_data.corner_tris[uv_primitive.primitive_i];
+  for (const UVPrimitive &uv_primitive : uv_island.uv_primitives) {
+    const int3 &tri = mesh_data.corner_tris[uv_primitive.primitive_i];
 
-      rctf uv_bounds = primitive_uv_bounds(tri, mesh_data.uv_map);
-      rcti buffer_bounds;
-      buffer_bounds.xmin = max_ii(
-          floor((uv_bounds.xmin - tile.udim_offset.x) * tile.mask_resolution.x), 0);
-      buffer_bounds.xmax = min_ii(
-          ceil((uv_bounds.xmax - tile.udim_offset.x) * tile.mask_resolution.x),
-          tile.mask_resolution.x - 1);
-      buffer_bounds.ymin = max_ii(
-          floor((uv_bounds.ymin - tile.udim_offset.y) * tile.mask_resolution.y), 0);
-      buffer_bounds.ymax = min_ii(
-          ceil((uv_bounds.ymax - tile.udim_offset.y) * tile.mask_resolution.y),
-          tile.mask_resolution.y - 1);
+    rctf uv_bounds = primitive_uv_bounds(tri, mesh_data.uv_map);
+    rcti buffer_bounds;
+    buffer_bounds.xmin = max_ii(
+        floor((uv_bounds.xmin - tile.udim_offset.x) * tile.mask_resolution.x), 0);
+    buffer_bounds.xmax = min_ii(
+        ceil((uv_bounds.xmax - tile.udim_offset.x) * tile.mask_resolution.x),
+        tile.mask_resolution.x - 1);
+    buffer_bounds.ymin = max_ii(
+        floor((uv_bounds.ymin - tile.udim_offset.y) * tile.mask_resolution.y), 0);
+    buffer_bounds.ymax = min_ii(
+        ceil((uv_bounds.ymax - tile.udim_offset.y) * tile.mask_resolution.y),
+        tile.mask_resolution.y - 1);
 
-      for (int y = buffer_bounds.ymin; y < buffer_bounds.ymax + 1; y++) {
-        for (int x = buffer_bounds.xmin; x < buffer_bounds.xmax + 1; x++) {
-          float2 uv(float(x) / tile.mask_resolution.x, float(y) / tile.mask_resolution.y);
-          float3 weights;
-          barycentric_weights_v2(mesh_data.uv_map[tri[0]],
-                                 mesh_data.uv_map[tri[1]],
-                                 mesh_data.uv_map[tri[2]],
-                                 uv + tile.udim_offset,
-                                 weights);
-          if (!barycentric_inside_triangle_v2(weights)) {
-            continue;
-          }
-
-          uint64_t offset = tile.mask_resolution.x * y + x;
-          tile.mask[offset] = island_index;
+    for (int y = buffer_bounds.ymin; y < buffer_bounds.ymax + 1; y++) {
+      for (int x = buffer_bounds.xmin; x < buffer_bounds.xmax + 1; x++) {
+        float2 uv(float(x) / tile.mask_resolution.x, float(y) / tile.mask_resolution.y);
+        float3 weights;
+        barycentric_weights_v2(mesh_data.uv_map[tri[0]],
+                               mesh_data.uv_map[tri[1]],
+                               mesh_data.uv_map[tri[2]],
+                               uv + tile.udim_offset,
+                               weights);
+        if (!barycentric_inside_triangle_v2(weights)) {
+          continue;
         }
+
+        uint64_t offset = tile.mask_resolution.x * y + x;
+        tile.mask[offset] = island_index;
       }
     }
   }

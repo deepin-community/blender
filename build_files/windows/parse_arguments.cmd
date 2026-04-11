@@ -13,12 +13,18 @@ if NOT "%1" == "" (
 		set BUILD_TYPE=Debug
 	REM Build Configurations
 	) else if "%1" == "builddir" (
-		set BUILD_DIR_OVERRRIDE=%BLENDER_DIR%..\%2
+		REM Check if the second character is a : and interpret as an absolute path if present.
+		call set BUILDDIR_ARG=%~2
+		if "!BUILDDIR_ARG:~1,1!" == ":" (
+			set BUILD_DIR_OVERRRIDE=%2
+		) else (
+			set BUILD_DIR_OVERRRIDE=%BLENDER_DIR%..\%2
+		)
 		shift /1
 	) else if "%1" == "with_tests" (
 		set TESTS_CMAKE_ARGS=%TESTS_CMAKE_ARGS% -DWITH_GTESTS=On
 	) else if "%1" == "with_gpu_tests" (
-		set TESTS_CMAKE_ARGS=%TESTS_CMAKE_ARGS% -DWITH_GPU_DRAW_TESTS=On -DWITH_GPU_RENDER_TESTS=On -DWITH_GPU_RENDER_TESTS_SILENT=Off
+		set TESTS_CMAKE_ARGS=%TESTS_CMAKE_ARGS% -DWITH_GPU_BACKEND_TESTS=On -DWITH_GPU_DRAW_TESTS=On -DWITH_GPU_RENDER_TESTS=On
 	) else if "%1" == "full" (
 		set TARGET=Full
 		set BUILD_CMAKE_ARGS=%BUILD_CMAKE_ARGS% ^
@@ -54,9 +60,6 @@ if NOT "%1" == "" (
 		set BUILD_ARCH=arm64
 	) else if "%1" == "2019" (
 		set BUILD_VS_YEAR=2019
-	) else if "%1" == "2019pre" (
-		set BUILD_VS_YEAR=2019
-		set VSWHERE_ARGS=-prerelease
 	) else if "%1" == "2019b" (
 		set BUILD_VS_YEAR=2019
 		set VSWHERE_ARGS=-products Microsoft.VisualStudio.Product.BuildTools
@@ -67,6 +70,14 @@ if NOT "%1" == "" (
 		set VSWHERE_ARGS=-prerelease
 	) else if "%1" == "2022b" (
 		set BUILD_VS_YEAR=2022
+		set VSWHERE_ARGS=-products Microsoft.VisualStudio.Product.BuildTools
+	) else if "%1" == "2026" (
+		set BUILD_VS_YEAR=2026
+	) else if "%1" == "2026i" (
+		set BUILD_VS_YEAR=2026
+		set VSWHERE_ARGS=-prerelease
+	) else if "%1" == "2026b" (
+		set BUILD_VS_YEAR=2026
 		set VSWHERE_ARGS=-products Microsoft.VisualStudio.Product.BuildTools
 	) else if "%1" == "packagename" (
 		set BUILD_CMAKE_ARGS=%BUILD_CMAKE_ARGS% -DCPACK_OVERRIDE_PACKAGENAME="%2"
@@ -112,6 +123,8 @@ if NOT "%1" == "" (
 	) else if "%1" == "doc_py" (
 		set DOC_PY=1
 		goto EOF
+	) else if "%1" == "msvc" (
+		set WITH_MSVC=1
 	) else (
 		echo Command "%1" unknown, aborting!
 		goto ERR

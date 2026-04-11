@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "kernel/svm/util.h"
+
 CCL_NAMESPACE_BEGIN
 
 /* Light Path Node */
@@ -11,15 +13,15 @@ CCL_NAMESPACE_BEGIN
 template<uint node_feature_mask, typename ConstIntegratorGenericState>
 ccl_device_noinline void svm_node_light_path(KernelGlobals kg,
                                              ConstIntegratorGenericState state,
-                                             ccl_private const ShaderData *sd,
+                                             const ccl_private ShaderData *sd,
                                              ccl_private float *stack,
-                                             uint type,
-                                             uint out_offset,
-                                             uint32_t path_flag)
+                                             const uint type,
+                                             const uint out_offset,
+                                             const uint32_t path_flag)
 {
   float info = 0.0f;
 
-  switch (type) {
+  switch ((NodeLightPath)type) {
     case NODE_LP_camera:
       info = (path_flag & PATH_RAY_CAMERA) ? 1.0f : 0.0f;
       break;
@@ -51,7 +53,7 @@ ccl_device_noinline void svm_node_light_path(KernelGlobals kg,
       info = sd->ray_length;
       break;
     case NODE_LP_ray_depth: {
-      /* Read bounce from difference location depending if this is a shadow
+      /* Read bounce from different locations depending on if this is a shadow
        * path. It's a bit dubious to have integrate state details leak into
        * this function but hard to avoid currently. */
       IF_KERNEL_NODES_FEATURE(LIGHT_PATH)
@@ -91,6 +93,12 @@ ccl_device_noinline void svm_node_light_path(KernelGlobals kg,
         info = (float)integrator_state_transmission_bounce(state, path_flag);
       }
       break;
+    case NODE_LP_ray_portal:
+      IF_KERNEL_NODES_FEATURE(LIGHT_PATH)
+      {
+        info = (float)integrator_state_portal_bounce(kg, state, path_flag);
+      }
+      break;
   }
 
   stack_store_float(stack, out_offset, info);
@@ -100,16 +108,25 @@ ccl_device_noinline void svm_node_light_path(KernelGlobals kg,
 
 ccl_device_noinline void svm_node_light_falloff(ccl_private ShaderData *sd,
                                                 ccl_private float *stack,
-                                                uint4 node)
+                                                const uint4 node)
 {
-  uint strength_offset, out_offset, smooth_offset;
+  uint strength_offset;
+  uint out_offset;
+  uint smooth_offset;
 
   svm_unpack_node_uchar3(node.z, &strength_offset, &smooth_offset, &out_offset);
 
   float strength = stack_load_float(stack, strength_offset);
-  uint type = node.y;
+  if (sd->ray_length == FLT_MAX) {
+    /* Distant lights (which have a ray_length of FLT_MAX) overflow when using most outputs of
+     * the light falloff node. So just ignore the node in that case. */
+    stack_store_float(stack, out_offset, strength);
+    return;
+  }
 
-  switch (type) {
+  const uint type = node.y;
+
+  switch ((NodeLightFalloff)type) {
     case NODE_LIGHT_FALLOFF_QUADRATIC:
       break;
     case NODE_LIGHT_FALLOFF_LINEAR:
@@ -120,14 +137,11 @@ ccl_device_noinline void svm_node_light_falloff(ccl_private ShaderData *sd,
       break;
   }
 
-  float smooth = stack_load_float(stack, smooth_offset);
+  const float smooth = stack_load_float(stack, smooth_offset);
 
   if (smooth > 0.0f) {
-    float squared = sd->ray_length * sd->ray_length;
-    /* Distant lamps set the ray length to FLT_MAX, which causes squared to overflow. */
-    if (isfinite(squared)) {
-      strength *= squared / (smooth + squared);
-    }
+    const float squared = sd->ray_length * sd->ray_length;
+    strength *= squared / (smooth + squared);
   }
 
   stack_store_float(stack, out_offset, strength);

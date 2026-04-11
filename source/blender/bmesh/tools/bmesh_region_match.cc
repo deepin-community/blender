@@ -27,6 +27,7 @@
 #include "BLI_linklist_stack.h"
 #include "BLI_listbase.h"
 #include "BLI_mempool.h"
+
 #include "MEM_guardedalloc.h"
 
 #include "bmesh.hh"
@@ -52,7 +53,7 @@
 #  include "BLI_time_utildefines.h"
 #endif
 
-#include "BLI_strict_flags.h" /* Keep last. */
+#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
 
 /* -------------------------------------------------------------------- */
 /** \name Internal UIDWalk API
@@ -60,7 +61,7 @@
 
 #define PRIME_VERT_INIT 100003
 
-typedef uintptr_t UID_Int;
+using UID_Int = uintptr_t;
 
 struct UIDWalk {
 
@@ -902,7 +903,7 @@ static void bm_face_array_visit(BMFace **faces,
  * \{ */
 
 /* signed user id */
-typedef intptr_t SUID_Int;
+using SUID_Int = intptr_t;
 
 BLI_INLINE intptr_t abs_intptr(intptr_t a)
 {
@@ -1227,7 +1228,7 @@ static BMEdge *bm_face_region_pivot_edge_find(BMFace **faces_region,
 /** \name Fast Match
  * \{ */
 
-typedef uintptr_t UIDFashMatch;
+using UIDFashMatch = uintptr_t;
 
 static UIDFashMatch bm_vert_fasthash_single(BMVert *v)
 {
@@ -1265,10 +1266,8 @@ static UIDFashMatch *bm_vert_fasthash_create(BMesh *bm, const uint depth)
   BMVert *v;
   BMIter iter;
 
-  id_prev = static_cast<UIDFashMatch *>(
-      MEM_mallocN(sizeof(*id_prev) * uint(bm->totvert), __func__));
-  id_curr = static_cast<UIDFashMatch *>(
-      MEM_mallocN(sizeof(*id_curr) * uint(bm->totvert), __func__));
+  id_prev = MEM_malloc_arrayN<UIDFashMatch>(uint(bm->totvert), __func__);
+  id_curr = MEM_malloc_arrayN<UIDFashMatch>(uint(bm->totvert), __func__);
 
   BM_ITER_MESH_INDEX (v, &iter, bm, BM_VERTS_OF_MESH, i) {
     id_prev[i] = bm_vert_fasthash_single(v);

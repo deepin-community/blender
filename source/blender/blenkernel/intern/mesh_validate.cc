@@ -8,14 +8,12 @@
 
 #include <algorithm>
 #include <climits>
-#include <cstdio>
 #include <cstring>
 
 #include "CLG_log.h"
 
 #include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
-#include "DNA_object_types.h"
 
 #include "BLI_map.hh"
 #include "BLI_math_base.h"
@@ -24,7 +22,6 @@
 #include "BLI_sort.hh"
 #include "BLI_sys_types.h"
 #include "BLI_utildefines.h"
-#include "BLI_vector_set.hh"
 
 #include "BKE_attribute.hh"
 #include "BKE_customdata.hh"
@@ -43,7 +40,7 @@ using blender::Span;
 /* corner v/e are unsigned, so using max uint_32 value as invalid marker... */
 #define INVALID_CORNER_EDGE_MARKER 4294967295u
 
-static CLG_LogRef LOG = {"bke.mesh"};
+static CLG_LogRef LOG = {"geom.mesh"};
 
 void strip_loose_faces_corners(Mesh *mesh, blender::BitSpan faces_to_remove);
 void mesh_strip_edges(Mesh *mesh);
@@ -150,7 +147,7 @@ static bool search_face_corner_cmp(const SortFace &sp1, const SortFace &sp2)
 
 #define PRINT_MSG(...) \
   if (do_verbose) { \
-    CLOG_INFO(&LOG, 1, __VA_ARGS__); \
+    CLOG_INFO(&LOG, __VA_ARGS__); \
   } \
   ((void)0)
 
@@ -521,6 +518,7 @@ bool BKE_mesh_validate_arrays(Mesh *mesh,
       else {
         /* Face itself is valid, for now. */
         int v1, v2; /* v1 is prev corner vert idx, v2 is current corner one. */
+        int corner_min = 0;
         sp->invalid = false;
         sp->verts = v = sort_face_verts.data() + sort_face_verts_offset;
         sort_face_verts_offset += face_size;
@@ -538,7 +536,7 @@ bool BKE_mesh_validate_arrays(Mesh *mesh,
         }
 
         /* Test all face's corners' vert idx. */
-        for (j = 0; j < face_size; j++, v++) {
+        for (j = 0; j < face_size; j++) {
           const int vert = corner_verts[sp->corner_start + j];
           if (vert >= verts_num) {
             /* Invalid vert idx. */
@@ -552,7 +550,10 @@ bool BKE_mesh_validate_arrays(Mesh *mesh,
           else {
             vert_tag[vert].set();
           }
-          *v = vert;
+
+          if (corner_verts[sp->corner_start + corner_min] < vert) {
+            corner_min = j;
+          }
         }
 
         if (sp->invalid) {
@@ -623,8 +624,21 @@ bool BKE_mesh_validate_arrays(Mesh *mesh,
         }
 
         if (!sp->invalid) {
-          /* Needed for checking faces using same verts below. */
-          std::sort(sp->verts, sp->verts + sp->numverts);
+          /* Order by the smallest index, then the smallest adjacent index this ensures:
+           * - Faces are only considered duplicates when they share vertices & edges.
+           * - Faces winding in opposite directions are considered duplicates.
+           * See: #150842. */
+          const int corner_min_for_modulo = corner_min + face_size;
+          const int corner_min_prev = (corner_min_for_modulo - 1) % face_size;
+          const int corner_min_next = (corner_min_for_modulo + 1) % face_size;
+          const int sign = (corner_verts[sp->corner_start + corner_min_next] <
+                            corner_verts[sp->corner_start + corner_min_prev]) ?
+                               1 :
+                               -1;
+          for (j = 0; j < face_size; j++, v++) {
+            *v = corner_verts[sp->corner_start +
+                              ((corner_min_for_modulo + (j * sign)) % face_size)];
+          }
         }
       }
       sp++;
@@ -949,7 +963,7 @@ static bool mesh_validate_customdata(CustomData *data,
 
     if (ok == false) {
       if (do_fixes) {
-        CustomData_free_layer(data, type, 0, i);
+        CustomData_free_layer(data, type, i);
         has_fixes = true;
       }
     }
@@ -1028,7 +1042,7 @@ bool BKE_mesh_validate(Mesh *mesh, const bool do_verbose, const bool cddata_chec
   bool changed;
 
   if (do_verbose) {
-    CLOG_INFO(&LOG, 0, "MESH: %s", mesh->id.name + 2);
+    CLOG_INFO(&LOG, "Validating Mesh: %s", mesh->id.name + 2);
   }
 
   BKE_mesh_validate_all_customdata(&mesh->vert_data,
@@ -1053,7 +1067,7 @@ bool BKE_mesh_validate(Mesh *mesh, const bool do_verbose, const bool cddata_chec
       CustomData_get_layer_for_write(&mesh->vert_data, CD_MDEFORMVERT, mesh->verts_num));
   BKE_mesh_validate_arrays(
       mesh,
-      reinterpret_cast<float(*)[3]>(positions.data()),
+      reinterpret_cast<float (*)[3]>(positions.data()),
       positions.size(),
       edges.data(),
       edges.size(),
@@ -1110,7 +1124,7 @@ bool BKE_mesh_is_valid(Mesh *mesh)
       CustomData_get_layer_for_write(&mesh->vert_data, CD_MDEFORMVERT, mesh->verts_num));
   is_valid &= BKE_mesh_validate_arrays(
       mesh,
-      reinterpret_cast<float(*)[3]>(positions.data()),
+      reinterpret_cast<float (*)[3]>(positions.data()),
       positions.size(),
       edges.data(),
       edges.size(),
@@ -1164,12 +1178,16 @@ bool BKE_mesh_validate_material_indices(Mesh *mesh)
 
 void strip_loose_faces_corners(Mesh *mesh, blender::BitSpan faces_to_remove)
 {
+  /* Ensure layers are mutable so that #CustomData_copy_data can be used. */
+  CustomData_ensure_layers_are_mutable(&mesh->face_data, mesh->faces_num);
+  CustomData_ensure_layers_are_mutable(&mesh->corner_data, mesh->corners_num);
+
   MutableSpan<int> face_offsets = mesh->face_offsets_for_write();
   MutableSpan<int> corner_edges = mesh->corner_edges_for_write();
 
   int a, b;
   /* New corners idx! */
-  int *new_idx = (int *)MEM_mallocN(sizeof(int) * mesh->corners_num, __func__);
+  int *new_idx = MEM_malloc_arrayN<int>(size_t(mesh->corners_num), __func__);
 
   for (a = b = 0; a < mesh->faces_num; a++) {
     bool invalid = false;
@@ -1185,7 +1203,7 @@ void strip_loose_faces_corners(Mesh *mesh, blender::BitSpan faces_to_remove)
     }
     else {
       /* If one of the face's corners is invalid, the whole face is invalid! */
-      if (corner_edges.slice(start, size).as_span().contains(INVALID_CORNER_EDGE_MARKER)) {
+      if (corner_edges.slice(start, size).contains(INVALID_CORNER_EDGE_MARKER)) {
         invalid = true;
       }
     }
@@ -1238,9 +1256,12 @@ void strip_loose_faces_corners(Mesh *mesh, blender::BitSpan faces_to_remove)
 
 void mesh_strip_edges(Mesh *mesh)
 {
+  /* Ensure layers are mutable so that #CustomData_copy_data can be used. */
+  CustomData_ensure_layers_are_mutable(&mesh->edge_data, mesh->edges_num);
+
   blender::int2 *e;
   int a, b;
-  uint *new_idx = (uint *)MEM_mallocN(sizeof(int) * mesh->edges_num, __func__);
+  uint *new_idx = MEM_malloc_arrayN<uint>(size_t(mesh->edges_num), __func__);
   MutableSpan<blender::int2> edges = mesh->edges_for_write();
 
   for (a = b = 0, e = edges.data(); a < mesh->edges_num; a++, e++) {

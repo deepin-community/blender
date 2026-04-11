@@ -12,37 +12,46 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "DNA_windowmanager_types.h"
+
 #include "MEM_guardedalloc.h"
+
+#include "DNA_windowmanager_types.h"
 
 #include "BLI_listbase.h"
 #include "BLI_string.h"
+#include "BLI_string_utf8.h"
 #include "BLI_utildefines.h"
 
 #include "IMB_imbuf.hh"
 #include "IMB_moviecache.hh"
 
+#include "MOV_util.hh"
+
 #include "BKE_addon.h"
+#include "BKE_appdir.hh"
 #include "BKE_asset.hh"
 #include "BKE_blender.hh"           /* own include */
 #include "BKE_blender_user_menu.hh" /* own include */
 #include "BKE_blender_version.h"    /* own include */
 #include "BKE_brush.hh"
-#include "BKE_cachefile.hh"
 #include "BKE_callbacks.hh"
 #include "BKE_global.hh"
 #include "BKE_idprop.hh"
 #include "BKE_main.hh"
 #include "BKE_node.hh"
-#include "BKE_report.hh"
 #include "BKE_screen.hh"
 #include "BKE_studiolight.h"
-#include "BKE_writeffmpeg.hh"
 
 #include "DEG_depsgraph.hh"
 
 #include "RE_texture.h"
 
 #include "BLF_api.hh"
+
+#include "SEQ_utils.hh"
+
+#include "CLG_log.h"
 
 Global G;
 UserDef U;
@@ -67,7 +76,6 @@ void BKE_blender_free()
   BKE_spacetypes_free(); /* after free main, it uses space callbacks */
 
   IMB_exit();
-  BKE_cachefiles_exit();
   DEG_free_node_types();
 
   BKE_brush_system_exit();
@@ -76,9 +84,8 @@ void BKE_blender_free()
   BKE_callback_global_finalize();
 
   IMB_moviecache_destruct();
-#ifdef WITH_FFMPEG
-  BKE_ffmpeg_exit();
-#endif
+  blender::seq::fontmap_clear();
+  MOV_exit();
 
   blender::bke::node_system_exit();
 }
@@ -120,20 +127,20 @@ static void blender_version_init()
 
   const char *version_suffix = BKE_blender_version_is_lts() ? " LTS" : "";
 
-  SNPRINTF(blender_version_string,
-           "%d.%01d.%d%s%s",
-           BLENDER_VERSION / 100,
-           BLENDER_VERSION % 100,
-           BLENDER_VERSION_PATCH,
-           version_suffix,
-           version_cycle);
+  SNPRINTF_UTF8(blender_version_string,
+                "%d.%01d.%d%s%s",
+                BLENDER_VERSION / 100,
+                BLENDER_VERSION % 100,
+                BLENDER_VERSION_PATCH,
+                version_suffix,
+                version_cycle);
 
-  SNPRINTF(blender_version_string_compact,
-           "%d.%01d.%d%s",
-           BLENDER_VERSION / 100,
-           BLENDER_VERSION % 100,
-           BLENDER_VERSION_PATCH,
-           version_cycle_compact);
+  SNPRINTF_UTF8(blender_version_string_compact,
+                "%d.%01d.%d%s",
+                BLENDER_VERSION / 100,
+                BLENDER_VERSION % 100,
+                BLENDER_VERSION_PATCH,
+                version_cycle_compact);
 }
 
 const char *BKE_blender_version_string()
@@ -154,15 +161,15 @@ void BKE_blender_version_blendfile_string_from_values(char *str_buff,
   const short file_version_major = file_version / 100;
   const short file_version_minor = file_version % 100;
   if (file_subversion >= 0) {
-    BLI_snprintf(str_buff,
-                 str_buff_maxncpy,
-                 "%d.%d (sub %d)",
-                 file_version_major,
-                 file_version_minor,
-                 file_subversion);
+    BLI_snprintf_utf8(str_buff,
+                      str_buff_maxncpy,
+                      "%d.%d (sub %d)",
+                      file_version_major,
+                      file_version_minor,
+                      file_subversion);
   }
   else {
-    BLI_snprintf(str_buff, str_buff_maxncpy, "%d.%d", file_version_major, file_version_minor);
+    BLI_snprintf_utf8(str_buff, str_buff_maxncpy, "%d.%d", file_version_major, file_version_minor);
   }
 }
 
@@ -194,6 +201,7 @@ void BKE_blender_globals_init()
   BKE_blender_globals_main_replace(BKE_main_new());
 
   STRNCPY(G.filepath_last_image, "//");
+  G.filepath_last_blend[0] = '\0';
 
 #ifndef WITH_PYTHON_SECURITY /* default */
   G.f |= G_FLAG_SCRIPT_AUTOEXEC;
@@ -201,7 +209,9 @@ void BKE_blender_globals_init()
   G.f &= ~G_FLAG_SCRIPT_AUTOEXEC;
 #endif
 
-  G.log.level = 1;
+  G.log.level = CLG_LEVEL_WARN;
+
+  G.profile_gpu = false;
 }
 
 void BKE_blender_globals_clear()
@@ -232,6 +242,20 @@ Main *BKE_blender_globals_main_swap(Main *new_gmain)
   G_MAIN = new_gmain;
   old_gmain->is_global_main = false;
   return old_gmain;
+}
+
+void BKE_blender_globals_crash_path_get(char filepath[FILE_MAX])
+{
+  /* Might be called after WM/Main exit, so needs to be careful about nullptr-checking before
+   * de-referencing. */
+
+  if (!(G_MAIN && G_MAIN->filepath[0])) {
+    BLI_path_join(filepath, FILE_MAX, BKE_tempdir_base(), "blender.crash.txt");
+  }
+  else {
+    BLI_path_join(filepath, FILE_MAX, BKE_tempdir_base(), BLI_path_basename(G_MAIN->filepath));
+    BLI_path_extension_replace(filepath, FILE_MAX, ".crash.txt");
+  }
 }
 
 /** \} */

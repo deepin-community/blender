@@ -13,6 +13,7 @@ __all__ = (
     "reset_all",
     "module_bl_info",
     "extensions_refresh",
+    "stale_pending_remove_paths",
     "stale_pending_stage_paths",
 )
 
@@ -118,22 +119,22 @@ def _fake_module(mod_name, mod_path, speedy=True):
         if speedy:
             lines = []
             line_iter = iter(file_mod)
-            l = ""
-            while not l.startswith("bl_info"):
+            line = ""
+            while not line.startswith("bl_info"):
                 try:
-                    l = line_iter.readline()
+                    line = line_iter.readline()
                 except UnicodeDecodeError as ex:
                     if not error_encoding:
                         error_encoding = True
                         print("Error reading file as UTF-8:", mod_path, ex)
                     return None
 
-                if len(l) == 0:
+                if len(line) == 0:
                     break
-            while l.rstrip():
-                lines.append(l)
+            while line.rstrip():
+                lines.append(line)
                 try:
-                    l = line_iter.readline()
+                    line = line_iter.readline()
                 except UnicodeDecodeError as ex:
                     if not error_encoding:
                         error_encoding = True
@@ -149,7 +150,7 @@ def _fake_module(mod_name, mod_path, speedy=True):
     try:
         ast_data = ast.parse(data, filename=mod_path)
     except Exception:
-        print("Syntax error 'ast.parse' can't read:", repr(mod_path))
+        print("Syntax error 'ast.parse' cannot read:", repr(mod_path))
         import traceback
         traceback.print_exc()
         ast_data = None
@@ -170,7 +171,7 @@ def _fake_module(mod_name, mod_path, speedy=True):
             mod.bl_info = ast.literal_eval(body.value)
             mod.__file__ = mod_path
             mod.__time__ = os.path.getmtime(mod_path)
-        except:
+        except Exception:
             print("AST error parsing bl_info for:", repr(mod_path))
             import traceback
             traceback.print_exc()
@@ -331,7 +332,7 @@ def enable(module_name, *, default_set=False, persistent=False, refresh_handled=
     import os
     import sys
     import importlib
-    from bpy_restrict_state import RestrictBlend
+    from _bpy_restrict_state import RestrictBlend
 
     if handle_error is None:
         def handle_error(ex):
@@ -347,7 +348,10 @@ def enable(module_name, *, default_set=False, persistent=False, refresh_handled=
 
     if (is_extension := module_name.startswith(_ext_base_pkg_idname_with_dot)):
         if not refresh_handled:
-            extensions_refresh(addon_modules_pending=[module_name])
+            extensions_refresh(
+                addon_modules_pending=[module_name],
+                handle_error=handle_error,
+            )
 
         # Ensure the extensions are compatible.
         if _extensions_incompatible:
@@ -389,7 +393,7 @@ def enable(module_name, *, default_set=False, persistent=False, refresh_handled=
                 print("Exception in module unregister():", (mod_file or module_name))
                 handle_error(ex)
                 if is_extension and not refresh_handled:
-                    extensions_refresh()
+                    extensions_refresh(handle_error=handle_error)
                 return None
 
         mod.__addon_enabled__ = False
@@ -405,7 +409,7 @@ def enable(module_name, *, default_set=False, persistent=False, refresh_handled=
                 del sys.modules[module_name]
 
                 if is_extension and not refresh_handled:
-                    extensions_refresh()
+                    extensions_refresh(handle_error=handle_error)
                 return None
             mod.__addon_enabled__ = False
 
@@ -477,7 +481,7 @@ def enable(module_name, *, default_set=False, persistent=False, refresh_handled=
             if default_set:
                 _addon_remove(module_name)
             if is_extension and not refresh_handled:
-                extensions_refresh()
+                extensions_refresh(handle_error=handle_error)
             return None
 
         if is_extension:
@@ -516,7 +520,7 @@ def enable(module_name, *, default_set=False, persistent=False, refresh_handled=
             if default_set:
                 _addon_remove(module_name)
             if is_extension and not refresh_handled:
-                extensions_refresh()
+                extensions_refresh(handle_error=handle_error)
             return None
         finally:
             _bl_owner_id_set(owner_id_prev)
@@ -578,7 +582,7 @@ def disable(module_name, *, default_set=False, refresh_handled=False, handle_err
         _addon_remove(module_name)
 
     if not refresh_handled:
-        extensions_refresh()
+        extensions_refresh(handle_error=handle_error)
 
     if _bpy.app.debug_python:
         print("\taddon_utils.disable", module_name)
@@ -708,6 +712,12 @@ def module_bl_info(mod, *, info_basis=None):
                 _blender_manual_url_prefix(),
             )
 
+    # Remove the maintainers email while it's not private, showing prominently
+    # could cause maintainers to get direct emails instead of issue tracking systems.
+    import re
+    if "author" in addon_info:
+        addon_info["author"] = re.sub(r"\s*<.*?>", "", addon_info["author"])
+
     addon_info["_init"] = None
     return addon_info
 
@@ -813,7 +823,7 @@ def _stale_pending_check_and_remove_once():
             if stale_handle.is_modified():
                 stale_handle.state_store(check_exists=False)
         except Exception as ex:
-            print("Unexpected error clearing stale data, this is is a bug!", str(ex))
+            print("Unexpected error clearing stale data, this is a bug!", str(ex))
 
     if is_empty:
         try:
@@ -921,10 +931,10 @@ def _extension_repos_module_to_directory_map():
 
 
 def _extension_compat_cache_update_needed(
-        cache_data,  # `Dict[str, Any]`
-        blender_id,  # `Tuple[Any, ...]`
-        extensions_enabled,  # `Set[Tuple[str, str]]`
-        print_debug,  # `Optional[Callable[[Any], None]]`
+        cache_data,  # `dict[str, Any]`
+        blender_id,  # `tuple[Any, ...]`
+        extensions_enabled,  # `set[tuple[str, str]]`
+        print_debug,  # `Callable[[Any], None] | None`
 ):  # `-> bool`
 
     # Detect when Blender itself changes.
@@ -996,11 +1006,11 @@ def _extension_compat_cache_update_needed(
 # This function should not run every startup, so it can afford to be slower,
 # although users should not have to wait for it either.
 def _extension_compat_cache_create(
-        blender_id,  # `Tuple[Any, ...]`
-        extensions_enabled,  # `Set[Tuple[str, str]]`
-        wheel_list,  # `List[Tuple[str, List[str]]]`
-        print_debug,  # `Optional[Callable[[Any], None]]`
-):  # `-> Dict[str, Any]`
+        blender_id,  # `tuple[Any, ...]`
+        extensions_enabled,  # `set[tuple[str, str]]`
+        wheel_list,  # `list[tuple[str, list[str]]]`
+        print_debug,  # `Callable[[Any], None] | None`
+):  # `-> dict[str, Any]`
     import os
     from os.path import join
 
@@ -1109,14 +1119,14 @@ def _initialize_extensions_compat_ensure_up_to_date(extensions_directory, extens
 
     if cache_data is not None:
         # NOTE: the exception handling here is fairly paranoid and accounts for invalid values in the loaded cache.
-        # An example would be values expected to be lists/dictionaries being other types (None or strings for e.g.).
+        # An example would be values expected to be lists/dictionaries being other types (None or strings for example).
         # While this should not happen, some bad value should not prevent Blender from loading properly,
         # so report the error and regenerate cache.
         try:
             if _extension_compat_cache_update_needed(cache_data, blender_id, extensions_enabled, print_debug):
                 cache_data = None
         except Exception:
-            print("Extension: unexpected error reading cache, this is is a bug! (regenerating)")
+            print("Extension: unexpected error reading cache, this is a bug! (regenerating)")
             import traceback
             traceback.print_exc()
             cache_data = None
@@ -1144,12 +1154,13 @@ def _initialize_extensions_compat_ensure_up_to_date(extensions_directory, extens
     return updated, wheel_list
 
 
-def _initialize_extensions_compat_ensure_up_to_date_wheels(extensions_directory, wheel_list, debug):
+def _initialize_extensions_compat_ensure_up_to_date_wheels(extensions_directory, wheel_list, debug, error_fn):
     import os
     _extension_sync_wheels(
         local_dir=os.path.join(extensions_directory, ".local"),
         wheel_list=wheel_list,
         debug=debug,
+        error_fn=error_fn,
     )
 
 
@@ -1157,8 +1168,9 @@ def _initialize_extensions_compat_data(
         extensions_directory,  # `str`
         *,
         ensure_wheels,  # `bool`
-        addon_modules_pending,  # `Optional[Sequence[str]]`
+        addon_modules_pending,  # `Sequence[str] | None`
         use_startup_fastpath,  # `bool`
+        error_fn,  # `Callable[[Exception], None] | None`
 ):
     # WARNING: this function must *never* raise an exception because it would interfere with low level initialization.
     # As the function deals with file IO, use what are typically over zealous exception checks so as to rule out
@@ -1205,17 +1217,26 @@ def _initialize_extensions_compat_data(
             print_debug,
         )
     except Exception:
-        print("Extension: unexpected error detecting cache, this is is a bug!")
+        print("Extension: unexpected error detecting cache, this is a bug!")
         import traceback
         traceback.print_exc()
         updated = False
 
     if ensure_wheels:
         if updated:
+            if error_fn is None:
+                def error_fn(ex):
+                    print("Error:", str(ex))
+
             try:
-                _initialize_extensions_compat_ensure_up_to_date_wheels(extensions_directory, wheel_list, debug)
+                _initialize_extensions_compat_ensure_up_to_date_wheels(
+                    extensions_directory,
+                    wheel_list,
+                    debug,
+                    error_fn=error_fn,
+                )
             except Exception:
-                print("Extension: unexpected error updating wheels, this is is a bug!")
+                print("Extension: unexpected error updating wheels, this is a bug!")
                 import traceback
                 traceback.print_exc()
 
@@ -1334,8 +1355,9 @@ def _fake_module_from_extension(mod_name, mod_path):
 def _extension_sync_wheels(
         *,
         local_dir,  # `str`
-        wheel_list,  # `List[WheelSource]`
+        wheel_list,  # `list[WheelSource]`
         debug,           # `bool`
+        error_fn,  # `Callable[[Exception], None]`
 ):  # `-> None`
     import os
     import sys
@@ -1357,6 +1379,7 @@ def _extension_sync_wheels(
         local_dir=local_dir,
         local_dir_site_packages=local_dir_site_packages,
         wheel_list=wheel_list,
+        error_fn=error_fn,
         remove_error_fn=remove_error_fn,
         debug=debug,
     )
@@ -1803,6 +1826,8 @@ def _initialize_extensions_repos_once():
         ensure_wheels=True,
         addon_modules_pending=None,
         use_startup_fastpath=True,
+        # Runs on startup, fall back to printing.
+        error_fn=None,
     )
 
     # Setup repositories for the first time.
@@ -1818,7 +1843,11 @@ def _initialize_extensions_repos_once():
 # -----------------------------------------------------------------------------
 # Extension Public API
 
-def extensions_refresh(ensure_wheels=True, addon_modules_pending=None):
+def extensions_refresh(
+        ensure_wheels=True,
+        addon_modules_pending=None,
+        handle_error=None,
+):
     """
     Ensure data relating to extensions is up to date.
     This should be called after extensions on the file-system have changed.
@@ -1828,6 +1857,8 @@ def extensions_refresh(ensure_wheels=True, addon_modules_pending=None):
     :arg addon_modules_pending: Refresh these add-ons by listing their package names, as if they are enabled.
        This is needed so wheels can be setup before the add-on is enabled.
     :type addon_modules_pending: Sequence[str] | None
+    :arg handle_error: Called in the case of an error, taking an exception argument.
+    :type handle_error: Callable[[Exception], None] | None
     """
 
     # Ensure any changes to extensions refresh `_extensions_incompatible`.
@@ -1836,6 +1867,7 @@ def extensions_refresh(ensure_wheels=True, addon_modules_pending=None):
         ensure_wheels=ensure_wheels,
         addon_modules_pending=addon_modules_pending,
         use_startup_fastpath=False,
+        error_fn=handle_error,
     )
 
 

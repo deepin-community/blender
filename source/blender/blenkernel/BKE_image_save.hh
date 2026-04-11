@@ -25,13 +25,17 @@ struct ImageSaveOptions {
 
   /* Format and absolute file path. */
   ImageFormatData im_format;
-  char filepath[1024]; /* 1024 = FILE_MAX */
+  char filepath[/*FILE_MAX*/ 1024];
 
   /* Options. */
   bool relative;
   bool save_copy;
   bool save_as_render;
   bool do_newpath;
+
+  /* Original values, so we can restore when type changes back .*/
+  int orig_imtype;
+  char orig_colorspace[/*MAX_COLORSPACE_NAME*/ 64];
 
   /* Keep track of previous values for auto updates in UI. */
   bool prev_save_as_render;

@@ -10,6 +10,10 @@
 
 #include "tree_element.hh"
 
+#include "BKE_action.hh"
+
+struct AnimData;
+
 namespace blender::ed::outliner {
 
 class TreeElementAnimData final : public AbstractTreeElement {
@@ -19,6 +23,8 @@ class TreeElementAnimData final : public AbstractTreeElement {
   TreeElementAnimData(TreeElement &legacy_te, AnimData &anim_data);
 
   void expand(SpaceOutliner &space_outliner) const override;
+
+  animrig::slot_handle_t get_slot_handle() const;
 
  private:
   void expand_drivers() const;

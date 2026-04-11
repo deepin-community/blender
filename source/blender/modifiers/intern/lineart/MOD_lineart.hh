@@ -1,4 +1,4 @@
-/* SPDX-FileCopyrightText: 2008 Blender Authors
+/* SPDX-FileCopyrightText: 2024 Blender Authors
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
@@ -9,7 +9,6 @@
 #pragma once
 
 #include "BLI_linklist.h"
-#include "BLI_listbase.h"
 #include "BLI_math_matrix_types.hh"
 #include "BLI_math_vector.h"
 #include "BLI_set.hh"
@@ -18,37 +17,39 @@
 #include "ED_grease_pencil.hh"
 
 #include <algorithm>
-#include <math.h>
+#include <cmath>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+struct LineartBoundingArea;
+struct LineartEdge;
+struct LineartVert;
+struct Mesh;
+struct Object;
 
-typedef struct LineartModifierRuntime {
+struct LineartModifierRuntime {
   /* This list is constructed during `update_depsgraph()` call, and stays valid until the next
    * update. This way line art can load objects from this list instead of iterating over all
    * objects that may or may not have finished evaluating. */
-  std::unique_ptr<blender::Set<const Object *>> object_dependencies;
-} LineartModifierRuntime;
+  blender::Set<const Object *> object_dependencies;
+};
 
-typedef struct LineartStaticMemPoolNode {
+struct LineartStaticMemPoolNode {
   Link item;
   size_t size;
   size_t used_byte;
   /* User memory starts here */
-} LineartStaticMemPoolNode;
+};
 
-typedef struct LineartStaticMemPool {
+struct LineartStaticMemPool {
   ListBase pools;
   SpinLock lock_mem;
-} LineartStaticMemPool;
+};
 
-typedef struct LineartTriangleAdjacent {
-  struct LineartEdge *e[3];
-} LineartTriangleAdjacent;
+struct LineartTriangleAdjacent {
+  LineartEdge *e[3];
+};
 
-typedef struct LineartTriangle {
-  struct LineartVert *v[3];
+struct LineartTriangle {
+  LineartVert *v[3];
 
   /* first culled in line list to use adjacent triangle info, then go through triangle list. */
   double gn[3];
@@ -69,11 +70,11 @@ typedef struct LineartTriangle {
    * This variable is also reused to store the pointer to adjacent lines of this triangle before
    * intersection stage.
    */
-  struct LinkNode *intersecting_verts;
-} LineartTriangle;
+  LinkNode *intersecting_verts;
+};
 
-typedef struct LineartTriangleThread {
-  struct LineartTriangle base;
+struct LineartTriangleThread {
+  LineartTriangle base;
   /**
    * This variable is used to store per-thread triangle-line testing pair,
    * also re-used to store triangle-triangle pair for intersection testing stage.
@@ -82,19 +83,19 @@ typedef struct LineartTriangleThread {
    * "testing_e" field. Worker threads will test lines against the "base" triangle.
    * At least one thread is present, thus we always have at least `testing_e[0]`.
    */
-  struct LineartEdge *testing_e[1];
-} LineartTriangleThread;
+  LineartEdge *testing_e[1];
+};
 
-typedef enum eLineArtElementNodeFlag {
+enum eLineArtElementNodeFlag {
   LRT_ELEMENT_IS_ADDITIONAL = (1 << 0),
   LRT_ELEMENT_BORDER_ONLY = (1 << 1),
   LRT_ELEMENT_NO_INTERSECTION = (1 << 2),
   LRT_ELEMENT_INTERSECTION_DATA = (1 << 3),
-} eLineArtElementNodeFlag;
+};
 ENUM_OPERATORS(eLineArtElementNodeFlag, LRT_ELEMENT_INTERSECTION_DATA);
 
-typedef struct LineartElementLinkNode {
-  struct LineartElementLinkNode *next, *prev;
+struct LineartElementLinkNode {
+  LineartElementLinkNode *next, *prev;
   void *pointer;
   int element_count;
   void *object_ref;
@@ -106,10 +107,10 @@ typedef struct LineartElementLinkNode {
 
   /** Per object value, always set, if not enabled by #ObjectLineArt, then it's set to global. */
   float crease_threshold;
-} LineartElementLinkNode;
+};
 
-typedef struct LineartEdgeSegment {
-  struct LineartEdgeSegment *next, *prev;
+struct LineartEdgeSegment {
+  LineartEdgeSegment *next, *prev;
   /** The point after which a property of the segment is changed, e.g. occlusion/material mask etc.
    * ratio==0: v1  ratio==1: v2 (this is in 2D projected space), */
   double ratio;
@@ -123,19 +124,19 @@ typedef struct LineartEdgeSegment {
    * TODO(Yiming): Transfer material masks from shadow results
    * onto here so then we can even filter transparent shadows. */
   uint32_t shadow_mask_bits;
-} LineartEdgeSegment;
+};
 
-typedef struct LineartShadowEdge {
-  struct LineartShadowEdge *next, *prev;
+struct LineartShadowEdge {
+  LineartShadowEdge *next, *prev;
   /* Two end points in frame-buffer coordinates viewed from the light source. */
   double fbc1[4], fbc2[4];
   double g1[3], g2[3];
   bool orig1, orig2;
-  struct LineartEdge *e_ref;
-  struct LineartEdge *e_ref_light_contour;
-  struct LineartEdgeSegment *es_ref; /* Only for 3rd stage casting. */
+  LineartEdge *e_ref;
+  LineartEdge *e_ref_light_contour;
+  LineartEdgeSegment *es_ref; /* Only for 3rd stage casting. */
   ListBase shadow_segments;
-} LineartShadowEdge;
+};
 
 enum eLineartShadowSegmentFlag {
   LRT_SHADOW_CASTED = 1,
@@ -143,8 +144,8 @@ enum eLineartShadowSegmentFlag {
 };
 
 /* Represents a cutting point on a #LineartShadowEdge */
-typedef struct LineartShadowSegment {
-  struct LineartShadowSegment *next, *prev;
+struct LineartShadowSegment {
+  LineartShadowSegment *next, *prev;
   /* eLineartShadowSegmentFlag */
   int flag;
   /* The point after which a property of the segment is changed. e.g. shadow mask/target_ref etc.
@@ -158,22 +159,22 @@ typedef struct LineartShadowSegment {
   double g1[4], g2[4];
   uint32_t target_reference;
   uint32_t shadow_mask_bits;
-} LineartShadowSegment;
+};
 
-typedef struct LineartVert {
+struct LineartVert {
   double gloc[3];
   double fbcoord[4];
 
   /* Scene global index. */
   int index;
-} LineartVert;
+};
 
-typedef struct LineartEdge {
-  struct LineartVert *v1, *v2;
+struct LineartEdge {
+  LineartVert *v1, *v2;
 
   /** These two variables are also used to specify original edge and segment during 3rd stage
    * reprojection, So we can easily find out the line which results come from. */
-  struct LineartTriangle *t1, *t2;
+  LineartTriangle *t1, *t2;
 
   ListBase segments;
   int8_t min_occ;
@@ -205,11 +206,11 @@ typedef struct LineartEdge {
    * TODO: If really need more savings, we can allocate this in a "extended" way too, but we need
    * another bit in flags to be able to show the difference.
    */
-  struct Object *object_ref;
-} LineartEdge;
+  Object *object_ref;
+};
 
-typedef struct LineartEdgeChain {
-  struct LineartEdgeChain *next, *prev;
+struct LineartEdgeChain {
+  LineartEdgeChain *next, *prev;
   ListBase chain;
 
   /** Calculated before draw command. */
@@ -231,12 +232,12 @@ typedef struct LineartEdgeChain {
    * local_index=lineart_index-index_offset. */
   uint32_t index_offset;
 
-  struct Object *object_ref;
-  struct Object *silhouette_backdrop;
-} LineartEdgeChain;
+  Object *object_ref;
+  Object *silhouette_backdrop;
+};
 
-typedef struct LineartEdgeChainItem {
-  struct LineartEdgeChainItem *next, *prev;
+struct LineartEdgeChainItem {
+  LineartEdgeChainItem *next, *prev;
   /** Need z value for fading, w value for image frame clipping. */
   float pos[4];
   /** For restoring position to 3d space. */
@@ -248,10 +249,10 @@ typedef struct LineartEdgeChainItem {
   uint8_t intersection_mask;
   uint32_t shadow_mask_bits;
   size_t index;
-} LineartEdgeChainItem;
+};
 
-typedef struct LineartChainRegisterEntry {
-  struct LineartChainRegisterEntry *next, *prev;
+struct LineartChainRegisterEntry {
+  LineartChainRegisterEntry *next, *prev;
   LineartEdgeChain *ec;
   LineartEdgeChainItem *eci;
   int8_t picked;
@@ -259,13 +260,13 @@ typedef struct LineartChainRegisterEntry {
   /* left/right mark.
    * Because we revert list in chaining so we need the flag. */
   int8_t is_left;
-} LineartChainRegisterEntry;
+};
 
-typedef struct LineartAdjacentEdge {
+struct LineartAdjacentEdge {
   uint32_t v1;
   uint32_t v2;
   uint32_t e;
-} LineartAdjacentEdge;
+};
 
 enum eLineArtTileRecursiveLimit {
   /* If tile gets this small, it's already much smaller than a pixel. No need to continue
@@ -283,14 +284,13 @@ enum eLineartShadowCameraType {
   LRT_SHADOW_CAMERA_POINT = 2,
 };
 
-typedef struct LineartPendingEdges {
+struct LineartPendingEdges {
   LineartEdge **array;
   int max;
   int next;
-} LineartPendingEdges;
+};
 
-typedef struct LineartData {
-
+struct LineartData {
   int w, h;
   int thread_count;
   int sizeof_triangle;
@@ -318,7 +318,7 @@ typedef struct LineartData {
      * eLineArtTileRecursiveLimit. */
     int recursive_level;
 
-    struct LineartBoundingArea *initials;
+    LineartBoundingArea *initials;
 
     uint32_t initial_tile_count;
 
@@ -430,10 +430,9 @@ typedef struct LineartData {
   ListBase wasted_shadow_cuts;
   SpinLock lock_cuts;
   SpinLock lock_task;
+};
 
-} LineartData;
-
-typedef struct LineartCache {
+struct LineartCache {
   blender::ed::greasepencil::LineartLimitInfo LimitInfo;
   /** Separate memory pool for chain data and shadow, this goes to the cache, so when we free the
    * main pool, chains and shadows will still be available. */
@@ -449,14 +448,14 @@ typedef struct LineartCache {
 
   /** Cache only contains edge types specified in this variable. */
   uint16_t all_enabled_edge_types;
-} LineartCache;
+};
 
 #define DBL_TRIANGLE_LIM 1e-8
 #define DBL_EDGE_LIM 1e-9
 
 #define LRT_MEMORY_POOL_1MB (1 << 20)
 
-typedef enum eLineartTriangleFlags {
+enum eLineartTriangleFlags {
   LRT_CULL_DONT_CARE = 0,
   LRT_CULL_USED = (1 << 0),
   LRT_CULL_DISCARD = (1 << 1),
@@ -465,7 +464,7 @@ typedef enum eLineartTriangleFlags {
   LRT_TRIANGLE_NO_INTERSECTION = (1 << 4),
   LRT_TRIANGLE_MAT_BACK_FACE_CULLING = (1 << 5),
   LRT_TRIANGLE_FORCE_INTERSECTION = (1 << 6),
-} eLineartTriangleFlags;
+};
 
 #define LRT_SHADOW_MASK_UNDEFINED 0
 #define LRT_SHADOW_MASK_ILLUMINATED (1 << 0)
@@ -487,7 +486,7 @@ typedef enum eLineartTriangleFlags {
  */
 #define LRT_THREAD_EDGE_COUNT 1000
 
-typedef struct LineartRenderTaskInfo {
+struct LineartRenderTaskInfo {
   struct LineartData *ld;
 
   int thread_id;
@@ -497,8 +496,7 @@ typedef struct LineartRenderTaskInfo {
    * LineartData::pending_edges, assigned by the occlusion scheduler.
    */
   struct LineartPendingEdges pending_edges;
-
-} LineartRenderTaskInfo;
+};
 
 #define LRT_OBINDEX_SHIFT 20
 #define LRT_OBINDEX_LOWER 0x0FFFFF    /* Lower 20 bits. */
@@ -508,11 +506,11 @@ typedef struct LineartRenderTaskInfo {
    (obi->obindex | (e->v2->index & LRT_OBINDEX_LOWER)))
 #define LRT_LIGHT_CONTOUR_TARGET 0xFFFFFFFF
 
-typedef struct LineartObjectInfo {
-  struct LineartObjectInfo *next;
-  struct Object *original_ob;
-  struct Object *original_ob_eval; /* For evaluated materials */
-  struct Mesh *original_me;
+struct LineartObjectInfo {
+  LineartObjectInfo *next;
+  Object *original_ob;
+  Object *original_ob_eval; /* For evaluated materials */
+  Mesh *original_me;
   double model_view_proj[4][4];
   double model_view[4][4];
   double normal[4][4];
@@ -528,19 +526,18 @@ typedef struct LineartObjectInfo {
   bool free_use_mesh;
 
   /** NOTE: Data inside #pending_edges are allocated with MEM_xxx call instead of in pool. */
-  struct LineartPendingEdges pending_edges;
+  LineartPendingEdges pending_edges;
+};
 
-} LineartObjectInfo;
-
-typedef struct LineartObjectLoadTaskInfo {
-  struct LineartData *ld;
+struct LineartObjectLoadTaskInfo {
+  LineartData *ld;
   int thread_id;
   /* LinkNode styled list */
   LineartObjectInfo *pending;
   /* Used to spread the load across several threads. This can not overflow. */
   uint64_t total_faces;
   ListBase *shadow_elns;
-} LineartObjectLoadTaskInfo;
+};
 
 /**
  * Bounding area diagram:
@@ -566,12 +563,12 @@ typedef struct LineartObjectLoadTaskInfo {
  * lp/rp/up/bp is the list for
  * storing pointers to adjacent bounding areas.
  */
-typedef struct LineartBoundingArea {
+struct LineartBoundingArea {
   double l, r, u, b;
   double cx, cy;
 
   /** 1,2,3,4 quadrant */
-  struct LineartBoundingArea *child;
+  LineartBoundingArea *child;
 
   SpinLock lock;
 
@@ -587,12 +584,12 @@ typedef struct LineartBoundingArea {
   uint32_t insider_triangle_count;
 
   /* Use array for speeding up multiple accesses. */
-  struct LineartTriangle **linked_triangles;
-  struct LineartEdge **linked_lines;
+  LineartTriangle **linked_triangles;
+  LineartEdge **linked_lines;
 
   /** Reserved for image space reduction && multi-thread chaining. */
   ListBase linked_chains;
-} LineartBoundingArea;
+};
 
 #define LRT_TILE(tile, r, c, CCount) tile[r * CCount + c]
 
@@ -607,10 +604,10 @@ typedef struct LineartBoundingArea {
 #define LRT_MIN3_INDEX_ABC(x, y, z) (x < y ? (x < z ? a : (y < z ? b : c)) : (y < z ? b : c))
 
 #define DBL_LOOSER 1e-5
-#define LRT_DOUBLE_CLOSE_LOOSER(a, b) (((a) + DBL_LOOSER) >= (b) && ((a)-DBL_LOOSER) <= (b))
-#define LRT_DOUBLE_CLOSE_ENOUGH(a, b) (((a) + DBL_EDGE_LIM) >= (b) && ((a)-DBL_EDGE_LIM) <= (b))
+#define LRT_DOUBLE_CLOSE_LOOSER(a, b) (((a) + DBL_LOOSER) >= (b) && ((a) - DBL_LOOSER) <= (b))
+#define LRT_DOUBLE_CLOSE_ENOUGH(a, b) (((a) + DBL_EDGE_LIM) >= (b) && ((a) - DBL_EDGE_LIM) <= (b))
 #define LRT_DOUBLE_CLOSE_ENOUGH_TRI(a, b) \
-  (((a) + DBL_TRIANGLE_LIM) >= (b) && ((a)-DBL_TRIANGLE_LIM) <= (b))
+  (((a) + DBL_TRIANGLE_LIM) >= (b) && ((a) - DBL_TRIANGLE_LIM) <= (b))
 
 #define LRT_CLOSE_LOOSER_v3(a, b) \
   (LRT_DOUBLE_CLOSE_LOOSER(a[0], b[0]) && LRT_DOUBLE_CLOSE_LOOSER(a[1], b[1]) && \
@@ -853,9 +850,9 @@ BLI_INLINE int lineart_line_isec_2d_ignore_line2pos(const double a1[2],
       k1 = (a2[1] - a1[1]) / x_diff;
       k2 = (b2[1] - b1[1]) / x_diff2;
 
-      if ((k1 == k2))
+      if ((k1 == k2)) {
         return 0;
-
+      }
       x = (a1[1] - b1[1] - k1 * a1[0] + k2 * b1[0]) / (k2 - k1);
 
       ratio = (x - a1[0]) / x_diff;
@@ -864,9 +861,9 @@ BLI_INLINE int lineart_line_isec_2d_ignore_line2pos(const double a1[2],
     }
   }
 
-  if (ratio <= 0 || ratio >= 1)
+  if (ratio <= 0 || ratio >= 1) {
     return 0;
-
+  }
   return 1;
 #endif
 }
@@ -879,7 +876,7 @@ struct GreasePencilLineartModifierData;
 struct LineartData;
 struct Scene;
 
-void MOD_lineart_destroy_render_data_v3(struct GreasePencilLineartModifierData *lmd);
+void MOD_lineart_destroy_render_data_v3(GreasePencilLineartModifierData *lmd);
 
 void MOD_lineart_chain_feature_lines(LineartData *ld);
 void MOD_lineart_chain_split_for_fixed_occlusion(LineartData *ld);
@@ -909,9 +906,9 @@ void MOD_lineart_finalize_chains(LineartData *ld);
  *
  * \return True when a change is made.
  */
-bool MOD_lineart_compute_feature_lines_v3(struct Depsgraph *depsgraph,
-                                          struct GreasePencilLineartModifierData &lmd,
-                                          struct LineartCache **cached_result,
+bool MOD_lineart_compute_feature_lines_v3(Depsgraph *depsgraph,
+                                          GreasePencilLineartModifierData &lmd,
+                                          LineartCache **cached_result,
                                           bool enable_stroke_depth_offset);
 
 /**
@@ -933,7 +930,7 @@ void MOD_lineart_gpencil_generate_v3(const LineartCache *cache,
                                      blender::bke::greasepencil::Drawing &drawing,
                                      int8_t source_type,
                                      Object *source_object,
-                                     struct Collection *source_collection,
+                                     Collection *source_collection,
                                      int level_start,
                                      int level_end,
                                      int mat_nr,
@@ -956,8 +953,4 @@ void MOD_lineart_gpencil_generate_v3(const LineartCache *cache,
 float MOD_lineart_chain_compute_length(LineartEdgeChain *ec);
 
 LineartCache *MOD_lineart_init_cache();
-void MOD_lineart_clear_cache(struct LineartCache **lc);
-
-#ifdef __cplusplus
-}
-#endif
+void MOD_lineart_clear_cache(LineartCache **lc);

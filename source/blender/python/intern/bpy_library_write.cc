@@ -12,11 +12,8 @@
 #include <Python.h>
 #include <cstddef>
 
-#include "MEM_guardedalloc.h"
-
 #include "BLI_path_utils.hh"
 #include "BLI_string.h"
-#include "BLI_utildefines.h"
 
 #include "BKE_blendfile.hh"
 #include "BKE_global.hh"
@@ -33,14 +30,15 @@
 #include "bpy_rna.hh"
 
 #include "../generic/py_capi_utils.hh"
-#include "../generic/python_compat.hh"
+#include "../generic/python_compat.hh" /* IWYU pragma: keep. */
 
 using namespace blender::bke::blendfile;
 
 PyDoc_STRVAR(
     /* Wrap. */
     bpy_lib_write_doc,
-    ".. method:: write(filepath, datablocks, path_remap=False, fake_user=False, compress=False)\n"
+    ".. method:: write(filepath, datablocks, *, "
+    "path_remap=False, fake_user=False, compress=False)\n"
     "\n"
     "   Write data-blocks into a blend file.\n"
     "\n"
@@ -119,7 +117,7 @@ static PyObject *bpy_lib_write(BPy_PropertyRNA *self, PyObject *args, PyObject *
     return nullptr;
   }
 
-  Main *bmain_src = static_cast<Main *>(self->ptr.data); /* Typically #G_MAIN */
+  Main *bmain_src = static_cast<Main *>(self->ptr->data); /* Typically #G_MAIN */
   int write_flags = 0;
 
   if (use_compress) {
@@ -131,31 +129,37 @@ static PyObject *bpy_lib_write(BPy_PropertyRNA *self, PyObject *args, PyObject *
 
   BLI_path_abs(filepath_abs, BKE_main_blendfile_path_from_global());
 
-  PartialWriteContext partial_write_ctx{bmain_src->filepath};
-  const PartialWriteContext::IDAddOptions add_options{PartialWriteContext::IDAddOperations(
-      PartialWriteContext::IDAddOperations::ADD_DEPENDENCIES |
-      (use_fake_user ? PartialWriteContext::IDAddOperations::SET_FAKE_USER : 0))};
+  PartialWriteContext partial_write_ctx{*bmain_src};
+  const PartialWriteContext::IDAddOptions add_options{
+      (PartialWriteContext::IDAddOperations::ADD_DEPENDENCIES |
+       PartialWriteContext::IDAddOperations(
+           use_fake_user ? PartialWriteContext::IDAddOperations::SET_FAKE_USER : 0))};
 
-  Py_ssize_t pos, hash;
-  PyObject *key;
-  ID *id = nullptr;
-
-  pos = hash = 0;
-  while (_PySet_NextEntry(datablocks, &pos, &key, &hash)) {
-    if (!pyrna_id_FromPyObject(key, &id)) {
-      PyErr_Format(PyExc_TypeError, "Expected an ID type, not %.200s", Py_TYPE(key)->tp_name);
-      return nullptr;
-    }
-    else {
+  if (PySet_GET_SIZE(datablocks) > 0) {
+    PyObject *it = PyObject_GetIter(datablocks);
+    PyObject *key;
+    while ((key = PyIter_Next(it))) {
+      /* Borrow from the set. */
+      Py_DECREF(key);
+      ID *id;
+      if (!pyrna_id_FromPyObject(key, &id)) {
+        PyErr_Format(PyExc_TypeError, "Expected an ID type, not %.200s", Py_TYPE(key)->tp_name);
+        break;
+      }
       partial_write_ctx.id_add(id, add_options, nullptr);
     }
+    Py_DECREF(it);
+    if (key) {
+      return nullptr;
+    }
   }
+
   BLI_assert(partial_write_ctx.is_valid());
 
   /* write blend */
   ReportList reports;
 
-  BKE_reports_init(&reports, RPT_STORE);
+  BKE_reports_init(&reports, RPT_STORE | RPT_PRINT_HANDLED_BY_OWNER);
   bool success = partial_write_ctx.write(
       filepath_abs, write_flags, path_remap.value_found, reports);
 
@@ -177,9 +181,14 @@ static PyObject *bpy_lib_write(BPy_PropertyRNA *self, PyObject *args, PyObject *
   return py_return_value;
 }
 
-#if (defined(__GNUC__) && !defined(__clang__))
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wcast-function-type"
+#ifdef __GNUC__
+#  ifdef __clang__
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wcast-function-type"
+#  else
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wcast-function-type"
+#  endif
 #endif
 
 PyMethodDef BPY_library_write_method_def = {
@@ -189,6 +198,10 @@ PyMethodDef BPY_library_write_method_def = {
     bpy_lib_write_doc,
 };
 
-#if (defined(__GNUC__) && !defined(__clang__))
-#  pragma GCC diagnostic pop
+#ifdef __GNUC__
+#  ifdef __clang__
+#    pragma clang diagnostic pop
+#  else
+#    pragma GCC diagnostic pop
+#  endif
 #endif

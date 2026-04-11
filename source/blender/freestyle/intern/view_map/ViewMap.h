@@ -20,9 +20,7 @@
 #include "../system/BaseIterator.h"
 #include "../system/FreestyleConfig.h"
 
-#ifdef WITH_CXX_GUARDEDALLOC
-#  include "MEM_guardedalloc.h"
-#endif
+#include "MEM_guardedalloc.h"
 
 namespace Freestyle {
 
@@ -183,7 +181,7 @@ class ViewMap {
   }
 
   /* Creates a T vertex in the view map.
-   *  A T vertex is the intersection between 2 FEdges (before these ones are splitted).
+   *  A T vertex is the intersection between 2 FEdges (before these are split).
    *  The TVertex is a 2D intersection but it corresponds to a 3D point on each of the 2 FEdges.
    *    iA3D
    *      The 3D coordinates of the point corresponding to the intersection on the first edge.
@@ -221,9 +219,7 @@ class ViewMap {
   /* Clean temporary FEdges created by chaining */
   virtual void Clean();
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:ViewMap")
-#endif
 };
 
 /**********************************/
@@ -354,9 +350,7 @@ class ViewVertex : public Interface0D {
   /** Returns an orientedViewEdgeIterator pointing to the ViewEdge given as argument. */
   virtual ViewVertexInternal::orientedViewEdgeIterator edgesIterator(ViewEdge *iEdge) = 0;
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:ViewVertex")
-#endif
 };
 
 /**********************************/
@@ -411,13 +405,13 @@ class TVertex : public ViewVertex {
     return _FrontSVertex->getPoint3D();
   }
 
-  /** Returns the projected 3D  x coordinate of the vertex. */
+  /** Returns the projected 3D x coordinate of the vertex. */
   virtual real getProjectedX() const
   {
     return _FrontSVertex->point2D().x();
   }
 
-  /** Returns the projected 3D  y coordinate of the vertex. */
+  /** Returns the projected 3D y coordinate of the vertex. */
   virtual real getProjectedY() const
   {
     return _FrontSVertex->point2D().y();
@@ -616,7 +610,8 @@ class TVertex : public ViewVertex {
     return nullptr;
   }
 
-  /* iterators access */
+  /* Iterators access. */
+
   virtual edge_iterator edges_begin();
   virtual const_edge_iterator edges_begin() const;
   virtual edge_iterator edges_end();
@@ -638,9 +633,7 @@ class TVertex : public ViewVertex {
   /** Returns an orientedViewEdgeIterator pointing to the ViewEdge given as argument. */
   virtual ViewVertexInternal::orientedViewEdgeIterator edgesIterator(ViewEdge *iEdge);
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:TVertex")
-#endif
 };
 
 /**********************************/
@@ -835,7 +828,8 @@ class NonTVertex : public ViewVertex {
     }
   }
 
-  /* iterators access */
+  /* Iterators access. */
+
   virtual edge_iterator edges_begin();
   virtual const_edge_iterator edges_begin() const;
   virtual edge_iterator edges_end();
@@ -857,9 +851,7 @@ class NonTVertex : public ViewVertex {
   /** Returns an orientedViewEdgeIterator pointing to the ViewEdge given as argument. */
   virtual ViewVertexInternal::orientedViewEdgeIterator edgesIterator(ViewEdge *iEdge);
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:NonTVertex")
-#endif
 };
 
 /**********************************/
@@ -1050,7 +1042,7 @@ class ViewEdge : public Interface1D {
       _aFace = nullptr;
     }
 #endif
-    // only the last splitted deletes this id
+    // only the last split deletes this id
     if (_splittingId) {
       if (*_splittingId == _Id) {
         delete _splittingId;
@@ -1309,7 +1301,7 @@ class ViewEdge : public Interface1D {
 
   inline const SShape *occluded_shape() const;
 
-  inline const bool occludee_empty() const
+  inline bool occludee_empty() const
   {
     if (_aShape == 0) {
       return true;
@@ -1378,9 +1370,7 @@ class ViewEdge : public Interface1D {
    */
   virtual Interface0DIterator pointsEnd(float t = 0.0f);
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:ViewEdge")
-#endif
 };
 
 /**********************************/
@@ -1521,7 +1511,7 @@ class ViewShape {
 
   /* splits a view edge into several view edges.
    *    fe
-   *      The FEdge that gets splitted
+   *      The FEdge that gets split
    *    iViewVertices
    *      The view vertices corresponding to the different intersections for the edge fe.
    *      This list need to be sorted such as the first view vertex is the farther away from
@@ -1619,9 +1609,7 @@ class ViewShape {
   /* removes the view vertex iViewVertex in the View Shape. */
   void RemoveVertex(ViewVertex *iViewVertex);
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:ViewShape")
-#endif
 };
 
 /*

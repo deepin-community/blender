@@ -11,10 +11,10 @@
 #include "AS_asset_library.hh"
 #include "AS_asset_representation.hh"
 
-#include "BKE_asset.hh"
 #include "BKE_screen.hh"
 
 #include "BLI_fnmatch.h"
+#include "BLI_listbase.h"
 #include "BLI_string.h"
 
 #include "DNA_asset_types.h"
@@ -26,6 +26,7 @@
 
 #include "UI_grid_view.hh"
 #include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 
 #include "RNA_access.hh"
 #include "RNA_prototypes.hh"
@@ -55,14 +56,11 @@ class AssetView : public ui::AbstractGridView {
 };
 
 class AssetViewItem : public ui::PreviewGridItem {
-  AssetHandle asset_;
+  asset_system::AssetRepresentation &asset_;
   bool allow_asset_drag_ = true;
 
  public:
-  AssetViewItem(const AssetHandle &asset,
-                StringRef identifier,
-                StringRef label,
-                int preview_icon_id);
+  AssetViewItem(asset_system::AssetRepresentation &asset_, StringRef identifier, StringRef label);
 
   void disable_asset_drag();
   void build_grid_tile(const bContext &C, uiLayout &layout) const override;
@@ -80,8 +78,9 @@ class AssetDragController : public ui::AbstractViewItemDragController {
  public:
   AssetDragController(ui::AbstractGridView &view, asset_system::AssetRepresentation &asset);
 
-  eWM_DragDataType get_drag_type() const override;
+  std::optional<eWM_DragDataType> get_drag_type() const override;
   void *create_drag_data() const override;
+  void on_drag_start(bContext &C) override;
 };
 
 AssetView::AssetView(const AssetLibraryReference &library_ref, const AssetShelf &shelf)
@@ -104,40 +103,45 @@ void AssetView::build_items()
     return;
   }
 
-  list::iterate(
-      library_ref_,
-      [&](AssetHandle asset_handle) {
-        const asset_system::AssetRepresentation *asset = handle_get_representation(&asset_handle);
-        const bool show_names = (shelf_.settings.display_flag & ASSETSHELF_SHOW_NAMES);
+  list::iterate(library_ref_, [&](asset_system::AssetRepresentation &asset) {
+    if (!shelf::type_asset_poll(*shelf_.type, asset)) {
+      /* Skip this asset. */
+      return true;
+    }
 
-        const StringRef identifier = asset->library_relative_identifier();
-        const int preview_id = handle_get_preview_or_type_icon_id(&asset_handle);
+    const AssetMetaData &asset_data = asset.get_metadata();
+    if (catalog_filter_ && !catalog_filter_->contains(asset_data.catalog_id)) {
+      /* Skip this asset. */
+      return true;
+    }
 
-        AssetViewItem &item = this->add_item<AssetViewItem>(
-            asset_handle, identifier, asset->get_name(), preview_id);
-        if (!show_names) {
-          item.hide_label();
-        }
-        if (shelf_.type->flag & ASSET_SHELF_TYPE_FLAG_NO_ASSET_DRAG) {
-          item.disable_asset_drag();
-        }
+    const bool show_names = (shelf_.settings.display_flag & ASSETSHELF_SHOW_NAMES);
+    const StringRef identifier = asset.library_relative_identifier();
 
-        return true;
-      },
+    AssetViewItem &item = this->add_item<AssetViewItem>(asset, identifier, asset.get_name());
+    if (!show_names) {
+      item.hide_label();
+    }
+    if (shelf_.type->flag & ASSET_SHELF_TYPE_FLAG_NO_ASSET_DRAG) {
+      item.disable_asset_drag();
+    }
+    if (!shelf_.type->drag_operator.empty()) {
+      /* For now always select/activate items on click instead of press when there's a drag
+       * operator set. Important for pose library blending. Maybe we want to make this an explicit
+       * option of the asset shelf instead. */
+      item.select_on_click_set();
+    }
+    /* Make sure every click calls the #bl_activate_operator. We might want to add a flag to
+     * enable/disable this. Or we only call #bl_activate_operator when an item becomes active, and
+     * add a #bl_click_operator for repeated execution on every click. So far it seems like every
+     * asset shelf use case works with activating on every click though. */
+    item.always_reactivate_on_click();
+    if (shelf_.type->flag & ASSET_SHELF_TYPE_FLAG_ACTIVATE_FOR_CONTEXT_MENU) {
+      item.activate_for_context_menu_set();
+    }
 
-      /* prefilter_fn=*/
-      [&](asset_system::AssetRepresentation &asset) {
-        if (shelf_.type->asset_poll && !shelf_.type->asset_poll(shelf_.type, &asset)) {
-          return false;
-        }
-
-        const AssetMetaData &asset_data = asset.get_metadata();
-        if (catalog_filter_ && !catalog_filter_->contains(asset_data.catalog_id)) {
-          /* Skip this asset. */
-          return false;
-        }
-        return true;
-      });
+    return true;
+  });
 }
 
 bool AssetView::begin_filtering(const bContext &C) const
@@ -181,11 +185,10 @@ static std::optional<asset_system::AssetCatalogFilter> catalog_filter_from_shelf
 
 /* ---------------------------------------------------------------------- */
 
-AssetViewItem::AssetViewItem(const AssetHandle &asset,
+AssetViewItem::AssetViewItem(asset_system::AssetRepresentation &asset,
                              StringRef identifier,
-                             StringRef label,
-                             int preview_icon_id)
-    : ui::PreviewGridItem(identifier, label, preview_icon_id), asset_(asset)
+                             StringRef label)
+    : ui::PreviewGridItem(identifier, label, ICON_NONE), asset_(asset)
 {
 }
 
@@ -198,7 +201,7 @@ void AssetViewItem::disable_asset_drag()
  * Needs freeing with #WM_operator_properties_free() (will be done by button if passed to that) and
  * #MEM_freeN().
  */
-static std::optional<wmOperatorCallParams> create_activate_operator_params(
+static std::optional<wmOperatorCallParams> create_asset_operator_params(
     const StringRefNull op_name, const asset_system::AssetRepresentation &asset)
 {
   if (op_name.is_empty()) {
@@ -212,28 +215,21 @@ static std::optional<wmOperatorCallParams> create_activate_operator_params(
   PointerRNA *op_props = MEM_new<PointerRNA>(__func__);
   WM_operator_properties_create_ptr(op_props, ot);
   asset::operator_asset_reference_props_set(asset, *op_props);
-  return wmOperatorCallParams{ot, op_props, WM_OP_INVOKE_REGION_WIN};
+  return wmOperatorCallParams{ot, op_props, wm::OpCallContext::InvokeRegionWin};
 }
 
-void AssetViewItem::build_grid_tile(const bContext &C, uiLayout &layout) const
+void AssetViewItem::build_grid_tile(const bContext & /*C*/, uiLayout &layout) const
 {
   const AssetView &asset_view = reinterpret_cast<const AssetView &>(this->get_view());
   const AssetShelfType &shelf_type = *asset_view.shelf_.type;
-  const asset_system::AssetRepresentation *asset = handle_get_representation(&asset_);
 
-  PointerRNA file_ptr = RNA_pointer_create(
-      nullptr,
-      &RNA_FileSelectEntry,
-      /* XXX passing file pointer here, should be asset handle or asset representation. */
-      const_cast<FileDirEntry *>(asset_.file_data));
-  UI_but_context_ptr_set(uiLayoutGetBlock(&layout),
-                         reinterpret_cast<uiBut *>(view_item_but_),
-                         "active_file",
-                         &file_ptr);
+  PointerRNA asset_ptr = RNA_pointer_create_discrete(nullptr, &RNA_AssetRepresentation, &asset_);
+  UI_but_context_ptr_set(
+      layout.block(), reinterpret_cast<uiBut *>(view_item_but_), "asset", &asset_ptr);
 
   uiBut *item_but = reinterpret_cast<uiBut *>(this->view_item_button());
-  if (std::optional<wmOperatorCallParams> activate_op = create_activate_operator_params(
-          shelf_type.activate_operator, *asset))
+  if (std::optional<wmOperatorCallParams> activate_op = create_asset_operator_params(
+          shelf_type.activate_operator, asset_))
   {
     /* Attach the operator, but don't call it through the button. We call it using
      * #on_activate(). */
@@ -248,27 +244,30 @@ void AssetViewItem::build_grid_tile(const bContext &C, uiLayout &layout) const
   UI_but_view_item_draw_size_set(
       item_but, style.tile_width + 2 * U.pixelsize, style.tile_height + 2 * U.pixelsize);
 
-  UI_but_func_tooltip_set(
+  UI_but_func_tooltip_custom_set(
       item_but,
-      [](bContext * /*C*/, void *argN, const char * /*tip*/) {
+      [](bContext & /*C*/, uiTooltipData &tip, uiBut * /*but*/, void *argN) {
         const asset_system::AssetRepresentation *asset =
             static_cast<const asset_system::AssetRepresentation *>(argN);
-        return asset_tooltip(*asset, /*include_name=*/false);
+        asset_tooltip(*asset, tip);
       },
-      const_cast<asset_system::AssetRepresentation *>(asset),
+      (&asset_),
       nullptr);
 
   /* Request preview when drawing. Grid views have an optimization to only draw items that are
    * actually visible, so only previews scrolled into view will be loaded this way. This reduces
    * total loading time and memory footprint. */
-  list::asset_preview_ensure_requested(
-      C, &asset_view.library_ref_, const_cast<AssetHandle *>(&asset_));
+  asset_.ensure_previewable();
 
   const int preview_id = [&]() -> int {
-    if (list::asset_image_is_loading(&asset_view.library_ref_, &asset_)) {
-      return ICON_TEMP;
+    /* Show loading icon while list is loading still. Previews might get pushed out of view again
+     * while the list grows, which can cause a lot of flickering. Note that this also means the
+     * actual loading of previews is delayed, because that only happens when a preview icon-ID is
+     * attached to a button. */
+    if (!list::is_loaded(&asset_view.library_ref_)) {
+      return ICON_PREVIEW_LOADING;
     }
-    return handle_get_preview_or_type_icon_id(&asset_);
+    return asset_preview_or_icon(asset_);
   }();
 
   ui::PreviewGridItem::build_grid_tile_button(layout, preview_id);
@@ -279,8 +278,7 @@ void AssetViewItem::build_context_menu(bContext &C, uiLayout &column) const
   const AssetView &asset_view = dynamic_cast<const AssetView &>(this->get_view());
   const AssetShelfType &shelf_type = *asset_view.shelf_.type;
   if (shelf_type.draw_context_menu) {
-    asset_system::AssetRepresentation *asset = handle_get_representation(&asset_);
-    shelf_type.draw_context_menu(&C, &shelf_type, asset, &column);
+    shelf_type.draw_context_menu(&C, &shelf_type, &asset_, &column);
   }
 }
 
@@ -294,8 +292,7 @@ std::optional<bool> AssetViewItem::should_be_active() const
   if (!asset_view.active_asset_) {
     return false;
   }
-  const asset_system::AssetRepresentation *asset = handle_get_representation(&asset_);
-  AssetWeakReference weak_ref = asset->make_weak_reference();
+  AssetWeakReference weak_ref = asset_.make_weak_reference();
   const bool matches = *asset_view.active_asset_ == weak_ref;
 
   return matches;
@@ -306,8 +303,8 @@ void AssetViewItem::on_activate(bContext &C)
   const AssetView &asset_view = dynamic_cast<const AssetView &>(this->get_view());
   const AssetShelfType &shelf_type = *asset_view.shelf_.type;
 
-  if (std::optional<wmOperatorCallParams> activate_op = create_activate_operator_params(
-          shelf_type.activate_operator, *handle_get_representation(&asset_)))
+  if (std::optional<wmOperatorCallParams> activate_op = create_asset_operator_params(
+          shelf_type.activate_operator, asset_))
   {
     WM_operator_name_call_ptr(
         &C, activate_op->optype, activate_op->opcontext, activate_op->opptr, nullptr);
@@ -318,17 +315,19 @@ void AssetViewItem::on_activate(bContext &C)
 
 bool AssetViewItem::should_be_filtered_visible(const StringRefNull filter_string) const
 {
-  const StringRefNull asset_name = handle_get_representation(&asset_)->get_name();
+  const StringRefNull asset_name = asset_.get_name();
   return fnmatch(filter_string.c_str(), asset_name.c_str(), FNM_CASEFOLD) == 0;
 }
 
 std::unique_ptr<ui::AbstractViewItemDragController> AssetViewItem::create_drag_controller() const
 {
-  if (!allow_asset_drag_) {
+  const AssetView &asset_view = dynamic_cast<const AssetView &>(this->get_view());
+  const AssetShelfType &shelf_type = *asset_view.shelf_.type;
+
+  if (!allow_asset_drag_ && shelf_type.drag_operator.empty()) {
     return nullptr;
   }
-  asset_system::AssetRepresentation *asset = handle_get_representation(&asset_);
-  return std::make_unique<AssetDragController>(this->get_view(), *asset);
+  return std::make_unique<AssetDragController>(this->get_view(), asset_);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -345,11 +344,9 @@ static std::string filter_string_get(const AssetShelf &shelf)
 void build_asset_view(uiLayout &layout,
                       const AssetLibraryReference &library_ref,
                       const AssetShelf &shelf,
-                      const bContext &C,
-                      const ARegion &region)
+                      const bContext &C)
 {
   list::storage_fetch(&library_ref, &C);
-  list::previews_fetch(&library_ref, &C);
 
   const asset_system::AssetLibrary *library = list::library_get_once_available(library_ref);
   if (!library) {
@@ -365,13 +362,13 @@ void build_asset_view(uiLayout &layout,
   asset_view->set_catalog_filter(catalog_filter_from_shelf_settings(shelf.settings, *library));
   asset_view->set_tile_size(tile_width, tile_height);
 
-  uiBlock *block = uiLayoutGetBlock(&layout);
+  uiBlock *block = layout.block();
   ui::AbstractGridView *grid_view = UI_block_add_view(
       *block, "asset shelf asset view", std::move(asset_view));
   grid_view->set_context_menu_title("Asset Shelf");
 
   ui::GridViewBuilder builder(*block);
-  builder.build_grid_view(C, *grid_view, region.v2d, layout, filter_string_get(shelf));
+  builder.build_grid_view(C, *grid_view, layout, filter_string_get(shelf));
 }
 
 /* ---------------------------------------------------------------------- */
@@ -383,9 +380,30 @@ AssetDragController::AssetDragController(ui::AbstractGridView &view,
 {
 }
 
-eWM_DragDataType AssetDragController::get_drag_type() const
+std::optional<eWM_DragDataType> AssetDragController::get_drag_type() const
 {
+  const AssetView &asset_view = this->get_view<AssetView>();
+  const AssetShelfType &shelf_type = *asset_view.shelf_.type;
+
+  /* Disable asset dragging, only call #AssetShelfType::drag_operator in #on_drag_start(). */
+  if (!shelf_type.drag_operator.empty()) {
+    return std::nullopt;
+  }
   return asset_.is_local_id() ? WM_DRAG_ID : WM_DRAG_ASSET;
+}
+
+void AssetDragController::on_drag_start(bContext &C)
+{
+  const AssetView &asset_view = this->get_view<AssetView>();
+  const AssetShelfType &shelf_type = *asset_view.shelf_.type;
+
+  if (std::optional<wmOperatorCallParams> drag_op = create_asset_operator_params(
+          shelf_type.drag_operator, asset_))
+  {
+    WM_operator_name_call_ptr(&C, drag_op->optype, drag_op->opcontext, drag_op->opptr, nullptr);
+    WM_operator_properties_free(drag_op->opptr);
+    MEM_delete(drag_op->opptr);
+  }
 }
 
 void *AssetDragController::create_drag_data() const
@@ -395,10 +413,16 @@ void *AssetDragController::create_drag_data() const
     return static_cast<void *>(local_id);
   }
 
-  const eAssetImportMethod import_method = asset_.get_import_method().value_or(
-      ASSET_IMPORT_APPEND_REUSE);
+  eAssetImportMethod import_method = asset_.get_import_method().value_or(ASSET_IMPORT_PACK);
+  if (U.experimental.no_data_block_packing && import_method == ASSET_IMPORT_PACK) {
+    import_method = ASSET_IMPORT_APPEND_REUSE;
+  }
 
-  return WM_drag_create_asset_data(&asset_, import_method);
+  AssetImportSettings import_settings{};
+  import_settings.method = import_method;
+  import_settings.use_instance_collections = false;
+
+  return WM_drag_create_asset_data(&asset_, import_settings);
 }
 
 }  // namespace blender::ed::asset::shelf

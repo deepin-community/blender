@@ -10,7 +10,10 @@ from bpy.props import (
     IntProperty,
     StringProperty,
 )
-from bpy.app.translations import pgettext_rpt as rpt_
+from bpy.app.translations import (
+    pgettext_rpt as rpt_,
+    contexts as i18n_contexts,
+)
 
 
 class SelectPattern(Operator):
@@ -22,9 +25,10 @@ class SelectPattern(Operator):
 
     pattern: StringProperty(
         name="Pattern",
+        translation_context=i18n_contexts.id_text,
         description="Name filter using '*', '?' and "
         "'[abc]' unix style wildcards",
-        maxlen=64,
+        maxlen=256,
         default="*",
     )
     case_sensitive: BoolProperty(
@@ -51,7 +55,7 @@ class SelectPattern(Operator):
         is_pbone = False
         obj = context.object
         if obj and obj.mode == 'POSE':
-            items = obj.data.bones
+            items = obj.pose.bones
             if not self.extend:
                 bpy.ops.pose.select_all(action='DESELECT')
             is_pbone = True
@@ -226,6 +230,12 @@ class SubdivisionSet(Operator):
         description="Apply the subdivision surface level as an offset relative to the current level",
         default=False,
     )
+    ensure_modifier: BoolProperty(
+        name="Ensure Modifier",
+        description="Create the corresponding modifier if it does not exist",
+        default=True,
+        options={'HIDDEN'}
+    )
 
     @classmethod
     def poll(cls, context):
@@ -235,9 +245,29 @@ class SubdivisionSet(Operator):
     def execute(self, context):
         level = self.level
         relative = self.relative
+        ensure_modifier = self.ensure_modifier
 
         if relative and level == 0:
             return {'CANCELLED'}  # nothing to do
+
+        if not ensure_modifier:
+            any_object_has_relevant_modifier = False
+            for obj in context.selected_editable_objects:
+                if obj.mode == 'SCULPT':
+                    any_object_has_relevant_modifier |= any(mod.type == 'MULTIRES' for mod in obj.modifiers)
+                elif obj.mode == 'OBJECT':
+                    any_object_has_relevant_modifier |= any(mod.type == 'SUBSURF' for mod in obj.modifiers)
+                if any_object_has_relevant_modifier:
+                    break
+
+            if not any_object_has_relevant_modifier:
+                mod_name = ""
+                if obj.mode == 'SCULPT':
+                    mod_name = "Multiresolution"
+                else:
+                    mod_name = "Subdivision Surface"
+                self.report({'WARNING'}, rpt_("No {:s} modifiers found").format(mod_name))
+                return {'CANCELLED'}
 
         if not relative and level < 0:
             self.level = level = 0
@@ -277,17 +307,18 @@ class SubdivisionSet(Operator):
                     return
 
             # add a new modifier
-            try:
-                if obj.mode == 'SCULPT':
-                    mod = obj.modifiers.new("Multires", 'MULTIRES')
-                    if level > 0:
-                        for _ in range(level):
-                            bpy.ops.object.multires_subdivide(modifier="Multires")
-                else:
-                    mod = obj.modifiers.new("Subdivision", 'SUBSURF')
-                    mod.levels = level
-            except Exception:
-                self.report({'WARNING'}, "Modifiers cannot be added to object: " + obj.name)
+            if ensure_modifier:
+                try:
+                    if obj.mode == 'SCULPT':
+                        mod = obj.modifiers.new("Multires", 'MULTIRES')
+                        if level > 0:
+                            for _ in range(level):
+                                bpy.ops.object.multires_subdivide(modifier="Multires")
+                    else:
+                        mod = obj.modifiers.new("Subdivision", 'SUBSURF')
+                        mod.levels = level
+                except Exception:
+                    self.report({'WARNING'}, rpt_("Modifiers cannot be added to object: {:s}").format(obj.name))
 
         for obj in context.selected_editable_objects:
             set_object_subd(obj)
@@ -341,6 +372,7 @@ class ShapeTransfer(Operator):
             if len(me.shape_keys.key_blocks) == 1:
                 key.name = "Basis"
                 key = ob.shape_key_add(from_mix=False)  # we need a rest
+            key.value = 0.0
             key.name = name
             ob.active_shape_key_index = len(me.shape_keys.key_blocks) - 1
             ob.show_only_shape_key = True
@@ -428,14 +460,18 @@ class ShapeTransfer(Operator):
                     n1loc_to = v1_to + target_normals[i1] * edlen_to
                     n2loc_to = v2_to + target_normals[i2] * edlen_to
 
-                    pt = barycentric_transform(orig_shape_coords[i1],
-                                               v2, v1, n1loc,
-                                               v2_to, v1_to, n1loc_to)
+                    pt = barycentric_transform(
+                        orig_shape_coords[i1],
+                        v2, v1, n1loc,
+                        v2_to, v1_to, n1loc_to,
+                    )
                     median_coords[i1].append(pt)
 
-                    pt = barycentric_transform(orig_shape_coords[i2],
-                                               v1, v2, n2loc,
-                                               v1_to, v2_to, n2loc_to)
+                    pt = barycentric_transform(
+                        orig_shape_coords[i2],
+                        v1, v2, n2loc,
+                        v1_to, v2_to, n2loc_to,
+                    )
                     median_coords[i2].append(pt)
 
             # apply the offsets to the new shape
@@ -784,6 +820,8 @@ class TransformsToDeltasAnim(Operator):
         return (obs is not None)
 
     def execute(self, context):
+        from bpy_extras import anim_utils
+
         # map from standard transform paths to "new" transform paths
         STANDARD_TO_DELTA_PATHS = {
             "location": "delta_location",
@@ -807,7 +845,10 @@ class TransformsToDeltasAnim(Operator):
             # first pass over F-Curves: ensure that we don't have conflicting
             # transforms already (e.g. if this was applied already) #29110.
             existingFCurves = {}
-            for fcu in adt.action.fcurves:
+            channelbag = anim_utils.action_get_channelbag_for_slot(adt.action, adt.action_slot)
+            if not channelbag:
+                continue
+            for fcu in channelbag.fcurves:
                 # get "delta" path - i.e. the final paths which may clash
                 path = fcu.data_path
                 if path in STANDARD_TO_DELTA_PATHS:
@@ -840,24 +881,23 @@ class TransformsToDeltasAnim(Operator):
                     # no conflict yet
                     existingFCurves[dpath] = [fcu.array_index]
 
-            # if F-Curve uses standard transform path
-            # just append "delta_" to this path
-            for fcu in adt.action.fcurves:
-                if fcu.data_path == "location":
-                    fcu.data_path = "delta_location"
-                    obj.location.zero()
-                elif fcu.data_path == "rotation_euler":
-                    fcu.data_path = "delta_rotation_euler"
-                    obj.rotation_euler.zero()
-                elif fcu.data_path == "rotation_quaternion":
-                    fcu.data_path = "delta_rotation_quaternion"
-                    obj.rotation_quaternion.identity()
-                # XXX: currently not implemented
-                # ~ elif fcu.data_path == "rotation_axis_angle":
-                # ~    fcu.data_path = "delta_rotation_axis_angle"
-                elif fcu.data_path == "scale":
-                    fcu.data_path = "delta_scale"
-                    obj.scale = 1.0, 1.0, 1.0
+            # Move the 'standard' to the 'delta' data paths.
+            for fcu in channelbag.fcurves:
+                standard_path = fcu.data_path
+                array_index = fcu.array_index
+                try:
+                    delta_path = STANDARD_TO_DELTA_PATHS[standard_path]
+                except KeyError:
+                    # Not a standard transform path.
+                    continue
+
+                # Just change the F-Curve's data path. The array index should remain the same.
+                fcu.data_path = delta_path
+
+                # Reset the now-no-longer-animated property to its default value.
+                default_array = obj.bl_rna.properties[standard_path].default_array
+                property_array = getattr(obj, standard_path)
+                property_array[array_index] = default_array[array_index]
 
         # hack: force animsys flush by changing frame, so that deltas get run
         context.scene.frame_set(context.scene.frame_current)

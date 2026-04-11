@@ -8,6 +8,10 @@
 
 #pragma once
 
+#include <Python.h>
+
+#include "bmesh.hh"
+
 struct BBMesh;
 struct BMEditSelection;
 struct BPy_BMesh;
@@ -31,9 +35,9 @@ struct BPy_BMEditSelIter {
 
 void BPy_BM_init_types_select();
 
-PyObject *BPy_BMEditSel_CreatePyObject(BMesh *bm);
-PyObject *BPy_BMEditSelIter_CreatePyObject(BMesh *bm);
+[[nodiscard]] PyObject *BPy_BMEditSel_CreatePyObject(BMesh *bm);
+[[nodiscard]] PyObject *BPy_BMEditSelIter_CreatePyObject(BMesh *bm);
 /**
  * \note doesn't actually check selection.
  */
-int BPy_BMEditSel_Assign(BPy_BMesh *self, PyObject *value);
+[[nodiscard]] int BPy_BMEditSel_Assign(BPy_BMesh *self, PyObject *value);

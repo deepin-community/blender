@@ -8,4 +8,6 @@
 
 #pragma once
 
-PyObject *BPY_msgbus_module();
+#include <Python.h>
+
+[[nodiscard]] PyObject *BPY_msgbus_module();

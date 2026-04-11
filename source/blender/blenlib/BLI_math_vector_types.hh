@@ -9,12 +9,10 @@
  */
 
 #include <array>
-#include <cmath>
 #include <ostream>
 #include <type_traits>
 
 #include "BLI_math_vector_unroll.hh"
-#include "BLI_unroll.hh"
 #include "BLI_utildefines.h"
 
 namespace blender {
@@ -160,6 +158,14 @@ template<typename T, int Size> struct VecBase : public vec_struct_base<T, Size> 
   {
   }
 
+  /**
+   * Prevent up-cast of dimensions (creating a bigger vector initialized with data
+   * from a smaller one) by deleting all copy constructors accepting smaller vectors
+   * as source.
+   */
+  template<typename U, int OtherSize, BLI_ENABLE_IF(OtherSize < Size)>
+  VecBase(const VecBase<U, OtherSize> &other) = delete;
+
   /** Masking. */
 
   template<typename U, int OtherSize, BLI_ENABLE_IF(OtherSize > Size)>
@@ -286,12 +292,12 @@ template<typename T, int Size> struct VecBase : public vec_struct_base<T, Size> 
     BLI_UNROLL_MATH_VEC_OP_SCALAR_VEC(+, a, b);
   }
 
-  VecBase &operator+=(const VecBase &b)
+  VecBase &operator+=(const VecBase &b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_VEC(+=, b);
   }
 
-  VecBase &operator+=(const T &b)
+  VecBase &operator+=(const T &b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_SCALAR(+=, b);
   }
@@ -316,12 +322,12 @@ template<typename T, int Size> struct VecBase : public vec_struct_base<T, Size> 
     BLI_UNROLL_MATH_VEC_OP_SCALAR_VEC(-, a, b);
   }
 
-  VecBase &operator-=(const VecBase &b)
+  VecBase &operator-=(const VecBase &b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_VEC(-=, b);
   }
 
-  VecBase &operator-=(const T &b)
+  VecBase &operator-=(const T &b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_SCALAR(-=, b);
   }
@@ -341,12 +347,12 @@ template<typename T, int Size> struct VecBase : public vec_struct_base<T, Size> 
     BLI_UNROLL_MATH_VEC_OP_SCALAR_VEC(*, a, b);
   }
 
-  VecBase &operator*=(T b)
+  VecBase &operator*=(T b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_SCALAR(*=, b);
   }
 
-  VecBase &operator*=(const VecBase &b)
+  VecBase &operator*=(const VecBase &b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_VEC(*=, b);
   }
@@ -373,13 +379,13 @@ template<typename T, int Size> struct VecBase : public vec_struct_base<T, Size> 
     BLI_UNROLL_MATH_VEC_OP_SCALAR_VEC(/, a, b);
   }
 
-  VecBase &operator/=(T b)
+  VecBase &operator/=(T b) &
   {
     BLI_assert(b != T(0));
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_SCALAR(/=, b);
   }
 
-  VecBase &operator/=(const VecBase &b)
+  VecBase &operator/=(const VecBase &b) &
   {
     for (int i = 0; i < Size; i++) {
       BLI_assert(b[i] != T(0));
@@ -404,12 +410,12 @@ template<typename T, int Size> struct VecBase : public vec_struct_base<T, Size> 
     BLI_UNROLL_MATH_VEC_OP_SCALAR_VEC(&, a, b);
   }
 
-  BLI_INT_OP(T) VecBase &operator&=(T b)
+  BLI_INT_OP(T) VecBase &operator&=(T b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_SCALAR(&=, b);
   }
 
-  BLI_INT_OP(T) VecBase &operator&=(const VecBase &b)
+  BLI_INT_OP(T) VecBase &operator&=(const VecBase &b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_VEC(&=, b);
   }
@@ -429,12 +435,12 @@ template<typename T, int Size> struct VecBase : public vec_struct_base<T, Size> 
     BLI_UNROLL_MATH_VEC_OP_SCALAR_VEC(|, a, b);
   }
 
-  BLI_INT_OP(T) VecBase &operator|=(T b)
+  BLI_INT_OP(T) VecBase &operator|=(T b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_SCALAR(|=, b);
   }
 
-  BLI_INT_OP(T) VecBase &operator|=(const VecBase &b)
+  BLI_INT_OP(T) VecBase &operator|=(const VecBase &b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_VEC(|=, b);
   }
@@ -454,12 +460,12 @@ template<typename T, int Size> struct VecBase : public vec_struct_base<T, Size> 
     BLI_UNROLL_MATH_VEC_OP_SCALAR_VEC(^, a, b);
   }
 
-  BLI_INT_OP(T) VecBase &operator^=(T b)
+  BLI_INT_OP(T) VecBase &operator^=(T b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_SCALAR(^=, b);
   }
 
-  BLI_INT_OP(T) VecBase &operator^=(const VecBase &b)
+  BLI_INT_OP(T) VecBase &operator^=(const VecBase &b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_VEC(^=, b);
   }
@@ -481,12 +487,12 @@ template<typename T, int Size> struct VecBase : public vec_struct_base<T, Size> 
     BLI_UNROLL_MATH_VEC_OP_VEC_SCALAR(<<, a, b);
   }
 
-  BLI_INT_OP(T) VecBase &operator<<=(T b)
+  BLI_INT_OP(T) VecBase &operator<<=(T b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_SCALAR(<<=, b);
   }
 
-  BLI_INT_OP(T) VecBase &operator<<=(const VecBase &b)
+  BLI_INT_OP(T) VecBase &operator<<=(const VecBase &b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_VEC(<<=, b);
   }
@@ -501,12 +507,12 @@ template<typename T, int Size> struct VecBase : public vec_struct_base<T, Size> 
     BLI_UNROLL_MATH_VEC_OP_VEC_SCALAR(>>, a, b);
   }
 
-  BLI_INT_OP(T) VecBase &operator>>=(T b)
+  BLI_INT_OP(T) VecBase &operator>>=(T b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_SCALAR(>>=, b);
   }
 
-  BLI_INT_OP(T) VecBase &operator>>=(const VecBase &b)
+  BLI_INT_OP(T) VecBase &operator>>=(const VecBase &b) &
   {
     BLI_UNROLL_MATH_VEC_OP_ASSIGN_VEC(>>=, b);
   }
@@ -588,6 +594,7 @@ using char2 = blender::VecBase<int8_t, 2>;
 using char3 = blender::VecBase<int8_t, 3>;
 using char4 = blender::VecBase<int8_t, 4>;
 
+using uchar2 = blender::VecBase<uint8_t, 2>;
 using uchar3 = blender::VecBase<uint8_t, 3>;
 using uchar4 = blender::VecBase<uint8_t, 4>;
 

@@ -12,6 +12,7 @@
 #include "DNA_screen_types.h"
 #include "DNA_sequence_types.h"
 #include "DNA_space_types.h"
+#include "DNA_userdef_types.h"
 
 #include "BKE_context.hh"
 
@@ -26,12 +27,11 @@
 
 #include "ED_sequencer.hh"
 
-#include "SEQ_sequencer.hh"
 #include "SEQ_time.hh"
 
 #include "MEM_guardedalloc.h"
 
-using namespace blender;
+namespace blender::ed::transform {
 
 /* -------------------------------------------------------------------- */
 /** \name Callbacks for #MouseInput.apply
@@ -161,7 +161,7 @@ static void InputCustomRatioFlip(TransInfo * /*t*/,
 
     distance = (length != 0.0) ? (mdx * dx + mdy * dy) / length : 0.0;
 
-    output[0] = (length != 0.0) ? double(distance / length) : 0.0;
+    output[0] = (length != 0.0) ? (distance / length) : 0.0;
   }
 }
 
@@ -184,9 +184,8 @@ static void InputAngle(TransInfo * /*t*/, MouseInput *mi, const double mval[2], 
   float dir_prev[2], dir_curr[2], mi_center[2];
   copy_v2_v2(mi_center, mi->center);
 
-  sub_v2_v2v2(
-      dir_prev, blender::float2{float(data->mval_prev[0]), float(data->mval_prev[1])}, mi_center);
-  sub_v2_v2v2(dir_curr, blender::float2{float(mval[0]), float(mval[1])}, mi_center);
+  sub_v2_v2v2(dir_prev, float2{float(data->mval_prev[0]), float(data->mval_prev[1])}, mi_center);
+  sub_v2_v2v2(dir_curr, float2{float(mval[0]), float(mval[1])}, mi_center);
 
   if (normalize_v2(dir_prev) && normalize_v2(dir_curr)) {
     float dphi = angle_normalized_v2v2(dir_prev, dir_curr);
@@ -295,12 +294,12 @@ static void calcSpringFactor(MouseInput *mi)
   }
 }
 
-static int transform_seq_slide_strip_cursor_get(const Sequence *seq)
+static int transform_seq_slide_strip_cursor_get(const Strip *strip)
 {
-  if ((seq->flag & SEQ_LEFTSEL) != 0) {
+  if ((strip->flag & SEQ_LEFTSEL) != 0) {
     return WM_CURSOR_LEFT_HANDLE;
   }
-  if ((seq->flag & SEQ_RIGHTSEL) != 0) {
+  if ((strip->flag & SEQ_RIGHTSEL) != 0) {
     return WM_CURSOR_RIGHT_HANDLE;
   }
   return WM_CURSOR_NSEW_SCROLL;
@@ -308,37 +307,34 @@ static int transform_seq_slide_strip_cursor_get(const Sequence *seq)
 
 static int transform_seq_slide_cursor_get(TransInfo *t)
 {
-  if ((U.sequencer_editor_flag & USER_SEQ_ED_SIMPLE_TWEAKING) == 0) {
-    return WM_CURSOR_NSEW_SCROLL;
-  }
-
   const Scene *scene = t->scene;
-  blender::VectorSet<Sequence *> strips = ED_sequencer_selected_strips_from_context(t->context);
+  VectorSet<Strip *> strips = vse::selected_strips_from_context(t->context);
 
   if (strips.size() == 1) {
     return transform_seq_slide_strip_cursor_get(strips[0]);
   }
   if (strips.size() == 2) {
-    Sequence *seq1 = strips[0];
-    Sequence *seq2 = strips[1];
+    Strip *strip1 = strips[0];
+    Strip *strip2 = strips[1];
 
-    if (SEQ_time_left_handle_frame_get(scene, seq1) > SEQ_time_left_handle_frame_get(scene, seq2))
+    if (seq::time_left_handle_frame_get(scene, strip1) >
+        seq::time_left_handle_frame_get(scene, strip2))
     {
-      SWAP(Sequence *, seq1, seq2);
+      SWAP(Strip *, strip1, strip2);
     }
 
-    if (seq1->machine != seq2->machine) {
+    if (strip1->channel != strip2->channel) {
       return WM_CURSOR_NSEW_SCROLL;
     }
 
-    if (SEQ_time_right_handle_frame_get(scene, seq1) !=
-        SEQ_time_left_handle_frame_get(scene, seq2))
+    if (seq::time_right_handle_frame_get(scene, strip1) !=
+        seq::time_left_handle_frame_get(scene, strip2))
     {
       return WM_CURSOR_NSEW_SCROLL;
     }
 
-    const int cursor1 = transform_seq_slide_strip_cursor_get(seq1);
-    const int cursor2 = transform_seq_slide_strip_cursor_get(seq2);
+    const int cursor1 = transform_seq_slide_strip_cursor_get(strip1);
+    const int cursor2 = transform_seq_slide_strip_cursor_get(strip2);
 
     if (cursor1 == WM_CURSOR_RIGHT_HANDLE && cursor2 == WM_CURSOR_LEFT_HANDLE) {
       return WM_CURSOR_BOTH_HANDLES;
@@ -381,8 +377,7 @@ void initMouseInputMode(TransInfo *t, MouseInput *mi, MouseInputMode mode)
       InputAngle_Data *data;
       mi->use_virtual_mval = false;
       mi->precision_factor = 1.0f / 30.0f;
-      data = static_cast<InputAngle_Data *>(
-          MEM_callocN(sizeof(InputAngle_Data), "angle accumulator"));
+      data = MEM_callocN<InputAngle_Data>("angle accumulator");
       data->mval_prev[0] = mi->imval[0];
       data->mval_prev[1] = mi->imval[1];
       mi->data = data;
@@ -427,6 +422,14 @@ void initMouseInputMode(TransInfo *t, MouseInput *mi, MouseInputMode mode)
       mi->apply = InputCustomRatioFlip;
       t->helpline = HLP_CARROW;
       break;
+    case INPUT_ERROR:
+      mi->apply = nullptr;
+      t->helpline = HLP_ERROR;
+      break;
+    case INPUT_ERROR_DASH:
+      mi->apply = nullptr;
+      t->helpline = HLP_ERROR_DASH;
+      break;
     case INPUT_NONE:
     default:
       mi->apply = nullptr;
@@ -467,6 +470,11 @@ void initMouseInputMode(TransInfo *t, MouseInput *mi, MouseInputMode mode)
         t->flag |= T_MODAL_CURSOR_SET;
         WM_cursor_modal_set(win, WM_CURSOR_NONE);
       }
+      break;
+    case HLP_ERROR:
+    case HLP_ERROR_DASH:
+      t->flag |= T_MODAL_CURSOR_SET;
+      WM_cursor_modal_set(win, WM_CURSOR_STOP);
       break;
     default:
       break;
@@ -536,12 +544,12 @@ void transform_input_update(TransInfo *t, const float fac)
 
   if (mi->use_virtual_mval) {
     /* Update accumulator. */
-    double mval_delta[2];
+    double2 mval_delta;
     sub_v2_v2v2_db(mval_delta, mi->virtual_mval.accum, mi->virtual_mval.prev);
     mval_delta[0] *= fac;
     mval_delta[1] *= fac;
     copy_v2_v2_db(mi->virtual_mval.accum, mi->virtual_mval.prev);
-    add_v2_v2_db(mi->virtual_mval.accum, mval_delta);
+    mi->virtual_mval.accum += mval_delta;
   }
 
   if (ELEM(mi->apply, InputAngle, InputAngleSpring)) {
@@ -575,3 +583,5 @@ void transform_input_virtual_mval_reset(TransInfo *t)
 }
 
 /** \} */
+
+}  // namespace blender::ed::transform

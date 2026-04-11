@@ -8,4 +8,6 @@
 
 #pragma once
 
-PyObject *BPY_app_opensubdiv_struct();
+#include <Python.h>
+
+[[nodiscard]] PyObject *BPY_app_opensubdiv_struct();

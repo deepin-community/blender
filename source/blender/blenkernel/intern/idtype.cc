@@ -9,12 +9,8 @@
 #include <array>
 #include <cstring>
 
-#include "MEM_guardedalloc.h"
-
 #include "BLI_ghash.h"
 #include "BLI_utildefines.h"
-
-#include "CLG_log.h"
 
 #include "BLT_translation.hh"
 
@@ -23,12 +19,11 @@
 #include "DNA_node_types.h"
 #include "DNA_scene_types.h"
 
-#include "BKE_main.hh"
 #include "BKE_node.hh"
 
 #include "BKE_idtype.hh"
 
-// static CLG_LogRef LOG = {"bke.idtype"};
+// static CLG_LogRef LOG = {"lib.idtype"};
 
 uint BKE_idtype_cache_key_hash(const void *key_v)
 {
@@ -72,7 +67,6 @@ static void id_type_init()
   INIT_TYPE(ID_LT);
   INIT_TYPE(ID_LA);
   INIT_TYPE(ID_CA);
-  INIT_TYPE(ID_IP);
   INIT_TYPE(ID_KE);
   INIT_TYPE(ID_WO);
   INIT_TYPE(ID_SCR);
@@ -135,6 +129,8 @@ const IDTypeInfo *BKE_idtype_get_info_from_idtype_index(const int idtype_index)
   if (idtype_index >= 0 && idtype_index < int(id_types.size())) {
     const IDTypeInfo *id_type = id_types[size_t(idtype_index)];
     if (id_type && id_type->name[0] != '\0') {
+      BLI_assert_msg(BKE_idtype_idcode_to_index(id_type->id_code) == idtype_index,
+                     "Critical inconsistency in ID type information");
       return id_type;
     }
   }
@@ -247,7 +243,6 @@ int BKE_idtype_idcode_to_index(const short idcode)
     CASE_IDINDEX(GR);
     CASE_IDINDEX(CV);
     CASE_IDINDEX(IM);
-    CASE_IDINDEX(IP);
     CASE_IDINDEX(KE);
     CASE_IDINDEX(LA);
     CASE_IDINDEX(LI);
@@ -306,7 +301,6 @@ int BKE_idtype_idfilter_to_index(const uint64_t id_filter)
     CASE_IDINDEX(GR);
     CASE_IDINDEX(CV);
     CASE_IDINDEX(IM);
-    CASE_IDINDEX(IP);
     CASE_IDINDEX(KE);
     CASE_IDINDEX(LA);
     CASE_IDINDEX(LI);

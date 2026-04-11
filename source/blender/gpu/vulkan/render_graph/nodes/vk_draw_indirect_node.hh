@@ -17,7 +17,7 @@ namespace blender::gpu::render_graph {
  * Information stored inside the render graph node. See `VKRenderGraphNode`.
  */
 struct VKDrawIndirectData {
-  VKPipelineData pipeline_data;
+  VKPipelineDataGraphics graphics;
   VKVertexBufferBindings vertex_buffers;
   VkBuffer indirect_buffer;
   VkDeviceSize offset;
@@ -44,10 +44,12 @@ class VKDrawIndirectNode : public VKNodeInfo<VKNodeType::DRAW_INDIRECT,
    * (`VK*Data`/`VK*CreateInfo`) types can be included in the same header file as the logic. The
    * actual node data (`VKRenderGraphNode` includes all header files.)
    */
-  template<typename Node> static void set_node_data(Node &node, const CreateInfo &create_info)
+  template<typename Node, typename Storage>
+  static void set_node_data(Node &node, Storage &storage, const CreateInfo &create_info)
   {
-    node.draw_indirect = create_info.node_data;
-    vk_pipeline_data_copy(node.draw_indirect.pipeline_data, create_info.node_data.pipeline_data);
+    node.storage_index = storage.draw_indirect.append_and_get_index(create_info.node_data);
+    vk_pipeline_data_copy(storage.draw_indirect[node.storage_index].graphics,
+                          create_info.node_data.graphics);
   }
 
   /**
@@ -72,8 +74,10 @@ class VKDrawIndirectNode : public VKNodeInfo<VKNodeType::DRAW_INDIRECT,
                       Data &data,
                       VKBoundPipelines &r_bound_pipelines) override
   {
+    vk_pipeline_dynamic_graphics_build_commands(
+        command_buffer, data.graphics.viewport, data.graphics.line_width, r_bound_pipelines);
     vk_pipeline_data_build_commands(command_buffer,
-                                    data.pipeline_data,
+                                    data.graphics.pipeline_data,
                                     r_bound_pipelines.graphics.pipeline,
                                     VK_PIPELINE_BIND_POINT_GRAPHICS,
                                     VK_SHADER_STAGE_ALL_GRAPHICS);
@@ -85,7 +89,7 @@ class VKDrawIndirectNode : public VKNodeInfo<VKNodeType::DRAW_INDIRECT,
 
   void free_data(Data &data)
   {
-    vk_pipeline_data_free(data.pipeline_data);
+    vk_pipeline_data_free(data.graphics);
   }
 };
 }  // namespace blender::gpu::render_graph

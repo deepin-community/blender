@@ -9,23 +9,23 @@
 #include <cstdlib>
 
 #include "BLI_math_vector.h"
-#include "BLI_string.h"
+#include "BLI_string_utf8.h"
 
 #include "BKE_unit.hh"
 
-#include "DNA_gpencil_legacy_types.h"
-
 #include "ED_screen.hh"
 
-#include "UI_interface.hh"
-
 #include "BLT_translation.hh"
+
+#include "UI_interface_types.hh"
 
 #include "transform.hh"
 #include "transform_convert.hh"
 #include "transform_snap.hh"
 
 #include "transform_mode.hh"
+
+namespace blender::ed::transform {
 
 /* -------------------------------------------------------------------- */
 /** \name Transform (GPencil Strokes Opacity)
@@ -49,28 +49,18 @@ static void applyGPOpacity(TransInfo *t)
   if (hasNumInput(&t->num)) {
     char c[NUM_STR_REP_LEN];
 
-    outputNumInput(&(t->num), c, &t->scene->unit);
-    SNPRINTF(str, IFACE_("Opacity: %s"), c);
+    outputNumInput(&(t->num), c, t->scene->unit);
+    SNPRINTF_UTF8(str, IFACE_("Opacity: %s"), c);
   }
   else {
-    SNPRINTF(str, IFACE_("Opacity: %3f"), ratio);
+    SNPRINTF_UTF8(str, IFACE_("Opacity: %3f"), ratio);
   }
 
   bool recalc = false;
   FOREACH_TRANS_DATA_CONTAINER (t, tc) {
     TransData *td = tc->data;
 
-    if (t->obedit_type == OB_GPENCIL_LEGACY) {
-      bGPdata *gpd = static_cast<bGPdata *>(td->ob->data);
-      const bool is_curve_edit = bool(GPENCIL_CURVE_EDIT_SESSIONS_ON(gpd));
-      /* Only recalculate data when in curve edit mode. */
-      if (is_curve_edit) {
-        recalc = true;
-      }
-    }
-    else if (t->obedit_type == OB_GREASE_PENCIL) {
-      recalc = true;
-    }
+    recalc = true;
 
     for (i = 0; i < tc->data_len; i++, td++) {
       if (td->flag & TD_SKIP) {
@@ -101,10 +91,10 @@ static void initGPOpacity(TransInfo *t, wmOperator * /*op*/)
 
   t->idx_max = 0;
   t->num.idx_max = 0;
-  t->snap[0] = 0.1f;
-  t->snap[1] = t->snap[0] * 0.1f;
+  t->increment[0] = 0.1f;
+  t->increment_precision = 0.1f;
 
-  copy_v3_fl(t->num.val_inc, t->snap[0]);
+  copy_v3_fl(t->num.val_inc, t->increment[0]);
   t->num.unit_sys = t->scene->unit.system;
   t->num.unit_type[0] = B_UNIT_NONE;
 
@@ -125,3 +115,5 @@ TransModeInfo TransMode_gpopacity = {
     /*snap_apply_fn*/ nullptr,
     /*draw_fn*/ nullptr,
 };
+
+}  // namespace blender::ed::transform

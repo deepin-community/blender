@@ -23,13 +23,13 @@
 #      undef NOMINMAX
 #    endif
 #  endif
+#else
+#  include "BLI_mutex.hh"
+#  include "BLI_set.hh"
 #endif
-
-#include <mutex>
 
 #include "BLI_hash.hh"
 #include "BLI_hash_tables.hh"
-#include "BLI_set.hh"
 
 namespace blender {
 
@@ -164,7 +164,7 @@ class ConcurrentMap {
   using UsedSet = Set<SetKey>;
 
   struct Accessor {
-    std::unique_lock<std::mutex> mutex;
+    std::unique_lock<Mutex> mutex;
     std::pair<Key, Value> *data = nullptr;
 
     std::pair<Key, Value> *operator->()
@@ -173,7 +173,7 @@ class ConcurrentMap {
     }
   };
 
-  std::mutex mutex_;
+  Mutex mutex_;
   UsedSet set_;
 
  public:

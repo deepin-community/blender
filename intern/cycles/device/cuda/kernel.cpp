@@ -32,10 +32,10 @@ void CUDADeviceKernels::load(CUDADevice *device)
       cuda_device_assert(
           device,
           cuOccupancyMaxPotentialBlockSize(
-              &kernel.min_blocks, &kernel.num_threads_per_block, kernel.function, NULL, 0, 0));
+              &kernel.min_blocks, &kernel.num_threads_per_block, kernel.function, nullptr, 0, 0));
     }
     else {
-      LOG(ERROR) << "Unable to load kernel " << function_name;
+      LOG_ERROR << "Unable to load kernel " << function_name;
     }
   }
 

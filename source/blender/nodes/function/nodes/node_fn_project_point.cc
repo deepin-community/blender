@@ -10,10 +10,12 @@ namespace blender::nodes::node_fn_project_point_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
   b.is_function_node();
   b.add_input<decl::Vector>("Vector").subtype(PROP_XYZ);
+  b.add_output<decl::Vector>("Vector").subtype(PROP_XYZ).align_with_previous();
   b.add_input<decl::Matrix>("Transform");
-  b.add_output<decl::Vector>("Vector").subtype(PROP_XYZ);
 }
 
 static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
@@ -27,10 +29,15 @@ static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-  fn_node_type_base(&ntype, FN_NODE_PROJECT_POINT, "Project Point", NODE_CLASS_CONVERTER);
+  fn_node_type_base(&ntype, "FunctionNodeProjectPoint", FN_NODE_PROJECT_POINT);
+  ntype.ui_name = "Project Point";
+  ntype.ui_description =
+      "Project a point using a matrix, using location, rotation, scale, and perspective divide";
+  ntype.enum_name_legacy = "PROJECT_POINT";
+  ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = node_declare;
   ntype.build_multi_function = node_build_multi_function;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

@@ -11,15 +11,13 @@
 #pragma once
 
 #include <array>
-#include <string>
 
-#include "BLI_array.hh"
-#include "BLI_bit_span.hh"
 #include "BLI_string_ref.hh"
-#include "BLI_vector.hh"
 
 #include "DNA_anim_types.h"
-#include "DNA_windowmanager_types.h"
+#include "DNA_userdef_types.h"
+
+#include "BKE_report.hh"
 
 #include "RNA_path.hh"
 #include "RNA_types.hh"
@@ -45,7 +43,7 @@ enum class SingleKeyingResult {
   SUCCESS = 0,
   /* TODO: remove `UNKNOWN_FAILURE` and replace all usages with proper, specific
    * cases. This is needed right now as a stop-gap while progressively moving
-   * the keyframing code over to propagate errors properly.*/
+   * the keyframing code over to propagate errors properly. */
   UNKNOWN_FAILURE,
   CANNOT_CREATE_FCURVE,
   FCURVE_NOT_KEYFRAMEABLE,
@@ -96,8 +94,8 @@ class CombinedKeyingResult {
  * For example, for object location/rotation/scale this returns the standard
  * "Object Transforms" channel group name.
  */
-const std::optional<StringRefNull> default_channel_group_for_path(
-    const PointerRNA *animated_struct, const StringRef prop_rna_path);
+std::optional<StringRefNull> default_channel_group_for_path(const PointerRNA *animated_struct,
+                                                            StringRef prop_rna_path);
 
 /* -------------------------------------------------------------------- */
 
@@ -114,8 +112,8 @@ bool key_insertion_may_create_fcurve(eInsertKeyFlags insert_key_flags);
 /** \name Key-Framing Management
  * \{ */
 
-/* Set the FCurve flag based on the property type of `prop`. */
-void update_autoflags_fcurve_direct(FCurve *fcu, PropertyRNA *prop);
+/** Ensure FCurve flags are correct for the property type it animates. */
+void update_autoflags_fcurve_direct(FCurve *fcu, PropertyType prop_type);
 
 /**
  * \brief Main key-frame insertion API.
@@ -207,6 +205,14 @@ int clear_keyframe(Main *bmain, ReportList *reports, ID *id, const RNAPath &rna_
 bool is_keying_flag(const Scene *scene, eKeying_Flag flag);
 
 /**
+ * Checks whether a keyframe exists for the given ID-block one the given frame.
+ *
+ * \param frame: The frame on which to check for a keyframe. This uses a threshold so the float
+ * doesn't need to match exactly.
+ */
+bool id_frame_has_keyframe(ID *id, float frame);
+
+/**
  * Get the settings for key-framing from the given scene.
  */
 eInsertKeyFlags get_keyframing_flags(Scene *scene);
@@ -239,7 +245,7 @@ bool autokeyframe_cfra_can_key(const Scene *scene, ID *id);
  *
  * \param rna_paths: Only inserts keys on those RNA paths.
  */
-void autokeyframe_object(bContext *C, Scene *scene, Object *ob, Span<RNAPath> rna_paths);
+void autokeyframe_object(bContext *C, const Scene *scene, Object *ob, Span<RNAPath> rna_paths);
 /**
  * Auto-keyframing feature - for objects
  *

@@ -11,10 +11,10 @@
 #include "BKE_grease_pencil.hh"
 
 #include "BKE_attribute_filter.hh"
-#include "BLI_generic_span.hh"
 #include "BLI_index_mask_fwd.hh"
 #include "BLI_math_matrix_types.hh"
 #include "BLI_set.hh"
+#include "BLI_task.hh"
 
 #include "ED_keyframes_edit.hh"
 #include "ED_select_utils.hh"
@@ -22,9 +22,12 @@
 #include "WM_api.hh"
 
 struct bContext;
+struct BrushColorJitterSettings;
+struct BrushGpencilSettings;
 struct Main;
 struct Object;
 struct KeyframeEditData;
+struct MDeformVert;
 struct wmKeyConfig;
 struct wmOperator;
 struct GPUOffScreen;
@@ -36,12 +39,13 @@ struct View3D;
 struct ViewContext;
 struct BVHTree;
 struct GreasePencilLineartModifierData;
+struct RV3DMatrixStore;
+
 namespace blender {
+class RandomNumberGenerator;
 namespace bke {
 enum class AttrDomain : int8_t;
 class CurvesGeometry;
-namespace crazyspace {
-}
 }  // namespace bke
 }  // namespace blender
 
@@ -57,7 +61,7 @@ enum {
 /**
  * Join selected objects. Called from #OBJECT_OT_join.
  */
-int ED_grease_pencil_join_objects_exec(bContext *C, wmOperator *op);
+wmOperatorStatus ED_grease_pencil_join_objects_exec(bContext *C, wmOperator *op);
 
 void ED_operatortypes_grease_pencil();
 void ED_operatortypes_grease_pencil_draw();
@@ -68,6 +72,7 @@ void ED_operatortypes_grease_pencil_edit();
 void ED_operatortypes_grease_pencil_join();
 void ED_operatortypes_grease_pencil_material();
 void ED_operatortypes_grease_pencil_modes();
+void ED_operatortypes_grease_pencil_pen();
 void ED_operatortypes_grease_pencil_primitives();
 void ED_operatortypes_grease_pencil_weight_paint();
 void ED_operatortypes_grease_pencil_vertex_paint();
@@ -80,10 +85,11 @@ void ED_keymap_grease_pencil(wmKeyConfig *keyconf);
 void ED_primitivetool_modal_keymap(wmKeyConfig *keyconf);
 void ED_filltool_modal_keymap(wmKeyConfig *keyconf);
 void ED_interpolatetool_modal_keymap(wmKeyConfig *keyconf);
+void ED_grease_pencil_pentool_modal_keymap(wmKeyConfig *keyconf);
 
 void GREASE_PENCIL_OT_stroke_trim(wmOperatorType *ot);
 
-void ED_undosys_type_grease_pencil(UndoType *undo_type);
+void ED_undosys_type_grease_pencil(UndoType *ut);
 
 /**
  * Get the selection mode for Grease Pencil selection operators: point, stroke, segment.
@@ -96,6 +102,11 @@ blender::bke::AttrDomain ED_grease_pencil_vertex_selection_domain_get(
     const ToolSettings *tool_settings);
 blender::bke::AttrDomain ED_grease_pencil_selection_domain_get(const ToolSettings *tool_settings,
                                                                const Object *object);
+/**
+ * True if any vertex mask selection is used.
+ */
+bool ED_grease_pencil_any_vertex_mask_selection(const ToolSettings *tool_settings);
+
 /**
  * True if segment selection is enabled.
  */
@@ -111,7 +122,7 @@ namespace blender::ed::greasepencil {
 
 enum class ReprojectMode : int8_t { Front, Side, Top, View, Cursor, Surface, Keep };
 
-enum class DrawingPlacementDepth : int8_t { ObjectOrigin, Cursor, Surface, NearestStroke };
+enum class DrawingPlacementDepth : int8_t { ObjectOrigin, Cursor, Surface, Stroke };
 
 enum class DrawingPlacementPlane : int8_t { View, Front, Side, Top, Cursor };
 
@@ -127,7 +138,8 @@ class DrawingPlacement {
 
   float3 placement_loc_;
   float3 placement_normal_;
-  float4 placement_plane_;
+  /* Optional explicit placement plane. */
+  std::optional<float4> placement_plane_;
 
   float4x4 layer_space_to_world_space_;
   float4x4 world_space_to_layer_space_;
@@ -157,22 +169,32 @@ class DrawingPlacement {
   DrawingPlacement &operator=(DrawingPlacement &&other);
   ~DrawingPlacement();
 
- public:
   bool use_project_to_surface() const;
-  bool use_project_to_nearest_stroke() const;
+  bool use_project_to_stroke() const;
 
   void cache_viewport_depths(Depsgraph *depsgraph, ARegion *region, View3D *view3d);
-  void set_origin_to_nearest_stroke(float2 co);
+
+  /**
+   * Attempt to project from the depth buffer.
+   * \return Un-projected position if a valid depth is found at the screen position.
+   */
+  std::optional<float3> project_depth(float2 co) const;
 
   /**
    * Projects a screen space coordinate to the local drawing space.
    */
+  float3 project(float2 co, bool &clipped) const;
   float3 project(float2 co) const;
   void project(Span<float2> src, MutableSpan<float3> dst) const;
   /**
    * Projects a screen space coordinate to the local drawing space including camera shift.
    */
   float3 project_with_shift(float2 co) const;
+
+  /**
+   * Convert a screen space coordinate with depth to the local drawing space.
+   */
+  float3 place(float2 co, float depth) const;
 
   /**
    * Projects a 3D position (in local space) to the drawing plane.
@@ -182,8 +204,12 @@ class DrawingPlacement {
 
   float4x4 to_world_space() const;
 
+  /** Return depth buffer if possible. */
+  std::optional<float> get_depth(float2 co) const;
+
  private:
-  float3 project_depth(float2 co) const;
+  /** Return depth buffer projection if possible or "View" placement fallback. */
+  float3 try_project_depth(float2 co) const;
 };
 
 void set_selected_frames_type(bke::greasepencil::Layer &layer,
@@ -300,7 +326,9 @@ bool grease_pencil_context_poll(bContext *C);
 bool active_grease_pencil_poll(bContext *C);
 bool active_grease_pencil_material_poll(bContext *C);
 bool editable_grease_pencil_poll(bContext *C);
+bool editable_grease_pencil_with_region_view3d_poll(bContext *C);
 bool active_grease_pencil_layer_poll(bContext *C);
+bool active_grease_pencil_layer_group_poll(bContext *C);
 bool editable_grease_pencil_point_selection_poll(bContext *C);
 bool grease_pencil_selection_poll(bContext *C);
 bool grease_pencil_painting_poll(bContext *C);
@@ -316,12 +344,12 @@ float radius_from_input_sample(const RegionView3D *rv3d,
                                const ARegion *region,
                                const Brush *brush,
                                float pressure,
-                               float3 location,
-                               float4x4 to_world,
+                               const float3 &location,
+                               const float4x4 &to_world,
                                const BrushGpencilSettings *settings);
-int grease_pencil_draw_operator_invoke(bContext *C,
-                                       wmOperator *op,
-                                       bool use_duplicate_previous_key);
+wmOperatorStatus grease_pencil_draw_operator_invoke(bContext *C,
+                                                    wmOperator *op,
+                                                    bool use_duplicate_previous_key);
 float4x2 calculate_texture_space(const Scene *scene,
                                  const ARegion *region,
                                  const float2 &mouse,
@@ -385,14 +413,27 @@ IndexMask retrieve_visible_points(Object &object,
                                   const bke::greasepencil::Drawing &drawing,
                                   IndexMaskMemory &memory);
 
+IndexMask retrieve_visible_bezier_strokes(Object &object,
+                                          const bke::greasepencil::Drawing &drawing,
+                                          IndexMaskMemory &memory);
+IndexMask retrieve_visible_bezier_points(Object &object,
+                                         const bke::greasepencil::Drawing &drawing,
+                                         IndexMaskMemory &memory);
+
+IndexMask retrieve_visible_bezier_handle_strokes(Object &object,
+                                                 const bke::greasepencil::Drawing &drawing,
+                                                 int handle_display,
+                                                 IndexMaskMemory &memory);
 IndexMask retrieve_visible_bezier_handle_points(Object &object,
                                                 const bke::greasepencil::Drawing &drawing,
                                                 int layer_index,
+                                                int handle_display,
                                                 IndexMaskMemory &memory);
 IndexMask retrieve_visible_bezier_handle_elements(Object &object,
                                                   const bke::greasepencil::Drawing &drawing,
                                                   int layer_index,
                                                   bke::AttrDomain selection_domain,
+                                                  int handle_display,
                                                   IndexMaskMemory &memory);
 
 IndexMask retrieve_editable_and_selected_strokes(Object &grease_pencil_object,
@@ -412,6 +453,12 @@ IndexMask retrieve_editable_and_selected_elements(Object &object,
                                                   int layer_index,
                                                   bke::AttrDomain selection_domain,
                                                   IndexMaskMemory &memory);
+IndexMask retrieve_editable_and_all_selected_points(Object &object,
+                                                    const bke::greasepencil::Drawing &drawing,
+                                                    int layer_index,
+                                                    int handle_display,
+                                                    IndexMaskMemory &memory);
+bool has_editable_layer(const GreasePencil &grease_pencil);
 
 void create_blank(Main &bmain, Object &object, int frame_number);
 void create_stroke(Main &bmain, Object &object, const float4x4 &matrix, int frame_number);
@@ -545,19 +592,15 @@ void add_armature_envelope_weights(Scene &scene, Object &object, const Object &o
 void add_armature_automatic_weights(Scene &scene, Object &object, const Object &ob_armature);
 
 void clipboard_free();
-const bke::CurvesGeometry &clipboard_curves();
 /**
- * Paste curves from the clipboard into the drawing.
- * \param paste_back: Render behind existing curves by inserting curves at the front.
- * \param keep_world_transform: Keep the world transform of clipboard strokes unchanged.
- * \return Index range of the new curves in the drawing after pasting.
+ * Paste all the strokes in the clipboard layers into \a drawing.
  */
-IndexRange clipboard_paste_strokes(Main &bmain,
-                                   Object &object,
-                                   bke::greasepencil::Drawing &drawing,
-                                   const float4x4 &transform,
-                                   bool keep_world_transform,
-                                   bool paste_back);
+IndexRange paste_all_strokes_from_clipboard(Main &bmain,
+                                            Object &object,
+                                            const float4x4 &object_to_paste_layer,
+                                            bool keep_world_transform,
+                                            bool paste_back,
+                                            bke::greasepencil::Drawing &drawing);
 
 /**
  * Method used by the Fill tool to fit the render buffer to strokes.
@@ -615,8 +658,9 @@ namespace image_render {
 
 /** Region size to restore after rendering. */
 struct RegionViewData {
-  int2 region_winsize;
-  rcti region_winrct;
+  int2 winsize;
+  rcti winrct;
+  RV3DMatrixStore *rv3d_store;
 };
 
 /**
@@ -900,4 +944,101 @@ void set_lineart_modifier_limits(GreasePencilLineartModifierData &lmd,
 GreasePencilLineartModifierData *get_first_lineart_modifier(const Object &ob);
 
 GreasePencil *from_context(bContext &C);
+
+/* Make sure selection domain is updated to match the current selection mode. */
+bool ensure_selection_domain(ToolSettings *ts, Object *object);
+
+/**
+ * Creates a new curve with one point at the beginning or end.
+ * \note Does not initialize the new curve or points.
+ */
+void add_single_curve(bke::CurvesGeometry &curves, bool at_end);
+
+/**
+ * Resize the first or last curve to `new_points_num` number of points.
+ * \note Does not initialize the new points.
+ */
+void resize_single_curve(bke::CurvesGeometry &curves, bool at_end, int new_points_num);
+
+/**
+ * Calculate a randomized radius value for a point.
+ * \param stroke_factor: Random seed value in [-1, 1] per stroke.
+ * \param distance: Screen-space length in pixels along the curve.
+ * \param radius: Base radius to be randomized.
+ * \param pressure: Pressure factor.
+ */
+float randomize_radius(const BrushGpencilSettings &settings,
+                       float stroke_factor,
+                       float distance,
+                       float radius,
+                       float pressure);
+/**
+ * Calculate a randomized opacity value for a point.
+ * \param stroke_factor: Random seed value in [-1, 1] per stroke.
+ * \param distance: Screen-space length in pixels along the curve.
+ * \param opacity: Base opacity to be randomized.
+ * \param pressure: Pressure factor.
+ */
+float randomize_opacity(const BrushGpencilSettings &settings,
+                        float stroke_factor,
+                        float distance,
+                        float opacity,
+                        float pressure);
+/**
+ * Calculate a randomized rotation for a point.
+ * \param stroke_factor: Random seed value in [-1, 1] per stroke.
+ * \param distance: Screen-space length in pixels along the curve.
+ * \param pressure: Pressure factor.
+ */
+float randomize_rotation(const BrushGpencilSettings &settings,
+                         float stroke_factor,
+                         float distance,
+                         float pressure);
+/**
+ * Calculate a randomized rotation for a point.
+ * \param rng: Random number generator instance.
+ * \param stroke_factor: Random seed value in [-1, 1] per stroke.
+ * \param pressure: Pressure factor.
+ */
+float randomize_rotation(const BrushGpencilSettings &settings,
+                         blender::RandomNumberGenerator &rng,
+                         float stroke_factor,
+                         float pressure);
+/**
+ * Calculate a randomized opacity value for a point.
+ * \param stroke_hue_factor: Random seed value in [-1, 1] per stroke for color hue.
+ * \param stroke_saturation_factor: Random seed value in [-1, 1] per stroke for color saturation.
+ * \param stroke_value_factor: Random seed value in [-1, 1] per stroke for color value.
+ * \param distance: Screen-space length in pixels along the curve.
+ * \param color: Base color to be randomized.
+ * \param pressure: Pressure factor.
+ */
+ColorGeometry4f randomize_color(const BrushGpencilSettings &settings,
+                                const std::optional<BrushColorJitterSettings> &jitter,
+                                float stroke_hue_factor,
+                                float stroke_saturation_factor,
+                                float stroke_value_factor,
+                                float distance,
+                                ColorGeometry4f color,
+                                float pressure);
+
+/**
+ * Applies the \a eval_grease_pencil onto the \a orig_grease_pencil at the \a eval_frame.
+ * The \a orig_grease_pencil is modified in-place.
+ * The mapping between the layers is created based on the layer name.
+ * \param eval_grease_pencil: The source Grease Pencil data.
+ * \param eval_frame: The frame at which to apply the data.
+ * \param orig_layers: Selection of original layers to modify.
+ * \param orig_grease_pencil: The destination Grease Pencil data.
+ */
+void apply_eval_grease_pencil_data(const GreasePencil &eval_grease_pencil,
+                                   int eval_frame,
+                                   const IndexMask &orig_layers,
+                                   GreasePencil &orig_grease_pencil);
+
+/**
+ * Remove all the strokes that are marked as fill guides.
+ */
+bool remove_fill_guides(bke::CurvesGeometry &curves);
+
 }  // namespace blender::ed::greasepencil

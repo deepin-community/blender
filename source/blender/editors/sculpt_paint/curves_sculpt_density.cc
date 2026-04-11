@@ -4,7 +4,6 @@
 
 #include <numeric>
 
-#include "BKE_attribute_math.hh"
 #include "BKE_brush.hh"
 #include "BKE_bvhutils.hh"
 #include "BKE_context.hh"
@@ -15,7 +14,7 @@
 #include "BKE_modifier.hh"
 #include "BKE_object.hh"
 #include "BKE_paint.hh"
-#include "BKE_report.hh"
+#include "BLI_bounds.hh"
 
 #include "ED_screen.hh"
 #include "ED_view3d.hh"
@@ -81,9 +80,9 @@ struct DensityAddOperationExecutor {
   Mesh *surface_eval_ = nullptr;
   Span<int3> surface_corner_tris_eval_;
   VArraySpan<float2> surface_uv_map_eval_;
-  BVHTreeFromMesh surface_bvh_eval_;
+  bke::BVHTreeFromMesh surface_bvh_eval_;
 
-  const CurvesSculpt *curves_sculpt_ = nullptr;
+  CurvesSculpt *curves_sculpt_ = nullptr;
   const Brush *brush_ = nullptr;
   const BrushCurvesSculptSettings *brush_settings_ = nullptr;
 
@@ -120,7 +119,7 @@ struct DensityAddOperationExecutor {
       return;
     }
 
-    surface_ob_eval_ = DEG_get_evaluated_object(ctx_.depsgraph, surface_ob_orig_);
+    surface_ob_eval_ = DEG_get_evaluated(ctx_.depsgraph, surface_ob_orig_);
     if (surface_ob_eval_ == nullptr) {
       return;
     }
@@ -130,8 +129,7 @@ struct DensityAddOperationExecutor {
       return;
     }
 
-    BKE_bvhtree_from_mesh_get(&surface_bvh_eval_, surface_eval_, BVHTREE_FROM_CORNER_TRIS, 2);
-    BLI_SCOPED_DEFER([&]() { free_bvhtree_from_mesh(&surface_bvh_eval_); });
+    surface_bvh_eval_ = surface_eval_->bvh_corner_tris();
     surface_corner_tris_eval_ = surface_eval_->corner_tris();
     /* Find UV map. */
     VArraySpan<float2> surface_uv_map;
@@ -155,8 +153,8 @@ struct DensityAddOperationExecutor {
     curves_sculpt_ = ctx_.scene->toolsettings->curves_sculpt;
     brush_ = BKE_paint_brush_for_read(&curves_sculpt_->paint);
     brush_settings_ = brush_->curves_sculpt_settings;
-    brush_strength_ = brush_strength_get(*ctx_.scene, *brush_, stroke_extension);
-    brush_radius_re_ = brush_radius_get(*ctx_.scene, *brush_, stroke_extension);
+    brush_strength_ = brush_strength_get(curves_sculpt_->paint, *brush_, stroke_extension);
+    brush_radius_re_ = brush_radius_get(curves_sculpt_->paint, *brush_, stroke_extension);
     brush_pos_re_ = stroke_extension.mouse_position;
 
     const eBrushFalloffShape falloff_shape = eBrushFalloffShape(brush_->falloff_shape);
@@ -175,9 +173,7 @@ struct DensityAddOperationExecutor {
     else {
       BLI_assert_unreachable();
     }
-    for (float3 &pos : new_positions_cu) {
-      pos = math::transform_point(transforms_.surface_to_curves, pos);
-    }
+    math::transform_points(transforms_.surface_to_curves, new_positions_cu);
 
     if (stroke_extension.is_first) {
       this->prepare_curve_roots_kdtrees();
@@ -287,6 +283,15 @@ struct DensityAddOperationExecutor {
                                                            add_outputs.new_points_range :
                                                            add_outputs.new_curves_range));
       selection.finish();
+    }
+    if (U.uiflag & USER_ORBIT_SELECTION) {
+      if (const std::optional<Bounds<float3>> center_cu = bounds::min_max(
+              curves_orig_->positions().slice(add_outputs.new_points_range)))
+      {
+        remember_stroke_position(
+            *curves_sculpt_,
+            math::transform_point(transforms_.curves_to_world, center_cu->center()));
+      }
     }
 
     if (add_outputs.uv_error) {
@@ -507,7 +512,7 @@ struct DensitySubtractOperationExecutor {
 
   Object *surface_ob_eval_ = nullptr;
   Mesh *surface_eval_ = nullptr;
-  BVHTreeFromMesh surface_bvh_eval_;
+  bke::BVHTreeFromMesh surface_bvh_eval_;
 
   const CurvesSculpt *curves_sculpt_ = nullptr;
   const Brush *brush_ = nullptr;
@@ -534,7 +539,7 @@ struct DensitySubtractOperationExecutor {
 
     curves_id_ = static_cast<Curves *>(object_->data);
     curves_ = &curves_id_->geometry.wrap();
-    if (curves_->curves_num() == 0) {
+    if (curves_->is_empty()) {
       return;
     }
 
@@ -544,20 +549,19 @@ struct DensitySubtractOperationExecutor {
     }
     surface_orig_ = static_cast<Mesh *>(surface_ob_orig_->data);
 
-    surface_ob_eval_ = DEG_get_evaluated_object(ctx_.depsgraph, surface_ob_orig_);
+    surface_ob_eval_ = DEG_get_evaluated(ctx_.depsgraph, surface_ob_orig_);
     if (surface_ob_eval_ == nullptr) {
       return;
     }
     surface_eval_ = BKE_object_get_evaluated_mesh(surface_ob_eval_);
 
-    BKE_bvhtree_from_mesh_get(&surface_bvh_eval_, surface_eval_, BVHTREE_FROM_CORNER_TRIS, 2);
-    BLI_SCOPED_DEFER([&]() { free_bvhtree_from_mesh(&surface_bvh_eval_); });
+    surface_bvh_eval_ = surface_eval_->bvh_corner_tris();
 
     curves_sculpt_ = ctx_.scene->toolsettings->curves_sculpt;
     brush_ = BKE_paint_brush_for_read(&curves_sculpt_->paint);
-    brush_radius_base_re_ = BKE_brush_size_get(ctx_.scene, brush_);
+    brush_radius_base_re_ = BKE_brush_radius_get(&curves_sculpt_->paint, brush_);
     brush_radius_factor_ = brush_radius_factor(*brush_, stroke_extension);
-    brush_strength_ = brush_strength_get(*ctx_.scene, *brush_, stroke_extension);
+    brush_strength_ = brush_strength_get(curves_sculpt_->paint, *brush_, stroke_extension);
     brush_pos_re_ = stroke_extension.mouse_position;
 
     minimum_distance_ = brush_->curves_sculpt_settings->minimum_distance;
@@ -796,6 +800,7 @@ static bool use_add_density_mode(const BrushStrokeMode brush_mode,
                                  const StrokeExtension &stroke_start)
 {
   const Scene &scene = *CTX_data_scene(&C);
+  const Paint &paint = scene.toolsettings->curves_sculpt->paint;
   const Brush &brush = *BKE_paint_brush_for_read(&scene.toolsettings->curves_sculpt->paint);
   const Depsgraph &depsgraph = *CTX_data_depsgraph_on_load(&C);
   const ARegion &region = *CTX_wm_region(&C);
@@ -818,7 +823,7 @@ static bool use_add_density_mode(const BrushStrokeMode brush_mode,
   if (surface_ob_orig == nullptr) {
     return true;
   }
-  Object *surface_ob_eval = DEG_get_evaluated_object(&depsgraph, surface_ob_orig);
+  Object *surface_ob_eval = DEG_get_evaluated(&depsgraph, surface_ob_orig);
   if (surface_ob_eval == nullptr) {
     return true;
   }
@@ -832,13 +837,11 @@ static bool use_add_density_mode(const BrushStrokeMode brush_mode,
   }
 
   const CurvesSurfaceTransforms transforms(curves_ob_orig, curves_id_orig.surface);
-  BVHTreeFromMesh surface_bvh_eval;
-  BKE_bvhtree_from_mesh_get(&surface_bvh_eval, surface_mesh_eval, BVHTREE_FROM_CORNER_TRIS, 2);
-  BLI_SCOPED_DEFER([&]() { free_bvhtree_from_mesh(&surface_bvh_eval); });
+  bke::BVHTreeFromMesh surface_bvh_eval = surface_mesh_eval->bvh_corner_tris();
 
   const float2 brush_pos_re = stroke_start.mouse_position;
   /* Reduce radius so that only an inner circle is used to determine the existing density. */
-  const float brush_radius_re = BKE_brush_size_get(&scene, &brush) * 0.5f;
+  const float brush_radius_re = BKE_brush_radius_get(&paint, &brush) * 0.5f;
 
   /* Find the surface point under the brush. */
   const std::optional<CurvesBrush3D> brush_3d = sample_curves_surface_3d_brush(

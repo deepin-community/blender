@@ -6,7 +6,6 @@
  * \ingroup edsculpt
  */
 
-#include "BLI_array_utils.hh"
 #include "BLI_enumerable_thread_specific.hh"
 
 #include "BKE_context.hh"
@@ -151,9 +150,9 @@ static void gesture_apply_for_symmetry_pass(bContext &C, gesture::GestureData &g
       switch (pbvh.type()) {
         case bke::pbvh::Type::Mesh: {
           Mesh &mesh = *static_cast<Mesh *>(object.data);
-          const MeshAttributeData attribute_data(mesh.attributes());
           MutableSpan<bke::pbvh::MeshNode> nodes = pbvh.nodes<bke::pbvh::MeshNode>();
           const PositionDeformData position_data(depsgraph, object);
+          const MeshAttributeData attribute_data(mesh);
           const Span<float3> vert_normals = bke::pbvh::vert_normals_eval(depsgraph, object);
           undo::push_nodes(depsgraph, object, node_mask, undo::Type::Position);
           node_mask.foreach_index(GrainSize(1), [&](const int i) {
@@ -201,7 +200,7 @@ static void gesture_apply_for_symmetry_pass(bContext &C, gesture::GestureData &g
       break;
   }
   pbvh.tag_positions_changed(node_mask);
-  bke::pbvh::flush_bounds_to_parents(pbvh);
+  pbvh.flush_bounds_to_parents();
 }
 
 static void gesture_end(bContext &C, gesture::GestureData &gesture_data)
@@ -214,7 +213,7 @@ static void gesture_end(bContext &C, gesture::GestureData &gesture_data)
 static void init_operation(gesture::GestureData &gesture_data, wmOperator & /*op*/)
 {
   gesture_data.operation = reinterpret_cast<gesture::Operation *>(
-      MEM_cnew<ProjectOperation>(__func__));
+      MEM_callocN<ProjectOperation>(__func__));
 
   ProjectOperation *project_operation = (ProjectOperation *)gesture_data.operation;
 
@@ -223,7 +222,7 @@ static void init_operation(gesture::GestureData &gesture_data, wmOperator & /*op
   project_operation->operation.end = gesture_end;
 }
 
-static int gesture_line_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus gesture_line_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   const View3D *v3d = CTX_wm_view3d(C);
   const Base *base = CTX_data_active_base(C);
@@ -234,7 +233,7 @@ static int gesture_line_invoke(bContext *C, wmOperator *op, const wmEvent *event
   return WM_gesture_straightline_active_side_invoke(C, op, event);
 }
 
-static int gesture_line_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus gesture_line_exec(bContext *C, wmOperator *op)
 {
   std::unique_ptr<gesture::GestureData> gesture_data = gesture::init_from_line(C, op);
   if (!gesture_data) {

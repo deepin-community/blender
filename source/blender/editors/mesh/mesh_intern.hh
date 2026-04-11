@@ -43,8 +43,8 @@ struct ViewLayer;
 bool EDBM_op_callf(BMEditMesh *em, wmOperator *op, const char *fmt, ...);
 bool EDBM_op_call_and_selectf(BMEditMesh *em,
                               wmOperator *op,
-                              const char *select_slot,
-                              bool select_replace,
+                              const char *select_slot_out,
+                              bool select_extend,
                               const char *fmt,
                               ...);
 /**
@@ -207,6 +207,7 @@ void MESH_OT_shortest_path_pick(wmOperatorType *ot);
 void MESH_OT_select_linked(wmOperatorType *ot);
 void MESH_OT_select_linked_pick(wmOperatorType *ot);
 void MESH_OT_select_face_by_sides(wmOperatorType *ot);
+void MESH_OT_select_by_pole_count(wmOperatorType *ot);
 void MESH_OT_select_loose(wmOperatorType *ot);
 void MESH_OT_select_mirror(wmOperatorType *ot);
 void MESH_OT_select_more(wmOperatorType *ot);
@@ -299,9 +300,9 @@ void MESH_OT_flip_quad_tessellation(wmOperatorType *ot);
 
 /* *** editmesh_mask_extract.cc *** */
 
-void MESH_OT_paint_mask_extract(wmOperatorType *ot);
-void MESH_OT_face_set_extract(wmOperatorType *ot);
-void MESH_OT_paint_mask_slice(wmOperatorType *ot);
+void SCULPT_OT_paint_mask_extract(wmOperatorType *ot);
+void SCULPT_OT_face_set_extract(wmOperatorType *ot);
+void SCULPT_OT_paint_mask_slice(wmOperatorType *ot);
 
 /** Called in `transform_ops.cc`, on each regeneration of key-maps. */
 wmKeyMap *point_normals_modal_keymap(wmKeyConfig *keyconf);
@@ -320,3 +321,4 @@ void MESH_OT_customdata_skin_add(wmOperatorType *ot);
 void MESH_OT_customdata_skin_clear(wmOperatorType *ot);
 void MESH_OT_customdata_custom_splitnormals_add(wmOperatorType *ot);
 void MESH_OT_customdata_custom_splitnormals_clear(wmOperatorType *ot);
+void MESH_OT_reorder_vertices_spatial(wmOperatorType *ot);

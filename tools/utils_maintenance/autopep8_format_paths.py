@@ -15,17 +15,15 @@ Otherwise you may call this script directly, for example:
    ./tools/utils_maintenance/autopep8_format_paths.py --changed-only tests/python
 """
 
+__all__ = (
+    "main",
+)
+
 import os
 import sys
 
 import subprocess
 import argparse
-
-from typing import (
-    List,
-    Tuple,
-    Optional,
-)
 
 VERSION_MIN = (2, 3, 1)
 VERSION_MAX_RECOMMENDED = (2, 3, 1)
@@ -48,13 +46,13 @@ extensions = (
 )
 
 ignore_files = {
-    "scripts/modules/rna_manual_reference.py",  # Large generated file, don't format.
+    "scripts/modules/_rna_manual_reference.py",  # Large generated file, don't format.
     "tools/svn_rev_map/rev_to_sha1.py",
     "tools/svn_rev_map/sha1_to_rev.py",
 }
 
 
-def compute_paths(paths: List[str], use_default_paths: bool) -> List[str]:
+def compute_paths(paths: list[str], use_default_paths: bool) -> list[str]:
     # Optionally pass in files to operate on.
     if use_default_paths:
         paths = [
@@ -78,31 +76,31 @@ def compute_paths(paths: List[str], use_default_paths: bool) -> List[str]:
     return paths
 
 
-def source_files_from_git(paths: List[str], changed_only: bool) -> List[str]:
+def source_files_from_git(paths: list[str], changed_only: bool) -> list[str]:
     if changed_only:
         cmd = ("git", "diff", "HEAD", "--name-only", "-z", "--", *paths)
     else:
         cmd = ("git", "ls-tree", "-r", "HEAD", *paths, "--name-only", "-z")
     files = subprocess.check_output(cmd).split(b'\0')
-    return [f.decode('ascii') for f in files]
+    return [f.decode('utf-8') for f in files]
 
 
-def autopep8_parse_version(version: str) -> Tuple[int, int, int]:
+def autopep8_parse_version(version: str) -> tuple[int, int, int]:
     # Ensure exactly 3 numbers.
     major, minor, patch = (tuple(int(n) for n in version.split("-")[0].split(".")) + (0, 0, 0))[0:3]
     return major, minor, patch
 
 
-def version_str_from_tuple(version: Tuple[int, ...]) -> str:
+def version_str_from_tuple(version: tuple[int, ...]) -> str:
     return ".".join(str(x) for x in version)
 
 
 def autopep8_ensure_version_from_command(
         autopep8_format_cmd_argument: str,
-) -> Optional[Tuple[str, Tuple[int, int, int]]]:
+) -> tuple[str, tuple[int, int, int]] | None:
 
     # The version to parse.
-    version_str: Optional[str] = None
+    version_str: str | None = None
 
     global AUTOPEP8_FORMAT_CMD
     autopep8_format_cmd = None
@@ -141,10 +139,10 @@ def autopep8_ensure_version_from_command(
     return None
 
 
-def autopep8_ensure_version_from_module() -> Optional[Tuple[str, Tuple[int, int, int]]]:
+def autopep8_ensure_version_from_module() -> tuple[str, tuple[int, int, int]] | None:
 
     # The version to parse.
-    version_str: Optional[str] = None
+    version_str: str | None = None
 
     # Extract the version from the module.
     try:
@@ -163,7 +161,7 @@ def autopep8_ensure_version_from_module() -> Optional[Tuple[str, Tuple[int, int,
     return None
 
 
-def autopep8_format(files: List[str]) -> bytes:
+def autopep8_format(files: list[str]) -> bytes:
     cmd = [
         AUTOPEP8_FORMAT_CMD,
         *AUTOPEP8_FORMAT_DEFAULT_ARGS,
@@ -177,7 +175,7 @@ def autopep8_format(files: List[str]) -> bytes:
     return subprocess.check_output(cmd, stderr=subprocess.STDOUT)
 
 
-def autopep8_format_no_subprocess(files: List[str]) -> None:
+def autopep8_format_no_subprocess(files: list[str]) -> None:
     cmd = [
         *AUTOPEP8_FORMAT_DEFAULT_ARGS,
         *files

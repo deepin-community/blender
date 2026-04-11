@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 __all__ = (
+    "connect_sockets",
+    "find_base_socket_type",
     "find_node_input",
 )
 
@@ -22,7 +24,7 @@ def find_base_socket_type(socket):
     if socket.type == 'INT':
         return 'NodeSocketInt'
     if socket.type == 'BOOLEAN':
-        return 'NodeSocketBoolean'
+        return 'NodeSocketBool'
     if socket.type == 'VECTOR':
         return 'NodeSocketVector'
     if socket.type == 'ROTATION':

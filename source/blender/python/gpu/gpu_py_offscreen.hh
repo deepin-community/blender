@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <Python.h>
+
 #include "BLI_compiler_attrs.h"
 
 struct GPUOffScreen;
@@ -23,4 +25,4 @@ struct BPyGPUOffScreen {
   GPUViewport *viewport;
 };
 
-PyObject *BPyGPUOffScreen_CreatePyObject(GPUOffScreen *ofs) ATTR_NONNULL(1);
+[[nodiscard]] PyObject *BPyGPUOffScreen_CreatePyObject(GPUOffScreen *ofs) ATTR_NONNULL(1);

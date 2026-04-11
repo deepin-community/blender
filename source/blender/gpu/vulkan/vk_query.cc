@@ -9,7 +9,6 @@
 #include "vk_query.hh"
 #include "vk_backend.hh"
 #include "vk_context.hh"
-#include "vk_memory.hh"
 
 #include "GPU_debug.hh"
 
@@ -19,11 +18,10 @@ VKQueryPool::~VKQueryPool()
 {
   VKBackend &backend = VKBackend::get();
   const VKDevice &device = backend.device;
-  VK_ALLOCATION_CALLBACKS;
 
   while (!vk_query_pools_.is_empty()) {
     VkQueryPool vk_query_pool = vk_query_pools_.pop_last();
-    vkDestroyQueryPool(device.vk_handle(), vk_query_pool, vk_allocation_callbacks);
+    vkDestroyQueryPool(device.vk_handle(), vk_query_pool, nullptr);
   }
 }
 
@@ -49,7 +47,6 @@ void VKQueryPool::begin_query()
 
   if (pool_index == vk_query_pools_.size()) {
     BLI_assert(is_new_pool);
-    VK_ALLOCATION_CALLBACKS;
 
     VkQueryPoolCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
@@ -57,7 +54,7 @@ void VKQueryPool::begin_query()
     create_info.queryCount = query_chunk_len_;
 
     VkQueryPool vk_query_pool = VK_NULL_HANDLE;
-    vkCreateQueryPool(device.vk_handle(), &create_info, vk_allocation_callbacks, &vk_query_pool);
+    vkCreateQueryPool(device.vk_handle(), &create_info, nullptr, &vk_query_pool);
     vk_query_pools_.append(vk_query_pool);
   }
   BLI_assert(pool_index < vk_query_pools_.size());
@@ -70,13 +67,13 @@ void VKQueryPool::begin_query()
     reset_query_pool.vk_query_pool = vk_query_pool;
     reset_query_pool.first_query = 0;
     reset_query_pool.query_count = query_chunk_len_;
-    context.render_graph.add_node(reset_query_pool);
+    context.render_graph().add_node(reset_query_pool);
   }
 
   render_graph::VKBeginQueryNode::Data begin_query = {};
   begin_query.vk_query_pool = vk_query_pool;
   begin_query.query_index = query_index_in_pool();
-  context.render_graph.add_node(begin_query);
+  context.render_graph().add_node(begin_query);
 }
 
 void VKQueryPool::end_query()
@@ -85,7 +82,7 @@ void VKQueryPool::end_query()
   render_graph::VKEndQueryNode::Data end_query = {};
   end_query.vk_query_pool = vk_query_pools_.last();
   end_query.query_index = query_index_in_pool();
-  context.render_graph.add_node(end_query);
+  context.render_graph().add_node(end_query);
   queries_issued_ += 1;
 }
 
@@ -95,8 +92,9 @@ void VKQueryPool::get_occlusion_result(MutableSpan<uint32_t> r_values)
   /* During selection the frame buffer is still rendering. It needs to finish the render scope to
    * ensure the END_RENDERING node */
   context.rendering_end();
-  context.descriptor_set_get().upload_descriptor_sets();
-  context.render_graph.submit();
+  context.flush_render_graph(RenderGraphFlushFlags::SUBMIT |
+                             RenderGraphFlushFlags::WAIT_FOR_COMPLETION |
+                             RenderGraphFlushFlags::RENEW_RENDER_GRAPH);
 
   int queries_left = queries_issued_;
   int pool_index = 0;

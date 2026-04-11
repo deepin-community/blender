@@ -7,7 +7,6 @@
 
 #include "BKE_action.hh"
 #include "BKE_anim_data.hh"
-#include "BKE_fcurve.hh"
 #include "BKE_global.hh"
 #include "BKE_idtype.hh"
 #include "BKE_lib_id.hh"
@@ -52,7 +51,7 @@ class ActionFilterTest : public testing::Test {
     bmain = BKE_main_new();
     G_MAIN = bmain; /* For BKE_animdata_free(). */
 
-    action = &static_cast<bAction *>(BKE_id_new(bmain, ID_AC, "ACÄnimåtië"))->wrap();
+    action = &BKE_id_new<bAction>(bmain, "ACÄnimåtië")->wrap();
     cube = BKE_object_add_only_object(bmain, OB_EMPTY, "Küüübus");
     suzanne = BKE_object_add_only_object(bmain, OB_EMPTY, "OBSuzanne");
   }
@@ -92,18 +91,16 @@ TEST_F(ActionFilterTest, slots_expanded_or_not)
       SingleKeyingResult::SUCCESS,
       strip_data.keyframe_insert(bmain, slot_suzanne, {"location", 1}, {1.0f, 0.25f}, settings));
 
-  ChannelBag *cube_channel_bag = strip_data.channelbag_for_slot(slot_cube);
-  ASSERT_NE(nullptr, cube_channel_bag);
-  FCurve *fcu_cube_loc_x = cube_channel_bag->fcurve_find({"location", 0});
-  FCurve *fcu_cube_loc_y = cube_channel_bag->fcurve_find({"location", 1});
+  Channelbag *cube_channelbag = strip_data.channelbag_for_slot(slot_cube);
+  ASSERT_NE(nullptr, cube_channelbag);
+  FCurve *fcu_cube_loc_x = cube_channelbag->fcurve_find({"location", 0});
+  FCurve *fcu_cube_loc_y = cube_channelbag->fcurve_find({"location", 1});
   ASSERT_NE(nullptr, fcu_cube_loc_x);
   ASSERT_NE(nullptr, fcu_cube_loc_y);
 
   /* Mock an bAnimContext for the Animation editor, with the above Animation showing. */
   SpaceAction saction = {nullptr};
-  saction.action = action;
-  saction.action_slot_handle = slot_cube.handle;
-  saction.ads.filterflag = ADS_FILTER_ALL_SLOTS;
+  saction.ads.filterflag = eDopeSheet_FilterFlag(0);
 
   bAnimContext ac = {nullptr};
   ac.bmain = bmain;
@@ -112,6 +109,8 @@ TEST_F(ActionFilterTest, slots_expanded_or_not)
   ac.spacetype = SPACE_ACTION;
   ac.sl = reinterpret_cast<SpaceLink *>(&saction);
   ac.obact = cube;
+  ac.active_action = action;
+  ac.active_action_user = &cube->id;
   ac.ads = &saction.ads;
 
   { /* Test with collapsed slots. */
@@ -249,18 +248,16 @@ TEST_F(ActionFilterTest, layered_action_active_fcurves)
   /* Set one F-Curve as the active one, and the other as inactive. The latter is necessary because
    * by default the first curve is automatically marked active, but that's too trivial a test case
    * (it's too easy to mistakenly just return the first-seen F-Curve). */
-  ChannelBag *cube_channel_bag = strip_data.channelbag_for_slot(slot_cube);
-  ASSERT_NE(nullptr, cube_channel_bag);
-  FCurve *fcurve_active = cube_channel_bag->fcurve_find({"location", 1});
+  Channelbag *cube_channelbag = strip_data.channelbag_for_slot(slot_cube);
+  ASSERT_NE(nullptr, cube_channelbag);
+  FCurve *fcurve_active = cube_channelbag->fcurve_find({"location", 1});
   fcurve_active->flag |= FCURVE_ACTIVE;
-  FCurve *fcurve_other = cube_channel_bag->fcurve_find({"location", 0});
+  FCurve *fcurve_other = cube_channelbag->fcurve_find({"location", 0});
   fcurve_other->flag &= ~FCURVE_ACTIVE;
 
   /* Mock an bAnimContext for the Action editor. */
   SpaceAction saction = {nullptr};
-  saction.action = action;
-  saction.action_slot_handle = slot_cube.handle;
-  saction.ads.filterflag = ADS_FILTER_ALL_SLOTS;
+  saction.ads.filterflag = eDopeSheet_FilterFlag(0);
 
   bAnimContext ac = {nullptr};
   ac.bmain = bmain;
@@ -269,6 +266,8 @@ TEST_F(ActionFilterTest, layered_action_active_fcurves)
   ac.spacetype = SPACE_ACTION;
   ac.sl = reinterpret_cast<SpaceLink *>(&saction);
   ac.obact = cube;
+  ac.active_action = action;
+  ac.active_action_user = &cube->id;
   ac.ads = &saction.ads;
 
   {

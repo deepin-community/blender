@@ -8,17 +8,19 @@
 
 #pragma once
 
-#include <mutex>
+#include "xxhash.h"
 
 #include "BLI_map.hh"
+#include "BLI_mutex.hh"
 #include "BLI_utility_mixins.hh"
 
 #include "gpu_state_private.hh"
 
 #include "vk_common.hh"
 
-namespace blender {
-namespace gpu {
+namespace blender::gpu {
+class VKDevice;
+class VKDiscardPool;
 
 /**
  * Struct containing key information to identify a compute pipeline.
@@ -34,6 +36,14 @@ struct VKComputeInfo {
            vk_pipeline_layout == other.vk_pipeline_layout &&
            specialization_constants == other.specialization_constants;
   };
+
+  uint64_t hash() const
+  {
+    uint64_t hash = uint64_t(vk_shader_module);
+    hash = hash * 33 ^ uint64_t(vk_pipeline_layout);
+    hash = hash * 33 ^ specialization_constants.hash();
+    return hash;
+  }
 };
 
 /**
@@ -61,19 +71,12 @@ struct VKGraphicsInfo {
 
     uint64_t hash() const
     {
-      uint64_t hash = 0;
-      hash = hash * 33 ^ uint64_t(vk_topology);
-      for (const VkVertexInputAttributeDescription &attribute : attributes) {
-        hash = hash * 33 ^ uint64_t(attribute.location);
-        hash = hash * 33 ^ uint64_t(attribute.binding);
-        hash = hash * 33 ^ uint64_t(attribute.format);
-        hash = hash * 33 ^ uint64_t(attribute.offset);
-      }
-      for (const VkVertexInputBindingDescription &binding : bindings) {
-        hash = hash * 33 ^ uint64_t(binding.binding);
-        hash = hash * 33 ^ uint64_t(binding.inputRate);
-        hash = hash * 33 ^ uint64_t(binding.stride);
-      }
+      uint64_t hash = uint64_t(vk_topology);
+      hash = hash * 33 ^
+             XXH3_64bits(attributes.data(),
+                         attributes.size() * sizeof(VkVertexInputAttributeDescription));
+      hash = hash * 33 ^ XXH3_64bits(bindings.data(),
+                                     bindings.size() * sizeof(VkVertexInputBindingDescription));
       return hash;
     }
   };
@@ -101,8 +104,14 @@ struct VKGraphicsInfo {
 
     bool operator==(const FragmentShader &other) const
     {
-      /* TODO: Do not use hash. */
-      return vk_fragment_module == other.vk_fragment_module && hash() == other.hash();
+      if (vk_fragment_module != other.vk_fragment_module ||
+          viewports.size() != other.viewports.size() || scissors.size() != other.scissors.size() ||
+          hash() != other.hash())
+      {
+        return false;
+      }
+
+      return true;
     }
 
     uint64_t hash() const
@@ -121,44 +130,49 @@ struct VKGraphicsInfo {
    private:
     uint64_t calc_hash() const
     {
-      uint64_t hash = 0;
-      hash = hash * 33 ^ uint64_t(vk_fragment_module);
-      for (const VkViewport &vk_viewport : viewports) {
-        hash = hash * 33 ^ uint64_t(vk_viewport.x);
-        hash = hash * 33 ^ uint64_t(vk_viewport.y);
-        hash = hash * 33 ^ uint64_t(vk_viewport.width);
-        hash = hash * 33 ^ uint64_t(vk_viewport.height);
-        hash = hash * 33 ^ uint64_t(vk_viewport.minDepth);
-        hash = hash * 33 ^ uint64_t(vk_viewport.maxDepth);
-      }
-      for (const VkRect2D &scissor : scissors) {
-        hash = hash * 33 ^ uint64_t(scissor.offset.x);
-        hash = hash * 33 ^ uint64_t(scissor.offset.y);
-        hash = hash * 33 ^ uint64_t(scissor.extent.width);
-        hash = hash * 33 ^ uint64_t(scissor.extent.height);
-      }
+      uint64_t hash = uint64_t(vk_fragment_module);
+      hash = hash * 33 ^ uint64_t(viewports.size());
+      hash = hash * 33 ^ uint64_t(scissors.size());
+
       return hash;
     }
   };
   struct FragmentOut {
+    uint32_t color_attachment_size;
+
+    /* Dynamic rendering */
     VkFormat depth_attachment_format;
     VkFormat stencil_attachment_format;
     Vector<VkFormat> color_attachment_formats;
 
     bool operator==(const FragmentOut &other) const
     {
+#if 1
       return hash() == other.hash();
+#else
+      if (depth_attachment_format != other.depth_attachment_format ||
+          stencil_attachment_format != other.stencil_attachment_format ||
+          color_attachment_formats.size() != other.color_attachment_formats.size())
+      {
+        return false;
+      }
+
+      if (memcmp(color_attachment_formats.data(),
+                 other.color_attachment_formats.data(),
+                 color_attachment_formats.size() * sizeof(VkFormat)) == 0)
+      {
+        return false;
+      }
+      return true;
+#endif
     }
 
     uint64_t hash() const
     {
-      uint64_t hash = 0;
-      hash = hash * 33 ^ uint64_t(depth_attachment_format);
+      uint64_t hash = uint64_t(depth_attachment_format);
       hash = hash * 33 ^ uint64_t(stencil_attachment_format);
-      for (VkFormat color_attachment_format : color_attachment_formats) {
-        hash = hash * 33 ^ uint64_t(color_attachment_format);
-      }
-
+      hash = hash * 33 ^ XXH3_64bits(color_attachment_formats.data(),
+                                     color_attachment_formats.size() * sizeof(VkFormat));
       return hash;
     }
   };
@@ -189,7 +203,7 @@ struct VKGraphicsInfo {
     hash = hash * 33 ^ fragment_shader.hash();
     hash = hash * 33 ^ fragment_out.hash();
     hash = hash * 33 ^ uint64_t(vk_pipeline_layout);
-    hash = hash * 33 ^ get_default_hash(specialization_constants);
+    hash = hash * 33 ^ specialization_constants.hash();
     hash = hash * 33 ^ state.data;
     hash = hash * 33 ^ mutable_state.data[0];
     hash = hash * 33 ^ mutable_state.data[1];
@@ -197,21 +211,6 @@ struct VKGraphicsInfo {
     return hash;
   }
 };
-
-}  // namespace gpu
-
-template<> struct DefaultHash<gpu::VKComputeInfo> {
-  uint64_t operator()(const gpu::VKComputeInfo &key) const
-  {
-    uint64_t hash = uint64_t(key.vk_shader_module);
-    hash = hash * 33 ^ uint64_t(key.vk_pipeline_layout);
-    hash = hash * 33 ^ get_default_hash(key.specialization_constants);
-    return hash;
-  }
-};
-
-namespace gpu {
-class VKDevice;
 
 /**
  * Pipelines are lazy initialized and same pipelines should share their handle.
@@ -241,7 +240,7 @@ class VKDevice;
  * some platforms where the driver isn't been updated and doesn't implement this extension. In
  * that case shader modules should still be used.
  *
- * TODO: GPUMaterials (or any other large shader) should be unloaded when the GPUShader is
+ * TODO: GPUMaterials (or any other large shader) should be unloaded when the gpu::Shader is
  * destroyed. Exact details what the best approach is unclear as support for EEVEE is still
  * lacking.
  */
@@ -262,6 +261,12 @@ class VKPipelinePool : public NonCopyable {
   VkPipelineVertexInputStateCreateInfo vk_pipeline_vertex_input_state_create_info_;
 
   VkPipelineRasterizationStateCreateInfo vk_pipeline_rasterization_state_create_info_;
+  VkPipelineRasterizationProvokingVertexStateCreateInfoEXT
+      vk_pipeline_rasterization_provoking_vertex_state_info_;
+
+  Vector<VkDynamicState> vk_dynamic_states_;
+  VkPipelineDynamicStateCreateInfo vk_pipeline_dynamic_state_create_info_;
+
   VkPipelineViewportStateCreateInfo vk_pipeline_viewport_state_create_info_;
   VkPipelineDepthStencilStateCreateInfo vk_pipeline_depth_stencil_state_create_info_;
 
@@ -278,7 +283,7 @@ class VKPipelinePool : public NonCopyable {
   VkPipelineCache vk_pipeline_cache_static_;
   VkPipelineCache vk_pipeline_cache_non_static_;
 
-  std::mutex mutex_;
+  Mutex mutex_;
 
  public:
   VKPipelinePool();
@@ -306,9 +311,9 @@ class VKPipelinePool : public NonCopyable {
                                              VkPipeline vk_pipeline_base);
 
   /**
-   * Remove all shader pipelines that uses the given shader_module.
+   * Discard all pipelines that uses the given pipeline_layout.
    */
-  void remove(Span<VkShaderModule> vk_shader_modules);
+  void discard(VKDiscardPool &discard_pool, VkPipelineLayout vk_pipeline_layout);
 
   /**
    * Destroy all created pipelines.
@@ -356,6 +361,4 @@ class VKPipelinePool : public NonCopyable {
   void specialization_info_reset();
 };
 
-}  // namespace gpu
-
-}  // namespace blender
+}  // namespace blender::gpu

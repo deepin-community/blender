@@ -22,9 +22,7 @@
 
 #include "BLI_utildefines.h"
 
-#ifdef WITH_CXX_GUARDEDALLOC
-#  include "MEM_guardedalloc.h"
-#endif
+#include "MEM_guardedalloc.h"
 
 using namespace std;
 
@@ -69,14 +67,12 @@ class Cell {
   Vec3r _orig;
   OccludersSet _occluders;
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:Cell")
-#endif
 };
 
 class GridVisitor {
  public:
-  virtual ~GridVisitor(){};  // soc
+  virtual ~GridVisitor() {};  // soc
 
   virtual void discoverCell(Cell * /*cell*/) {}
 
@@ -89,9 +85,7 @@ class GridVisitor {
     return false;
   }
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:GridVisitor")
-#endif
 };
 
 /** Gathers all the occluders belonging to the cells traversed by the ray */
@@ -378,9 +372,7 @@ class Grid {
   // a ray
   OccludersSet _occluders;  // List of all occluders inserted in the grid
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:Grid")
-#endif
 };
 
 //
@@ -390,7 +382,7 @@ class Grid {
 
 class VirtualOccludersSet {
  public:
-  VirtualOccludersSet(Grid &_grid) : grid(_grid){};
+  VirtualOccludersSet(Grid &_grid) : grid(_grid) {};
   Polygon3r *begin();
   Polygon3r *next();
   Polygon3r *next(bool stopOnNewCell);
@@ -400,9 +392,7 @@ class VirtualOccludersSet {
   Grid &grid;
   OccludersSet::iterator it, end;
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:VirtualOccludersSet")
-#endif
 };
 
 } /* namespace Freestyle */

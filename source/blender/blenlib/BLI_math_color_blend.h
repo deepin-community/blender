@@ -10,11 +10,6 @@
 
 #include "BLI_math_inline.h"
 #include "BLI_sys_types.h"
-#include "BLI_utildefines.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /******************** Blending Modes **********************
  * - byte function assume straight alpha
@@ -128,9 +123,5 @@ MINLINE void blend_color_interpolate_float(float dst[4],
                                            float t);
 
 #if BLI_MATH_DO_INLINE
-#  include "intern/math_color_blend_inline.c"
-#endif
-
-#ifdef __cplusplus
-}
+#  include "intern/math_color_blend_inline.cc"  // IWYU pragma: export
 #endif

@@ -11,12 +11,7 @@
 #include "util/log.h"
 #include "util/tbb.h"
 
-// clang-format off
-#include "kernel/device/cpu/compat.h"
-#include "kernel/device/cpu/globals.h"
 #include "kernel/types.h"
-#include "kernel/film/read.h"
-// clang-format on
 
 CCL_NAMESPACE_BEGIN
 
@@ -110,12 +105,14 @@ inline void PassAccessorCPU::run_get_pass_kernel_processor_half_rgba(
 /* Float (scalar) passes. */
 DEFINE_PASS_ACCESSOR(depth)
 DEFINE_PASS_ACCESSOR(mist)
+DEFINE_PASS_ACCESSOR(volume_majorant)
 DEFINE_PASS_ACCESSOR(sample_count)
 DEFINE_PASS_ACCESSOR(float)
 
 /* Float3 passes. */
 DEFINE_PASS_ACCESSOR(light_path)
 DEFINE_PASS_ACCESSOR(shadow_catcher)
+DEFINE_PASS_ACCESSOR(rgbe)
 DEFINE_PASS_ACCESSOR(float3)
 
 /* Float4 passes. */

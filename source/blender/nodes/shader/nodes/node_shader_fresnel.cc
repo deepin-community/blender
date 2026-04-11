@@ -10,7 +10,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.add_input<decl::Float>("IOR").default_value(1.5f).min(0.0f).max(1000.0f);
   b.add_input<decl::Vector>("Normal").hide_value();
-  b.add_output<decl::Float>("Fac");
+  b.add_output<decl::Float>("Factor", "Fac");
 }
 
 static int node_shader_gpu_fresnel(GPUMaterial *mat,
@@ -45,10 +45,17 @@ void register_node_type_sh_fresnel()
 
   static blender::bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, SH_NODE_FRESNEL, "Fresnel", NODE_CLASS_INPUT);
+  sh_node_type_base(&ntype, "ShaderNodeFresnel", SH_NODE_FRESNEL);
+  ntype.ui_name = "Fresnel";
+  ntype.ui_description =
+      "Produce a blending factor depending on the angle between the surface normal and the view "
+      "direction using Fresnel equations.\nTypically used for mixing reflections at grazing "
+      "angles";
+  ntype.enum_name_legacy = "FRESNEL";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;
   ntype.gpu_fn = file_ns::node_shader_gpu_fresnel;
   ntype.materialx_fn = file_ns::node_shader_materialx;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

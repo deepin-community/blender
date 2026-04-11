@@ -7,19 +7,16 @@
  * \ingroup bke
  * \brief Blender kernel action and pose functionality.
  */
-#ifndef __cplusplus
-#  error This is a C++ only header.
-#endif
 
 #include "BLI_compiler_attrs.h"
 #include "BLI_function_ref.hh"
-
-#include "DNA_listBase.h"
+#include "BLI_span.hh"
 
 struct BlendDataReader;
 struct BlendLibReader;
 struct BlendWriter;
 struct bArmature;
+struct BoneParentTransform;
 
 /* The following structures are defined in DNA_action_types.h, and DNA_anim_types.h */
 struct AnimationEvalContext;
@@ -34,6 +31,25 @@ struct bItasc;
 struct bPose;
 struct bPoseChannel;
 struct bPoseChannel_Runtime;
+
+namespace blender::animrig {
+
+/**
+ * Action slot handle type.
+ *
+ * An identifier of slots within an action that is guaranteed to be unique
+ * within that action and is guaranteed not to change for a slot.
+ *
+ * NOTE: keep this type in sync with `ActionSlot::handle` in the action DNA
+ * types. We redefine it here rather than making a type alias to avoid bringing
+ * in the entirety of DNA_action_types.h for everything that includes this
+ * header.
+ *
+ * \see `ActionSlot::handle`
+ */
+using slot_handle_t = int32_t;
+
+}  // namespace blender::animrig
 
 /* Action Lib Stuff ----------------- */
 
@@ -293,6 +309,21 @@ void BKE_pose_itasc_init(bItasc *itasc);
  */
 bool BKE_pose_channel_in_IK_chain(Object *ob, bPoseChannel *pchan);
 
+/**
+ * Get the transform location, accounting for POSE_TRANSFORM_AT_CUSTOM_TX.
+ */
+void BKE_pose_channel_transform_location(const bArmature *arm,
+                                         const bPoseChannel *pose_bone,
+                                         float r_pose_space_pivot[3]);
+
+/**
+ * Get the transform pose orientation, accounting for
+ * POSE_TRANSFORM_AT_CUSTOM_TX.
+ */
+void BKE_pose_channel_transform_orientation(const bArmature *arm,
+                                            const bPoseChannel *pose_bone,
+                                            float r_pose_orientation[3][3]);
+
 /* Bone Groups API --------------------- */
 
 /**
@@ -340,7 +371,7 @@ void BKE_pose_rest(bPose *pose, bool selected_bones_only);
  */
 void BKE_pose_tag_recalc(Main *bmain, bPose *pose) ATTR_NONNULL(1, 2);
 
-void BKE_pose_blend_write(BlendWriter *writer, bPose *pose, bArmature *arm) ATTR_NONNULL(1, 2, 3);
+void BKE_pose_blend_write(BlendWriter *writer, bPose *pose) ATTR_NONNULL(1, 2);
 void BKE_pose_blend_read_data(BlendDataReader *reader, ID *id_owner, bPose *pose)
     ATTR_NONNULL(1, 2);
 void BKE_pose_blend_read_after_liblink(BlendLibReader *reader, Object *ob, bPose *pose)
@@ -348,11 +379,28 @@ void BKE_pose_blend_read_after_liblink(BlendLibReader *reader, Object *ob, bPose
 
 /* `action_mirror.cc` */
 
-void BKE_action_flip_with_pose(bAction *act, Object *ob_arm) ATTR_NONNULL(1, 2);
+/**
+ * Flip the action so it can be applied as a mirror. Only data of slots that are related to the
+ * given objects is mirrored.
+ */
+void BKE_action_flip_with_pose(bAction *act, blender::Span<Object *> objects) ATTR_NONNULL(1);
 
 namespace blender::bke {
 
 using FoundFCurveCallback = blender::FunctionRef<void(FCurve *fcurve, const char *bone_name)>;
-void BKE_action_find_fcurves_with_bones(const bAction *action, FoundFCurveCallback callback);
+using FoundFCurveCallbackConst =
+    blender::FunctionRef<void(const FCurve *fcurve, const char *bone_name)>;
+
+/**
+ * Calls `callback` for every fcurve in an action slot that targets any bone.
+ *
+ * \param slot_handle: only FCurves from the given action slot are visited.
+ */
+void BKE_action_find_fcurves_with_bones(bAction *action,
+                                        blender::animrig::slot_handle_t slot_handle,
+                                        FoundFCurveCallback callback);
+void BKE_action_find_fcurves_with_bones(const bAction *action,
+                                        blender::animrig::slot_handle_t slot_handle,
+                                        FoundFCurveCallbackConst callback);
 
 };  // namespace blender::bke

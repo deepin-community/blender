@@ -15,9 +15,6 @@
 #include "util/openimagedenoise.h"
 #include "util/path.h"
 
-#include "kernel/device/cpu/compat.h"
-#include "kernel/device/cpu/kernel.h"
-
 CCL_NAMESPACE_BEGIN
 
 thread_mutex OIDNDenoiser::mutex_;
@@ -56,13 +53,13 @@ class OIDNPass {
     offset = buffer_params.get_pass_offset(type, mode);
     need_scale = (type == PASS_DENOISING_ALBEDO || type == PASS_DENOISING_NORMAL);
 
-    const PassInfo pass_info = Pass::get_info(type);
+    const PassInfo pass_info = Pass::get_info(type, mode);
     num_components = pass_info.num_components;
     use_compositing = pass_info.use_compositing;
     use_denoising_albedo = pass_info.use_denoising_albedo;
   }
 
-  inline operator bool() const
+  operator bool() const
   {
     return name[0] != '\0';
   }
@@ -124,7 +121,7 @@ class OIDNDenoiseContext {
     const char *custom_weight_path = getenv("CYCLES_OIDN_CUSTOM_WEIGHTS");
     if (custom_weight_path) {
       if (!path_read_binary(custom_weight_path, custom_weights)) {
-        fprintf(stderr, "Cycles: Failed to load custom OIDN weights!");
+        LOG_ERROR << "Failed to load custom OpenImageDenoise weights";
       }
     }
   }
@@ -154,14 +151,14 @@ class OIDNDenoiseContext {
 
     if (oidn_color_pass.use_denoising_albedo) {
       if (albedo_replaced_with_fake_) {
-        LOG(ERROR) << "Pass which requires albedo is denoised after fake albedo has been set.";
+        LOG_ERROR << "Pass which requires albedo is denoised after fake albedo has been set.";
         return;
       }
     }
 
     OIDNPass oidn_output_pass(buffer_params_, "output", pass_type, PassMode::DENOISED);
     if (oidn_output_pass.offset == PASS_UNUSED) {
-      LOG(DFATAL) << "Missing denoised pass " << pass_type_as_string(pass_type);
+      LOG_DFATAL << "Missing denoised pass " << pass_type_as_string(pass_type);
       return;
     }
 
@@ -180,7 +177,7 @@ class OIDNDenoiseContext {
     oidn_filter.setProgressMonitorFunction(oidn_progress_monitor_function, denoiser_);
     oidn_filter.set("hdr", true);
     oidn_filter.set("srgb", false);
-    if (custom_weights.size()) {
+    if (!custom_weights.empty()) {
       oidn_filter.setData("weights", custom_weights.data(), custom_weights.size());
     }
     set_quality(oidn_filter);
@@ -310,7 +307,7 @@ class OIDNDenoiseContext {
   /* Read pass pixels using PassAccessor into a temporary buffer which is owned by the pass.. */
   void read_pass_pixels_into_buffer(OIDNPass &oidn_pass)
   {
-    VLOG_WORK << "Allocating temporary buffer for pass " << oidn_pass.name << " ("
+    LOG_DEBUG << "Allocating temporary buffer for pass " << oidn_pass.name << " ("
               << pass_type_as_string(oidn_pass.type) << ")";
 
     const int64_t width = buffer_params_.width;
@@ -621,7 +618,7 @@ bool OIDNDenoiser::denoise_buffer(const BufferParams &buffer_params,
       << "OpenImageDenoise is not supported on this platform or build.";
 
 #ifdef WITH_OPENIMAGEDENOISE
-  thread_scoped_lock lock(mutex_);
+  const thread_scoped_lock lock(mutex_);
 
   /* Make sure the host-side data is available for denoising. */
   unique_ptr<DeviceQueue> queue = create_device_queue(render_buffers);

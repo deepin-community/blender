@@ -8,4 +8,6 @@
 
 #pragma once
 
-PyObject *BPY_app_openvdb_struct();
+#include <Python.h>
+
+[[nodiscard]] PyObject *BPY_app_openvdb_struct();

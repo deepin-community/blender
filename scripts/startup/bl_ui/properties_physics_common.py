@@ -6,7 +6,9 @@ import bpy
 from bpy.types import (
     Panel,
 )
-from bpy.app.translations import contexts as i18n_contexts
+from bpy.app.translations import (
+    contexts as i18n_contexts,
+)
 
 
 class PhysicButtonsPanel:
@@ -55,7 +57,7 @@ class PHYSICS_PT_add(PhysicButtonsPanel, Panel):
     bl_options = {'HIDE_HEADER'}
     COMPAT_ENGINES = {
         'BLENDER_RENDER',
-        'BLENDER_EEVEE_NEXT',
+        'BLENDER_EEVEE',
         'BLENDER_WORKBENCH',
     }
 
@@ -185,10 +187,6 @@ def point_cache_ui(self, cache, enabled, cachetype):
             subcol = col.column()
             subcol.active = cache.use_disk_cache
             subcol.prop(cache, "use_library_path", text="Use Library Path")
-
-            col = flow.column()
-            col.active = cache.use_disk_cache
-            col.prop(cache, "compression", text="Compression")
 
             if cache.id_data.library and not cache.use_disk_cache:
                 can_bake = False
@@ -328,7 +326,7 @@ def basic_force_field_falloff_ui(self, field):
 
     col = layout.column()
     col.prop(field, "z_direction")
-    col.prop(field, "falloff_power", text="Power")
+    col.prop(field, "falloff_power", text="Power", text_ctxt=i18n_contexts.id_particlesettings)
 
     col = layout.column(align=False, heading="Min Distance")
     col.use_property_decorate = False

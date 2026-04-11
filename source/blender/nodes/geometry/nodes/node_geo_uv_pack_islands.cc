@@ -2,17 +2,61 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "GEO_uv_pack.hh"
 #include "GEO_uv_parametrizer.hh"
 
-#include "BKE_mesh.hh"
+#include "DNA_mesh_types.h"
 
 #include "node_geometry_util.hh"
 
 namespace blender::nodes::node_geo_uv_pack_islands_cc {
 
+/** Local node enum that maps to eUVPackIsland_ShapeMethod in GEO_uv_pack.hh. */
+enum class ShapeMethod : int16_t {
+  Aabb = 0,
+  Convex = 1,
+  Concave = 2,
+};
+
+static const EnumPropertyItem shape_method_items[] = {
+    {int(ShapeMethod::Aabb),
+     "AABB",
+     0,
+     N_("Bounding Box"),
+     N_("Use axis-aligned bounding boxes for packing (fastest, least space efficient)")},
+    {int(ShapeMethod::Convex),
+     "CONVEX",
+     0,
+     N_("Convex Hull"),
+     N_("Use convex hull approximation of islands (good balance of speed and space efficiency)")},
+    {int(ShapeMethod::Concave),
+     "CONCAVE",
+     0,
+     N_("Exact Shape"),
+     N_("Use exact geometry for most efficient packing (slowest)")},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
+static eUVPackIsland_ShapeMethod convert_shape_method(const ShapeMethod method)
+{
+  switch (method) {
+    case ShapeMethod::Aabb:
+      return ED_UVPACK_SHAPE_AABB;
+    case ShapeMethod::Convex:
+      return ED_UVPACK_SHAPE_CONVEX;
+    case ShapeMethod::Concave:
+      return ED_UVPACK_SHAPE_CONCAVE;
+  }
+  BLI_assert_unreachable();
+  return ED_UVPACK_SHAPE_AABB;
+}
+
 static void node_declare(NodeDeclarationBuilder &b)
 {
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
   b.add_input<decl::Vector>("UV").hide_value().supports_field();
+  b.add_output<decl::Vector>("UV").field_source_reference_all().align_with_previous();
   b.add_input<decl::Bool>("Selection")
       .default_value(true)
       .hide_value()
@@ -21,7 +65,11 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_input<decl::Float>("Margin").default_value(0.001f).min(0.0f).max(1.0f).description(
       "Space between islands");
   b.add_input<decl::Bool>("Rotate").default_value(true).description("Rotate islands for best fit");
-  b.add_output<decl::Vector>("UV").field_source_reference_all();
+  b.add_input<decl::Menu>("Method")
+      .static_items(shape_method_items)
+      .default_value(ShapeMethod::Aabb)
+      .optional_label()
+      .description("Method used for packing UV islands");
 }
 
 static VArray<float3> construct_uv_gvarray(const Mesh &mesh,
@@ -29,6 +77,7 @@ static VArray<float3> construct_uv_gvarray(const Mesh &mesh,
                                            const Field<float3> uv_field,
                                            const bool rotate,
                                            const float margin,
+                                           const eUVPackIsland_ShapeMethod shape_method,
                                            const AttrDomain domain)
 {
   const Span<float3> positions = mesh.vert_positions();
@@ -79,12 +128,17 @@ static VArray<float3> construct_uv_gvarray(const Mesh &mesh,
   });
   geometry::uv_parametrizer_construct_end(handle, true, true, nullptr);
 
-  geometry::uv_parametrizer_pack(handle, margin, rotate, true);
+  blender::geometry::UVPackIsland_Params params;
+  params.shape_method = shape_method;
+  params.rotate_method = rotate ? ED_UVPACK_ROTATION_ANY : ED_UVPACK_ROTATION_NONE;
+  params.margin = margin;
+
+  geometry::uv_parametrizer_pack(handle, params);
   geometry::uv_parametrizer_flush(handle);
   delete (handle);
 
   return mesh.attributes().adapt_domain<float3>(
-      VArray<float3>::ForContainer(std::move(uv)), AttrDomain::Corner, domain);
+      VArray<float3>::from_container(std::move(uv)), AttrDomain::Corner, domain);
 }
 
 class PackIslandsFieldInput final : public bke::MeshFieldInput {
@@ -93,17 +147,20 @@ class PackIslandsFieldInput final : public bke::MeshFieldInput {
   const Field<float3> uv_field_;
   const bool rotate_;
   const float margin_;
+  const eUVPackIsland_ShapeMethod shape_method_;
 
  public:
   PackIslandsFieldInput(const Field<bool> selection_field,
                         const Field<float3> uv_field,
                         const bool rotate,
-                        const float margin)
+                        const float margin,
+                        const eUVPackIsland_ShapeMethod shape_method)
       : bke::MeshFieldInput(CPPType::get<float3>(), "Pack UV Islands Field"),
         selection_field_(selection_field),
         uv_field_(uv_field),
         rotate_(rotate),
-        margin_(margin)
+        margin_(margin),
+        shape_method_(shape_method)
   {
     category_ = Category::Generated;
   }
@@ -112,7 +169,8 @@ class PackIslandsFieldInput final : public bke::MeshFieldInput {
                                  const AttrDomain domain,
                                  const IndexMask & /*mask*/) const final
   {
-    return construct_uv_gvarray(mesh, selection_field_, uv_field_, rotate_, margin_, domain);
+    return construct_uv_gvarray(
+        mesh, selection_field_, uv_field_, rotate_, margin_, shape_method_, domain);
   }
 
   void for_each_field_input_recursive(FunctionRef<void(const FieldInput &)> fn) const override
@@ -129,23 +187,31 @@ class PackIslandsFieldInput final : public bke::MeshFieldInput {
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
+  const ShapeMethod local_shape_method = params.get_input<ShapeMethod>("Method");
+  const eUVPackIsland_ShapeMethod shape_method = convert_shape_method(local_shape_method);
+
   const Field<bool> selection_field = params.extract_input<Field<bool>>("Selection");
   const Field<float3> uv_field = params.extract_input<Field<float3>>("UV");
   const bool rotate = params.extract_input<bool>("Rotate");
   const float margin = params.extract_input<float>("Margin");
   params.set_output("UV",
                     Field<float3>(std::make_shared<PackIslandsFieldInput>(
-                        selection_field, uv_field, rotate, margin)));
+                        selection_field, uv_field, rotate, margin, shape_method)));
 }
 
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_UV_PACK_ISLANDS, "Pack UV Islands", NODE_CLASS_CONVERTER);
+  geo_node_type_base(&ntype, "GeometryNodeUVPackIslands", GEO_NODE_UV_PACK_ISLANDS);
+  ntype.ui_name = "Pack UV Islands";
+  ntype.ui_description =
+      "Scale islands of a UV map and move them so they fill the UV space as much as possible";
+  ntype.enum_name_legacy = "UV_PACK_ISLANDS";
+  ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

@@ -1,5 +1,5 @@
 From: "Matteo F. Vescovi" <mfv@debian.org>
-Date: Mon, 12 Aug 2024 20:24:22 +0200
+Date: Sun, 7 Sep 2025 15:20:01 +0200
 Subject: locales_directory_install
 
 Change where locales are installed.
@@ -16,10 +16,10 @@ Contributions by:
  4 files changed, 7 insertions(+), 3 deletions(-)
 
 diff --git a/source/blender/blenkernel/BKE_appdir.hh b/source/blender/blenkernel/BKE_appdir.hh
-index 629dbc7..8125c23 100644
+index d82bb33..d2b4b06 100644
 --- a/source/blender/blenkernel/BKE_appdir.hh
 +++ b/source/blender/blenkernel/BKE_appdir.hh
-@@ -174,6 +174,7 @@ enum {
+@@ -168,6 +168,7 @@ enum {
    BLENDER_SYSTEM_SCRIPTS = 53,
    BLENDER_SYSTEM_EXTENSIONS = 54,
    BLENDER_SYSTEM_PYTHON = 55,
@@ -28,10 +28,10 @@ index 629dbc7..8125c23 100644
  
  /** For #BKE_appdir_folder_id_version only. */
 diff --git a/source/blender/blenkernel/intern/appdir.cc b/source/blender/blenkernel/intern/appdir.cc
-index 7422110..bde24d1 100644
+index c6cb161..45b4c40 100644
 --- a/source/blender/blenkernel/intern/appdir.cc
 +++ b/source/blender/blenkernel/intern/appdir.cc
-@@ -693,6 +693,9 @@ bool BKE_appdir_folder_id_ex(const int folder_id,
+@@ -706,6 +706,9 @@ bool BKE_appdir_folder_id_ex(const int folder_id,
        }
        return false;
  
@@ -42,32 +42,32 @@ index 7422110..bde24d1 100644
        BLI_assert_unreachable();
        break;
 diff --git a/source/blender/blentranslation/intern/blt_lang.cc b/source/blender/blentranslation/intern/blt_lang.cc
-index 3fe958b..6fd5ebe 100644
+index 32a379c..6ff2435 100644
 --- a/source/blender/blentranslation/intern/blt_lang.cc
 +++ b/source/blender/blentranslation/intern/blt_lang.cc
-@@ -65,7 +65,7 @@ static void free_locales()
+@@ -67,7 +67,7 @@ static void free_locales()
  
  static void fill_locales()
  {
 -  std::optional<std::string> languages_path = BKE_appdir_folder_id(BLENDER_DATAFILES, "locale");
 +  std::optional<std::string> languages_path = BKE_appdir_folder_id(BLENDER_SYSTEM_LOCALE, NULL);
-   char languages[FILE_MAX];
-   LinkNode *lines = nullptr, *line = nullptr;
-   char *str;
-@@ -182,7 +182,7 @@ const EnumPropertyItem *BLT_lang_RNA_enum_properties()
- void BLT_lang_init()
- {
- #ifdef WITH_INTERNATIONAL
+   if (!languages_path.has_value()) {
+     CLOG_WARN(&LOG, "'locale' data path for translations not found");
+     return;
+@@ -254,7 +254,7 @@ void BLT_lang_set(const char *str)
+   std::string locale_name = str ? str : LOCALE(ulang);
+ 
+   /* #blender::locale assumes UTF8, no need to put it in the name. */
 -  const std::optional<std::string> messagepath = BKE_appdir_folder_id(BLENDER_DATAFILES, "locale");
 +  const std::optional<std::string> messagepath = BKE_appdir_folder_id(BLENDER_SYSTEM_LOCALE, NULL);
- #endif
+   blender::locale::init(locale_name, {TEXT_DOMAIN_NAME}, {messagepath.value_or("")});
  
- /* Make sure LANG is correct and wouldn't cause #std::runtime_error. */
+ #else
 diff --git a/source/creator/CMakeLists.txt b/source/creator/CMakeLists.txt
-index c9197ca..1207876 100644
+index f0c81fc..c10809d 100644
 --- a/source/creator/CMakeLists.txt
 +++ b/source/creator/CMakeLists.txt
-@@ -484,7 +484,7 @@ install(
+@@ -502,7 +502,7 @@ install(
  # localization
  if(WITH_INTERNATIONAL)
    set(_locale_dir "${CMAKE_SOURCE_DIR}/locale")

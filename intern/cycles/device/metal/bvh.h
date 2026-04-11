@@ -32,13 +32,18 @@ class BVHMetal : public BVH {
 
   bool motion_blur = false;
 
+  /* Per-component Motion Interpolation in macOS 15. */
+  bool use_pcmi = false;
+
+  bool extended_limits = false;
+
   bool build(Progress &progress, id<MTLDevice> device, id<MTLCommandQueue> queue, bool refit);
 
   BVHMetal(const BVHParams &params,
            const vector<Geometry *> &geometry,
            const vector<Object *> &objects,
            Device *device);
-  virtual ~BVHMetal();
+  ~BVHMetal() override;
 
   bool build_BLAS(Progress &progress, id<MTLDevice> device, id<MTLCommandQueue> queue, bool refit);
   bool build_BLAS_mesh(Progress &progress,

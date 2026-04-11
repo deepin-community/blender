@@ -8,7 +8,7 @@ import array
 
 
 class CustomRenderEngine(bpy.types.RenderEngine):
-    # These three members are used by blender to set up the
+    # These three members are used by Blender to set up the
     # RenderEngine; define its internal name, visible name and capabilities.
     bl_idname = "CUSTOM"
     bl_label = "Custom"
@@ -17,14 +17,19 @@ class CustomRenderEngine(bpy.types.RenderEngine):
     # Init is called whenever a new render engine instance is created. Multiple
     # instances may exist at the same time, for example for a viewport and final
     # render.
-    def __init__(self):
+    # Note the generic arguments signature, and the call to the parent class
+    # `__init__` methods, which are required for Blender to create the underlying
+    # `RenderEngine` data.
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.scene_data = None
         self.draw_data = None
 
     # When the render engine instance is destroy, this is called. Clean up any
     # render engine data here, for example stopping running render threads.
     def __del__(self):
-        pass
+        # Own delete code...
+        super().__del__()
 
     # This is the method called by Blender for both final renders (F12) and
     # small preview for materials, world and lights.
@@ -34,7 +39,7 @@ class CustomRenderEngine(bpy.types.RenderEngine):
         self.size_x = int(scene.render.resolution_x * scale)
         self.size_y = int(scene.render.resolution_y * scale)
 
-        # Fill the render result with a flat color. The framebuffer is
+        # Fill the render result with a flat color. The frame-buffer is
         # defined as a list of pixels, each pixel itself being a list of
         # R,G,B,A values.
         if self.is_preview:
@@ -120,14 +125,14 @@ class CustomDrawData:
     def __init__(self, dimensions):
         import gpu
 
-        # Generate dummy float image buffer
+        # Generate dummy float image buffer.
         self.dimensions = dimensions
         width, height = dimensions
 
         pixels = width * height * array.array('f', [0.1, 0.2, 0.1, 1.0])
         pixels = gpu.types.Buffer('FLOAT', width * height * 4, pixels)
 
-        # Generate texture
+        # Generate texture.
         self.texture = gpu.types.GPUTexture((width, height), format='RGBA16F', data=pixels)
 
         # Note: This is just a didactic example.
@@ -162,7 +167,7 @@ def get_panels():
 
 
 def register():
-    # Register the RenderEngine
+    # Register the RenderEngine.
     bpy.utils.register_class(CustomRenderEngine)
 
     for panel in get_panels():

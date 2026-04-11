@@ -2,6 +2,12 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+__all__ = (
+    "addon_keymap_register",
+    "addon_keymap_unregister",
+    "keyconfig_test",
+)
+
 
 # -----------------------------------------------------------------------------
 # Add-on helpers to properly (un)register their own keymaps.
@@ -113,7 +119,7 @@ def keyconfig_test(kc):
                         item = km.keymap_items[j + i + 1]
                         if src.compare(item):
                             print("===========")
-                            print(km.name, "[self confict]")
+                            print(km.name, "[self conflict]")
                             print(_kmistr(src, is_modal).strip())
                             print(_kmistr(item, is_modal).strip())
                             result = True

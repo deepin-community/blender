@@ -2,12 +2,12 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_mesh.hh"
 
 #include "NOD_rna_define.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "BLI_array_utils.hh"
@@ -38,14 +38,14 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiLayoutSetPropSep(layout, true);
-  uiLayoutSetPropDecorate(layout, false);
-  uiItemR(layout, ptr, "fill_type", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->use_property_split_set(true);
+  layout->use_property_decorate_set(false);
+  layout->prop(ptr, "fill_type", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryMeshCircle *node_storage = MEM_cnew<NodeGeometryMeshCircle>(__func__);
+  NodeGeometryMeshCircle *node_storage = MEM_callocN<NodeGeometryMeshCircle>(__func__);
 
   node_storage->fill_type = GEO_NODE_MESH_CIRCLE_FILL_NONE;
 
@@ -221,14 +221,18 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_MESH_PRIMITIVE_CIRCLE, "Mesh Circle", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeMeshCircle", GEO_NODE_MESH_PRIMITIVE_CIRCLE);
+  ntype.ui_name = "Mesh Circle";
+  ntype.ui_description = "Generate a circular ring of edges";
+  ntype.enum_name_legacy = "MESH_PRIMITIVE_CIRCLE";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.initfunc = node_init;
   blender::bke::node_type_storage(
-      &ntype, "NodeGeometryMeshCircle", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeGeometryMeshCircle", node_free_standard_storage, node_copy_standard_storage);
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
   ntype.declare = node_declare;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

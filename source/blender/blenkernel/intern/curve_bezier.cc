@@ -45,16 +45,19 @@ void calculate_evaluated_offsets(const Span<int8_t> handle_types_left,
     return;
   }
 
+  const int points_per_segment = std::max(1, resolution);
+
   int offset = 0;
   for (const int i : IndexRange(size - 1)) {
     evaluated_offsets[i] = offset;
-    offset += segment_is_vector(handle_types_left, handle_types_right, i) ? 1 : resolution;
+    offset += segment_is_vector(handle_types_left, handle_types_right, i) ? 1 : points_per_segment;
   }
 
   evaluated_offsets.last(1) = offset;
   if (cyclic) {
-    offset += last_cyclic_segment_is_vector(handle_types_left, handle_types_right) ? 1 :
-                                                                                     resolution;
+    offset += last_cyclic_segment_is_vector(handle_types_left, handle_types_right) ?
+                  1 :
+                  points_per_segment;
   }
   else {
     offset++;
@@ -179,6 +182,17 @@ void set_handle_position(const float3 &position,
   if (type_other == BEZIER_HANDLE_ALIGN) {
     handle_other = calculate_aligned_handle(position, handle, handle_other);
   }
+}
+
+void calculate_aligned_handles(const IndexMask &selection,
+                               const Span<float3> positions,
+                               const Span<float3> align_with,
+                               MutableSpan<float3> align_handles)
+{
+  selection.foreach_index_optimized<int>(GrainSize(4096), [&](const int point) {
+    align_handles[point] = calculate_aligned_handle(
+        positions[point], align_with[point], align_handles[point]);
+  });
 }
 
 void calculate_auto_handles(const bool cyclic,

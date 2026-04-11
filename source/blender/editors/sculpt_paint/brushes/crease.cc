@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "editors/sculpt_paint/brushes/types.hh"
+#include "editors/sculpt_paint/brushes/brushes.hh"
 
 #include "DNA_brush_types.h"
 #include "DNA_mesh_types.h"
@@ -10,25 +10,21 @@
 #include "DNA_scene_types.h"
 
 #include "BKE_brush.hh"
-#include "BKE_key.hh"
 #include "BKE_mesh.hh"
 #include "BKE_paint.hh"
-#include "BKE_pbvh.hh"
+#include "BKE_paint_bvh.hh"
 #include "BKE_subdiv_ccg.hh"
 
-#include "BLI_array.hh"
 #include "BLI_enumerable_thread_specific.hh"
-#include "BLI_math_geom.h"
-#include "BLI_math_matrix.hh"
-#include "BLI_math_vector.hh"
-#include "BLI_task.h"
 #include "BLI_task.hh"
 
 #include "editors/sculpt_paint/mesh_brush_common.hh"
 #include "editors/sculpt_paint/sculpt_automask.hh"
 #include "editors/sculpt_paint/sculpt_intern.hh"
 
-namespace blender::ed::sculpt_paint {
+#include "bmesh.hh"
+
+namespace blender::ed::sculpt_paint::brushes {
 
 inline namespace crease_cc {
 
@@ -189,7 +185,6 @@ static void calc_bmesh(const Depsgraph &depsgraph,
 }
 
 static void do_crease_or_blob_brush(const Depsgraph &depsgraph,
-                                    const Scene &scene,
                                     const Sculpt &sd,
                                     const bool invert_strength,
                                     Object &object,
@@ -206,7 +201,7 @@ static void do_crease_or_blob_brush(const Depsgraph &depsgraph,
   /* We divide out the squared alpha and multiply by the squared crease
    * to give us the pinch strength. */
   float crease_correction = brush.crease_pinch_factor * brush.crease_pinch_factor;
-  float brush_alpha = BKE_brush_alpha_get(&scene, &brush);
+  float brush_alpha = BKE_brush_alpha_get(&sd.paint, &brush);
   if (brush_alpha > 0.0f) {
     crease_correction /= brush_alpha * brush_alpha;
   }
@@ -219,7 +214,7 @@ static void do_crease_or_blob_brush(const Depsgraph &depsgraph,
   switch (pbvh.type()) {
     case bke::pbvh::Type::Mesh: {
       const Mesh &mesh = *static_cast<Mesh *>(object.data);
-      const MeshAttributeData attribute_data(mesh.attributes());
+      const MeshAttributeData attribute_data(mesh);
       const PositionDeformData position_data(depsgraph, object);
       const Span<float3> vert_normals = bke::pbvh::vert_normals_eval(depsgraph, object);
       MutableSpan<bke::pbvh::MeshNode> nodes = pbvh.nodes<bke::pbvh::MeshNode>();
@@ -262,27 +257,25 @@ static void do_crease_or_blob_brush(const Depsgraph &depsgraph,
     }
   }
   pbvh.tag_positions_changed(node_mask);
-  bke::pbvh::flush_bounds_to_parents(pbvh);
+  pbvh.flush_bounds_to_parents();
 }
 
 }  // namespace crease_cc
 
 void do_crease_brush(const Depsgraph &depsgraph,
-                     const Scene &scene,
                      const Sculpt &sd,
                      Object &object,
                      const IndexMask &node_mask)
 {
-  do_crease_or_blob_brush(depsgraph, scene, sd, false, object, node_mask);
+  do_crease_or_blob_brush(depsgraph, sd, false, object, node_mask);
 }
 
 void do_blob_brush(const Depsgraph &depsgraph,
-                   const Scene &scene,
                    const Sculpt &sd,
                    Object &object,
                    const IndexMask &node_mask)
 {
-  do_crease_or_blob_brush(depsgraph, scene, sd, true, object, node_mask);
+  do_crease_or_blob_brush(depsgraph, sd, true, object, node_mask);
 }
 
-}  // namespace blender::ed::sculpt_paint
+}  // namespace blender::ed::sculpt_paint::brushes

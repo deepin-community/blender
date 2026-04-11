@@ -43,14 +43,10 @@ endif()
 
 set(INC
   ../../../../intern/guardedalloc
-  ../../blenkernel
   ../../blenlib
-  ../../imbuf
   ../../makesdna
   ../../makesrna
-  ../../nodes
   ../../io/usd
-  ../../gpu
   ../../gpu/intern
   ../../python/intern
   # RNA_prototypes.hh
@@ -63,20 +59,23 @@ set(INC_SYS
   ${Epoxy_INCLUDE_DIRS}
   ${USD_INCLUDE_DIRS}
   ${BOOST_INCLUDE_DIR}
-  ${TBB_INCLUDE_DIR}
+  ${TBB_INCLUDE_DIRS}
   ${GFLAGS_INCLUDE_DIRS}
-  ${EIGEN3_INCLUDE_DIRS}
 )
 
 set(LIB
   ${Epoxy_LIBRARIES}
   ${PYTHON_LIBRARIES}
-  ${BOOST_LIBRARIES}
   ${USD_LIBRARIES}
   ${TBB_LIBRARIES}
+  PRIVATE bf::blenkernel
   PRIVATE bf::depsgraph
+  PRIVATE bf::gpu
+  PRIVATE bf::imbuf
   PRIVATE bf::intern::clog
   bf_io_usd
+  PRIVATE bf::nodes
+  PRIVATE bf::dependencies::eigen
 )
 
 set(SRC

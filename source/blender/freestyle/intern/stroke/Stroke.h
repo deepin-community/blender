@@ -20,9 +20,7 @@
 #include "../system/FreestyleConfig.h"
 #include "../system/StringUtils.h"
 
-#ifdef WITH_CXX_GUARDEDALLOC
-#  include "MEM_guardedalloc.h"
-#endif
+#include "MEM_guardedalloc.h"
 
 extern "C" {
 struct MTex;
@@ -100,19 +98,19 @@ class StrokeAttribute {
   }
 
   /** Returns the R color component. */
-  inline const float getColorR() const
+  inline float getColorR() const
   {
     return _color[0];
   }
 
   /** Returns the G color component. */
-  inline const float getColorG() const
+  inline float getColorG() const
   {
     return _color[1];
   }
 
   /** Returns the B color component. */
-  inline const float getColorB() const
+  inline float getColorB() const
   {
     return _color[2];
   }
@@ -139,13 +137,13 @@ class StrokeAttribute {
   }
 
   /** Returns the thickness on the right of the vertex when following the stroke. */
-  inline const float getThicknessR() const
+  inline float getThicknessR() const
   {
     return _thickness[0];
   }
 
   /** Returns the thickness on the left of the vertex when following the stroke. */
-  inline const float getThicknessL() const
+  inline float getThicknessL() const
   {
     return _thickness[1];
   }
@@ -300,9 +298,7 @@ class StrokeAttribute {
   Vec2fMap *_userAttributesVec2f;
   Vec3fMap *_userAttributesVec3f;
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:StrokeAttribute")
-#endif
 };
 
 //
@@ -458,9 +454,7 @@ class StrokeVertex : public CurvePoint {
   /* interface definition */
   /* inherited */
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:StrokeVertex")
-#endif
 };
 
 //
@@ -534,7 +528,7 @@ class Stroke : public Interface1D {
   bNodeTree *_nodeTree;
   bool _tips;
   StrokeRep *_rep;
-  Vec2r _extremityOrientations[2];  // the orientations of the first and last extermity
+  Vec2r _extremityOrientations[2];  // the orientations of the first and last extremity
 
  public:
   /** default constructor */
@@ -857,9 +851,7 @@ class Stroke : public Interface1D {
   virtual Interface0DIterator pointsBegin(float t = 0.0f);
   virtual Interface0DIterator pointsEnd(float t = 0.0f);
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:Stroke")
-#endif
 };
 
 //

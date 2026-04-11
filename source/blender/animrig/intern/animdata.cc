@@ -14,13 +14,13 @@
 #include "BKE_key.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_node.hh"
 
 #include "BLT_translation.hh"
 
 #include "BLI_listbase.h"
-#include "BLI_string.h"
+#include "BLI_string_utf8.h"
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_build.hh"
@@ -28,13 +28,9 @@
 #include "DNA_anim_types.h"
 #include "DNA_key_types.h"
 #include "DNA_material_types.h"
-#include "DNA_mesh_types.h"
 #include "DNA_particle_types.h"
 
-#include "ED_anim_api.hh"
-
 #include "RNA_access.hh"
-#include "RNA_path.hh"
 
 namespace blender::animrig {
 
@@ -54,7 +50,7 @@ static void add_object_data_users(const Main &bmain, const ID &id, Vector<ID *> 
   Object *ob;
   ID *object_id;
   FOREACH_MAIN_LISTBASE_ID_BEGIN (&bmain.objects, object_id) {
-    ob = (Object *)object_id;
+    ob = reinterpret_cast<Object *>(object_id);
     if (ob->data != &id) {
       continue;
     }
@@ -74,7 +70,11 @@ Vector<ID *> find_related_ids(Main &bmain, ID &id)
 
     if (related_id->flag & ID_FLAG_EMBEDDED_DATA) {
       /* No matter the type of embedded ID, their owner can always be added to the related IDs. */
-      BLI_assert(ID_REAL_USERS(related_id) == 0);
+
+      /* User counting is irrelevant for the logic here, because embedded IDs cannot be shared.
+       * Embedded IDs do exist (sometimes) with a non-zero user count, hence the assertion that the
+       * user count is not greater than 1. */
+      BLI_assert(ID_REAL_USERS(related_id) <= 1);
       ID *owner_id = BKE_id_owner_get(related_id);
       /* Embedded IDs should always have an owner. */
       BLI_assert(owner_id != nullptr);
@@ -84,16 +84,16 @@ Vector<ID *> find_related_ids(Main &bmain, ID &id)
     /* No action found on current ID, add related IDs to the ID Vector. */
     switch (GS(related_id->name)) {
       case ID_OB: {
-        Object *ob = (Object *)related_id;
+        Object *ob = reinterpret_cast<Object *>(related_id);
         if (!ob->data) {
           break;
         }
-        ID *data = (ID *)ob->data;
+        ID *data = static_cast<ID *>(ob->data);
         if (ID_REAL_USERS(data) == 1) {
           related_ids.append_non_duplicates(data);
         }
         LISTBASE_FOREACH (ParticleSystem *, particle_system, &ob->particlesystem) {
-          if (!particle_system) {
+          if (!particle_system->part) {
             continue;
           }
           if (ID_REAL_USERS(&particle_system->part->id) != 1) {
@@ -106,7 +106,7 @@ Vector<ID *> find_related_ids(Main &bmain, ID &id)
 
       case ID_KE: {
         /* Shape-keys. */
-        Key *key = (Key *)related_id;
+        Key *key = reinterpret_cast<Key *>(related_id);
         /* Shape-keys are not embedded but there is currently no way to reuse them. */
         BLI_assert(ID_REAL_USERS(related_id) == 1);
         related_ids.append_non_duplicates(key->from);
@@ -115,7 +115,7 @@ Vector<ID *> find_related_ids(Main &bmain, ID &id)
 
       case ID_MA: {
         /* Explicitly not relating materials and material users. */
-        Material *mat = (Material *)related_id;
+        Material *mat = reinterpret_cast<Material *>(related_id);
         if (mat->nodetree && ID_REAL_USERS(&mat->nodetree->id) == 1) {
           related_ids.append_non_duplicates(&mat->nodetree->id);
         }
@@ -130,10 +130,10 @@ Vector<ID *> find_related_ids(Main &bmain, ID &id)
         ID *object_id;
         /* Find users of this particle setting. */
         FOREACH_MAIN_LISTBASE_ID_BEGIN (&bmain.objects, object_id) {
-          ob = (Object *)object_id;
+          ob = reinterpret_cast<Object *>(object_id);
           bool object_uses_particle_settings = false;
           LISTBASE_FOREACH (ParticleSystem *, particle_system, &ob->particlesystem) {
-            if (!particle_system) {
+            if (!particle_system->part) {
               continue;
             }
             if (&particle_system->part->id != related_id) {
@@ -182,7 +182,7 @@ static bAction *find_related_action(Main &bmain, ID &id)
 
   for (ID *related_id : related_ids) {
     Action *action = get_action(*related_id);
-    if (action && action->is_action_layered()) {
+    if (action && action->is_action_layered() && BKE_id_is_editable(&bmain, &action->id)) {
       /* Returning the first action found means highest priority has the action closest in the
        * relationship graph. */
       return action;
@@ -203,26 +203,24 @@ bAction *id_action_ensure(Main *bmain, ID *id)
   /* init action if none available yet */
   /* TODO: need some wizardry to handle NLA stuff correct */
   if (adt->action == nullptr) {
-    bAction *action = nullptr;
-    if (USER_EXPERIMENTAL_TEST(&U, use_animation_baklava)) {
-      action = find_related_action(*bmain, *id);
-    }
+    bAction *action = find_related_action(*bmain, *id);
+
     if (action == nullptr) {
       /* init action name from name of ID block */
       char actname[sizeof(id->name) - 2];
-      if (id->flag & ID_FLAG_EMBEDDED_DATA && USER_EXPERIMENTAL_TEST(&U, use_animation_baklava)) {
+      if (id->flag & ID_FLAG_EMBEDDED_DATA) {
         /* When the ID is embedded, use the name of the owner ID for clarity. */
         ID *owner_id = BKE_id_owner_get(id);
         /* If the ID is embedded it should have an owner. */
         BLI_assert(owner_id != nullptr);
-        SNPRINTF(actname, DATA_("%sAction"), owner_id->name + 2);
+        SNPRINTF_UTF8(actname, DATA_("%sAction"), owner_id->name + 2);
       }
-      else if (GS(id->name) == ID_KE && USER_EXPERIMENTAL_TEST(&U, use_animation_baklava)) {
-        Key *key = (Key *)id;
-        SNPRINTF(actname, DATA_("%sAction"), key->from->name + 2);
+      else if (GS(id->name) == ID_KE) {
+        Key *key = reinterpret_cast<Key *>(id);
+        SNPRINTF_UTF8(actname, DATA_("%sAction"), key->from->name + 2);
       }
       else {
-        SNPRINTF(actname, DATA_("%sAction"), id->name + 2);
+        SNPRINTF_UTF8(actname, DATA_("%sAction"), id->name + 2);
       }
 
       /* create action */
@@ -250,7 +248,7 @@ bAction *id_action_ensure(Main *bmain, ID *id)
   return adt->action;
 }
 
-void animdata_fcurve_delete(bAnimContext *ac, AnimData *adt, FCurve *fcu)
+void animdata_fcurve_delete(AnimData *adt, FCurve *fcu)
 {
   /* - If no AnimData, we've got nowhere to remove the F-Curve from
    *   (this doesn't guarantee that the F-Curve is in there, but at least we tried
@@ -260,13 +258,8 @@ void animdata_fcurve_delete(bAnimContext *ac, AnimData *adt, FCurve *fcu)
     return;
   }
 
-  /* Remove from whatever list it came from
-   * - Action Group
-   * - Action
-   * - Drivers
-   * - TODO... some others?
-   */
-  if ((ac) && (ac->datatype == ANIMCONT_DRIVERS)) {
+  const bool is_driver = fcu->driver != nullptr;
+  if (is_driver) {
     BLI_remlink(&adt->drivers, fcu);
   }
   else if (adt->action) {
@@ -319,7 +312,8 @@ bool animdata_remove_empty_action(AnimData *adt)
   if (adt->action != nullptr) {
     bAction *act = adt->action;
     DEG_id_tag_update(&act->id, ID_RECALC_ANIMATION_NO_FLUSH);
-    if (BLI_listbase_is_empty(&act->curves) && (adt->flag & ADT_NLA_EDIT_ON) == 0) {
+    Action &action = act->wrap();
+    if (action.is_empty() && (adt->flag & ADT_NLA_EDIT_ON) == 0) {
       id_us_min(&act->id);
       adt->action = nullptr;
       return true;
@@ -330,37 +324,6 @@ bool animdata_remove_empty_action(AnimData *adt)
 }
 
 /** \} */
-
-void reevaluate_fcurve_errors(bAnimContext *ac)
-{
-  /* Need to take off the flag before filtering, else the filter code would skip the FCurves, which
-   * have not yet been validated. */
-  const bool filtering_enabled = ac->ads->filterflag & ADS_FILTER_ONLY_ERRORS;
-  if (filtering_enabled) {
-    ac->ads->filterflag &= ~ADS_FILTER_ONLY_ERRORS;
-  }
-  ListBase anim_data = {nullptr, nullptr};
-  const eAnimFilter_Flags filter = ANIMFILTER_DATA_VISIBLE | ANIMFILTER_FCURVESONLY;
-  ANIM_animdata_filter(ac, &anim_data, filter, ac->data, eAnimCont_Types(ac->datatype));
-
-  LISTBASE_FOREACH (bAnimListElem *, ale, &anim_data) {
-    FCurve *fcu = (FCurve *)ale->key_data;
-    PointerRNA ptr;
-    PropertyRNA *prop;
-    PointerRNA id_ptr = RNA_id_pointer_create(ale->id);
-    if (RNA_path_resolve_property(&id_ptr, fcu->rna_path, &ptr, &prop)) {
-      fcu->flag &= ~FCURVE_DISABLED;
-    }
-    else {
-      fcu->flag |= FCURVE_DISABLED;
-    }
-  }
-
-  ANIM_animdata_freelist(&anim_data);
-  if (filtering_enabled) {
-    ac->ads->filterflag |= ADS_FILTER_ONLY_ERRORS;
-  }
-}
 
 const FCurve *fcurve_find_by_rna_path(const AnimData &adt,
                                       const StringRefNull rna_path,
@@ -394,7 +357,7 @@ const FCurve *fcurve_find_by_rna_path(const AnimData &adt,
       switch (strip->type()) {
         case Strip::Type::Keyframe: {
           const StripKeyframeData &strip_data = strip->data<StripKeyframeData>(action);
-          const ChannelBag *channelbag_for_slot = strip_data.channelbag_for_slot(*slot);
+          const Channelbag *channelbag_for_slot = strip_data.channelbag_for_slot(*slot);
           if (!channelbag_for_slot) {
             continue;
           }

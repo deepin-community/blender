@@ -209,7 +209,7 @@ class PartialWriteContext : NonCopyable, NonMovable {
   /* Passing a reference root filepath is mandatory, for remapping of relative paths to work as
    * expected. */
   PartialWriteContext() = delete;
-  PartialWriteContext(StringRefNull reference_root_filepath);
+  PartialWriteContext(Main &reference_main);
   ~PartialWriteContext();
 
   /**
@@ -428,5 +428,8 @@ class PartialWriteContext : NonCopyable, NonMovable {
    */
   Library *ensure_library(StringRefNull library_absolute_path);
 };
+
+ENUM_OPERATORS(PartialWriteContext::IDAddOperations,
+               PartialWriteContext::IDAddOperations::MASK_INHERITED);
 
 }  // namespace blender::bke::blendfile

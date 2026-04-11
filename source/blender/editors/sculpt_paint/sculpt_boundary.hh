@@ -12,7 +12,7 @@
 #include "BLI_array.hh"
 #include "BLI_bit_span.hh"
 #include "BLI_map.hh"
-#include "BLI_math_vector.hh"
+#include "BLI_math_vector_types.hh"
 #include "BLI_offset_indices.hh"
 #include "BLI_span.hh"
 #include "BLI_vector.hh"
@@ -21,6 +21,7 @@ struct Brush;
 struct BMVert;
 struct Depsgraph;
 struct Object;
+struct Sculpt;
 struct SculptBoundaryPreview;
 struct SculptSession;
 struct SubdivCCG;
@@ -145,5 +146,10 @@ void edges_preview_draw(uint gpuattr,
                         const float outline_col[3],
                         float outline_alpha);
 void pivot_line_preview_draw(uint gpuattr, SculptSession &ss);
+
+void do_boundary_brush(const Depsgraph &depsgraph,
+                       const Sculpt &sd,
+                       Object &object,
+                       const IndexMask &node_mask);
 
 }  // namespace blender::ed::sculpt_paint::boundary

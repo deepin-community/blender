@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <Python.h>
+
 namespace blender::gpu {
 class IndexBuf;
 }
@@ -21,4 +23,4 @@ struct BPyGPUIndexBuf {
   blender::gpu::IndexBuf *elem;
 };
 
-PyObject *BPyGPUIndexBuf_CreatePyObject(blender::gpu::IndexBuf *elem);
+[[nodiscard]] PyObject *BPyGPUIndexBuf_CreatePyObject(blender::gpu::IndexBuf *elem);

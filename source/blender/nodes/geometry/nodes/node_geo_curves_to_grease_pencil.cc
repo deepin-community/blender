@@ -2,6 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "BLI_array_utils.hh"
+
 #include "BKE_curves.hh"
 #include "BKE_grease_pencil.hh"
 #include "BKE_instances.hh"
@@ -51,7 +53,7 @@ static GreasePencil *curves_to_grease_pencil_with_one_layer(
   /* Transfer materials. */
   const int materials_num = curves_id.totcol;
   grease_pencil->material_array_num = materials_num;
-  grease_pencil->material_array = MEM_cnew_array<Material *>(materials_num, __func__);
+  grease_pencil->material_array = MEM_calloc_arrayN<Material *>(materials_num, __func__);
   initialized_copy_n(curves_id.mat, materials_num, grease_pencil->material_array);
 
   return grease_pencil;
@@ -122,7 +124,7 @@ static GreasePencil *curve_instances_to_grease_pencil_layers(
   });
 
   grease_pencil->material_array_num = all_materials.size();
-  grease_pencil->material_array = MEM_cnew_array<Material *>(all_materials.size(), __func__);
+  grease_pencil->material_array = MEM_calloc_arrayN<Material *>(all_materials.size(), __func__);
   initialized_copy_n(all_materials.data(), all_materials.size(), grease_pencil->material_array);
 
   const bke::AttributeAccessor instances_attributes = instances.attributes();
@@ -131,7 +133,7 @@ static GreasePencil *curve_instances_to_grease_pencil_layers(
     if (iter.is_builtin && !grease_pencil_attributes.is_builtin(iter.name)) {
       return;
     }
-    if (iter.data_type == CD_PROP_STRING) {
+    if (iter.data_type == bke::AttrType::String) {
       return;
     }
     if (ELEM(iter.name, "opacity")) {
@@ -218,13 +220,16 @@ static void node_geo_exec(GeoNodeExecParams params)
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(
-      &ntype, GEO_NODE_CURVES_TO_GREASE_PENCIL, "Curves to Grease Pencil", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeCurvesToGreasePencil", GEO_NODE_CURVES_TO_GREASE_PENCIL);
+  ntype.ui_name = "Curves to Grease Pencil";
+  ntype.ui_description = "Convert the curves in each top-level instance into Grease Pencil layer";
+  ntype.enum_name_legacy = "CURVES_TO_GREASE_PENCIL";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  bke::node_type_size(&ntype, 160, 100, 320);
+  bke::node_type_size(ntype, 160, 100, 320);
 
-  bke::node_register_type(&ntype);
+  bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

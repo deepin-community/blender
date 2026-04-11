@@ -99,13 +99,18 @@ typedef enum eGPDbrush_Flag {
   /* Affect only the drawing in the active layer.
    * Otherwise affect all editable drawings in the object. */
   GP_BRUSH_ACTIVE_LAYER_ONLY = (1 << 20),
+  /* Automatically remove fill guides created with fill tool. */
+  GP_BRUSH_FILL_AUTO_REMOVE_FILL_GUIDES = (1 << 21),
 } eGPDbrush_Flag;
 
 typedef enum eGPDbrush_Flag2 {
+  /* DEPRECATED: replaced with BRUSH_COLOR_JITTER_USE_HUE_AT_STROKE  */
   /* Brush use random Hue at stroke level */
   GP_BRUSH_USE_HUE_AT_STROKE = (1 << 0),
+  /* DEPRECATED: replaced with BRUSH_COLOR_JITTER_USE_SAT_AT_STROKE  */
   /* Brush use random Saturation at stroke level */
   GP_BRUSH_USE_SAT_AT_STROKE = (1 << 1),
+  /* DEPRECATED: replaced with BRUSH_COLOR_JITTER_USE_VAL_AT_STROKE  */
   /* Brush use random Value at stroke level */
   GP_BRUSH_USE_VAL_AT_STROKE = (1 << 2),
   /* Brush use random Pressure at stroke level */
@@ -114,10 +119,13 @@ typedef enum eGPDbrush_Flag2 {
   GP_BRUSH_USE_STRENGTH_AT_STROKE = (1 << 4),
   /* Brush use random UV at stroke level */
   GP_BRUSH_USE_UV_AT_STROKE = (1 << 5),
+  /* DEPRECATED: replaced with BRUSH_COLOR_JITTER_USE_HUE_RAND_PRESS  */
   /* Brush use Hue random pressure */
   GP_BRUSH_USE_HUE_RAND_PRESS = (1 << 6),
+  /* DEPRECATED: replaced with BRUSH_COLOR_JITTER_USE_SAT_RAND_PRESS  */
   /* Brush use Saturation random pressure */
   GP_BRUSH_USE_SAT_RAND_PRESS = (1 << 7),
+  /* DEPRECATED: replaced with BRUSH_COLOR_JITTER_USE_VAL_RAND_PRESS  */
   /* Brush use Value random pressure */
   GP_BRUSH_USE_VAL_RAND_PRESS = (1 << 8),
   /* Brush use Pressure random pressure */
@@ -263,6 +271,11 @@ typedef enum eBrushSnakeHookDeformType {
   BRUSH_SNAKE_HOOK_DEFORM_ELASTIC = 1,
 } eBrushSnakeHookDeformType;
 
+typedef enum eBrushPlaneInversionMode {
+  BRUSH_PLANE_INVERT_DISPLACEMENT = 0,
+  BRUSH_PLANE_SWAP_HEIGHT_AND_DEPTH = 1,
+} eBrushPlaneInversionMode;
+
 /** #Gpencilsettings.Vertex_mode */
 typedef enum eGp_Vertex_Mode {
   /* Affect to Stroke only. */
@@ -368,7 +381,7 @@ typedef enum eBrushFlags {
   BRUSH_FRONTFACE_FALLOFF = (1 << 25),
   BRUSH_PLANE_TRIM = (1 << 26),
   BRUSH_FRONTFACE = (1 << 27),
-  BRUSH_CUSTOM_ICON = (1 << 28),
+  /* BRUSH_CUSTOM_ICON = (1 << 28), */
   BRUSH_LINE = (1 << 29),
   BRUSH_ABSOLUTE_JITTER = (1 << 30),
   BRUSH_CURVE = (1u << 31),
@@ -391,6 +404,7 @@ typedef enum eBrushFlags2 {
   BRUSH_AREA_RADIUS_PRESSURE = (1 << 7),
   BRUSH_GRAB_SILHOUETTE = (1 << 8),
   BRUSH_USE_COLOR_AS_DISPLACEMENT = (1 << 9),
+  BRUSH_JITTER_COLOR = (1 << 10),
 } eBrushFlags2;
 
 typedef enum {
@@ -420,10 +434,14 @@ typedef enum eBrushSculptType {
   SCULPT_BRUSH_TYPE_INFLATE = 4,
   SCULPT_BRUSH_TYPE_GRAB = 5,
   SCULPT_BRUSH_TYPE_LAYER = 6,
+#ifdef DNA_DEPRECATED_ALLOW
   SCULPT_BRUSH_TYPE_FLATTEN = 7,
+#endif
   SCULPT_BRUSH_TYPE_CLAY = 8,
+#ifdef DNA_DEPRECATED_ALLOW
   SCULPT_BRUSH_TYPE_FILL = 9,
   SCULPT_BRUSH_TYPE_SCRAPE = 10,
+#endif
   SCULPT_BRUSH_TYPE_NUDGE = 11,
   SCULPT_BRUSH_TYPE_THUMB = 12,
   SCULPT_BRUSH_TYPE_SNAKE_HOOK = 13,
@@ -446,6 +464,7 @@ typedef enum eBrushSculptType {
   SCULPT_BRUSH_TYPE_BOUNDARY = 30,
   SCULPT_BRUSH_TYPE_DISPLACEMENT_ERASER = 31,
   SCULPT_BRUSH_TYPE_DISPLACEMENT_SMEAR = 32,
+  SCULPT_BRUSH_TYPE_PLANE = 33,
 } eBrushSculptType;
 
 /* Brush.curves_sculpt_brush_type. */
@@ -462,59 +481,6 @@ typedef enum eBrushCurvesSculptType {
   CURVES_SCULPT_BRUSH_TYPE_DENSITY = 9,
   CURVES_SCULPT_BRUSH_TYPE_SLIDE = 10,
 } eBrushCurvesSculptType;
-
-/** When #BRUSH_ACCUMULATE is used */
-#define SCULPT_BRUSH_TYPE_HAS_ACCUMULATE(t) \
-  ELEM(t, \
-       SCULPT_BRUSH_TYPE_DRAW, \
-       SCULPT_BRUSH_TYPE_DRAW_SHARP, \
-       SCULPT_BRUSH_TYPE_SLIDE_RELAX, \
-       SCULPT_BRUSH_TYPE_CREASE, \
-       SCULPT_BRUSH_TYPE_BLOB, \
-       SCULPT_BRUSH_TYPE_INFLATE, \
-       SCULPT_BRUSH_TYPE_CLAY, \
-       SCULPT_BRUSH_TYPE_CLAY_STRIPS, \
-       SCULPT_BRUSH_TYPE_CLAY_THUMB, \
-       SCULPT_BRUSH_TYPE_ROTATE, \
-       SCULPT_BRUSH_TYPE_SCRAPE, \
-       SCULPT_BRUSH_TYPE_FLATTEN)
-
-#define SCULPT_BRUSH_TYPE_HAS_NORMAL_WEIGHT(t) \
-  ELEM(t, SCULPT_BRUSH_TYPE_GRAB, SCULPT_BRUSH_TYPE_SNAKE_HOOK, SCULPT_BRUSH_TYPE_ELASTIC_DEFORM)
-
-#define SCULPT_BRUSH_TYPE_HAS_RAKE(t) ELEM(t, SCULPT_BRUSH_TYPE_SNAKE_HOOK)
-
-#define SCULPT_BRUSH_TYPE_HAS_DYNTOPO(t) \
-  (ELEM(t, /* These brushes, as currently coded, cannot support dynamic topology */ \
-        SCULPT_BRUSH_TYPE_GRAB, \
-        SCULPT_BRUSH_TYPE_ROTATE, \
-        SCULPT_BRUSH_TYPE_CLOTH, \
-        SCULPT_BRUSH_TYPE_THUMB, \
-        SCULPT_BRUSH_TYPE_LAYER, \
-        SCULPT_BRUSH_TYPE_DISPLACEMENT_ERASER, \
-        SCULPT_BRUSH_TYPE_DRAW_SHARP, \
-        SCULPT_BRUSH_TYPE_SLIDE_RELAX, \
-        SCULPT_BRUSH_TYPE_ELASTIC_DEFORM, \
-        SCULPT_BRUSH_TYPE_BOUNDARY, \
-        SCULPT_BRUSH_TYPE_POSE, \
-        SCULPT_BRUSH_TYPE_DRAW_FACE_SETS, \
-        SCULPT_BRUSH_TYPE_PAINT, \
-        SCULPT_BRUSH_TYPE_SMEAR, \
-\
-        /* These brushes could handle dynamic topology, \ \
-         * but user feedback indicates it's better not to */ \
-        SCULPT_BRUSH_TYPE_SMOOTH, \
-        SCULPT_BRUSH_TYPE_MASK) == 0)
-
-#define SCULPT_BRUSH_TYPE_HAS_TOPOLOGY_RAKE(t) \
-  (ELEM(t, /* These brushes, as currently coded, cannot support topology rake. */ \
-        SCULPT_BRUSH_TYPE_GRAB, \
-        SCULPT_BRUSH_TYPE_ROTATE, \
-        SCULPT_BRUSH_TYPE_THUMB, \
-        SCULPT_BRUSH_TYPE_DRAW_SHARP, \
-        SCULPT_BRUSH_TYPE_DISPLACEMENT_ERASER, \
-        SCULPT_BRUSH_TYPE_SLIDE_RELAX, \
-        SCULPT_BRUSH_TYPE_MASK) == 0)
 
 /** #Brush.image_brush_type */
 typedef enum eBrushImagePaintType {
@@ -626,4 +592,14 @@ typedef enum eBrushCurvesSculptDensityMode {
   BRUSH_CURVES_SCULPT_DENSITY_MODE_REMOVE = 2,
 } eBrushCurvesSculptDensityMode;
 
+typedef enum eBrushColorJitterSettings_Flag {
+  BRUSH_COLOR_JITTER_USE_HUE_AT_STROKE = (1 << 0),
+  BRUSH_COLOR_JITTER_USE_SAT_AT_STROKE = (1 << 1),
+  BRUSH_COLOR_JITTER_USE_VAL_AT_STROKE = (1 << 2),
+  BRUSH_COLOR_JITTER_USE_HUE_RAND_PRESS = (1 << 3),
+  BRUSH_COLOR_JITTER_USE_SAT_RAND_PRESS = (1 << 4),
+  BRUSH_COLOR_JITTER_USE_VAL_RAND_PRESS = (1 << 5),
+} eBrushColorJitterSettings_Flag;
+
 #define MAX_BRUSH_PIXEL_RADIUS 500
+#define MAX_BRUSH_PIXEL_DIAMETER 1000

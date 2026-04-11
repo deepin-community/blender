@@ -8,4 +8,6 @@
 
 #pragma once
 
-PyObject *BPY_utils_units();
+#include <Python.h>
+
+[[nodiscard]] PyObject *BPY_utils_units();

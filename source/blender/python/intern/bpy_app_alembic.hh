@@ -8,4 +8,6 @@
 
 #pragma once
 
-PyObject *BPY_app_alembic_struct();
+#include <Python.h>
+
+[[nodiscard]] PyObject *BPY_app_alembic_struct();

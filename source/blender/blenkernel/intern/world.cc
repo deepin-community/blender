@@ -6,7 +6,6 @@
  * \ingroup bke
  */
 
-#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <optional>
@@ -46,8 +45,6 @@
 static void world_free_data(ID *id)
 {
   World *wrld = (World *)id;
-
-  DRW_drawdata_free(id);
 
   /* is no lib link block, but world extension */
   if (wrld->nodetree) {
@@ -112,7 +109,6 @@ static void world_copy_data(Main *bmain,
   }
 
   BLI_listbase_clear(&wrld_dst->gpumaterial);
-  BLI_listbase_clear((ListBase *)&wrld_dst->drawdata);
 
   if ((flag & LIB_ID_COPY_NO_PREVIEW) == 0) {
     BKE_previewimg_id_copy(&wrld_dst->id, &wrld_src->id);
@@ -129,17 +125,19 @@ static void world_copy_data(Main *bmain,
 static void world_foreach_id(ID *id, LibraryForeachIDData *data)
 {
   World *world = reinterpret_cast<World *>(id);
-  const int flag = BKE_lib_query_foreachid_process_flags_get(data);
 
   if (world->nodetree) {
     /* nodetree **are owned by IDs**, treat them as mere sub-data and not real ID! */
     BKE_LIB_FOREACHID_PROCESS_FUNCTION_CALL(
         data, BKE_library_foreach_ID_embedded(data, (ID **)&world->nodetree));
   }
+}
 
-  if (flag & IDWALK_DO_DEPRECATED_POINTERS) {
-    BKE_LIB_FOREACHID_PROCESS_ID_NOCHECK(data, world->ipo, IDWALK_CB_USER);
-  }
+static void world_foreach_working_space_color(ID *id, const IDTypeForeachColorFunctionCallback &fn)
+{
+  World *world = reinterpret_cast<World *>(id);
+
+  fn.single(&world->horr);
 }
 
 static void world_blend_write(BlendWriter *writer, ID *id, const void *id_address)
@@ -151,22 +149,19 @@ static void world_blend_write(BlendWriter *writer, ID *id, const void *id_addres
   BLI_listbase_clear(&wrld->gpumaterial);
   wrld->last_update = 0;
 
+  /* Set deprecated #use_nodes for forward compatibility. */
+  wrld->use_nodes = true;
+
   /* write LibData */
   BLO_write_id_struct(writer, World, id_address, &wrld->id);
   BKE_id_blend_write(writer, &wrld->id);
 
   /* nodetree is integral part of world, no libdata */
   if (wrld->nodetree) {
-    BLO_Write_IDBuffer *temp_embedded_id_buffer = BLO_write_allocate_id_buffer();
-    BLO_write_init_id_buffer_from_id(
-        temp_embedded_id_buffer, &wrld->nodetree->id, BLO_write_is_undo(writer));
-    BLO_write_struct_at_address(writer,
-                                bNodeTree,
-                                wrld->nodetree,
-                                BLO_write_get_id_buffer_temp_id(temp_embedded_id_buffer));
+    BLO_Write_IDBuffer temp_embedded_id_buffer{wrld->nodetree->id, writer};
+    BLO_write_struct_at_address(writer, bNodeTree, wrld->nodetree, temp_embedded_id_buffer.get());
     blender::bke::node_tree_blend_write(
-        writer, (bNodeTree *)BLO_write_get_id_buffer_temp_id(temp_embedded_id_buffer));
-    BLO_write_destroy_id_buffer(&temp_embedded_id_buffer);
+        writer, reinterpret_cast<bNodeTree *>(temp_embedded_id_buffer.get()));
   }
 
   BKE_previewimg_blend_write(writer, wrld->preview);
@@ -188,7 +183,7 @@ static void world_blend_read_data(BlendDataReader *reader, ID *id)
 }
 
 IDTypeInfo IDType_ID_WO = {
-    /*id_code*/ ID_WO,
+    /*id_code*/ World::id_type,
     /*id_filter*/ FILTER_ID_WO,
     /*dependencies_id_types*/ FILTER_ID_TE,
     /*main_listbase_index*/ INDEX_ID_WO,
@@ -206,6 +201,7 @@ IDTypeInfo IDType_ID_WO = {
     /*foreach_id*/ world_foreach_id,
     /*foreach_cache*/ nullptr,
     /*foreach_path*/ nullptr,
+    /*foreach_working_space_color*/ world_foreach_working_space_color,
     /*owner_pointer_get*/ nullptr,
 
     /*blend_write*/ world_blend_write,
@@ -221,7 +217,7 @@ World *BKE_world_add(Main *bmain, const char *name)
 {
   World *wrld;
 
-  wrld = static_cast<World *>(BKE_id_new(bmain, ID_WO, name));
+  wrld = BKE_id_new<World>(bmain, name);
 
   return wrld;
 }

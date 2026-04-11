@@ -2,14 +2,18 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <fmt/format.h>
+
 #include "node_geometry_util.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_c.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "NOD_geo_index_switch.hh"
 #include "NOD_rna_define.hh"
 #include "NOD_socket.hh"
+#include "NOD_socket_items_blend.hh"
 #include "NOD_socket_items_ops.hh"
 #include "NOD_socket_search_link.hh"
 
@@ -19,10 +23,53 @@
 #include "BLO_read_write.hh"
 
 #include "BKE_node_socket_value.hh"
+#include "BKE_node_tree_reference_lifetimes.hh"
 
 namespace blender::nodes::node_geo_index_switch_cc {
 
 NODE_STORAGE_FUNCS(NodeIndexSwitch)
+
+static void draw_item_socket(CustomSocketDrawParams &params, const int index)
+{
+  if (!params.menu_switch_source_by_index_switch) {
+    params.draw_standard(params.layout);
+    return;
+  }
+  const bNode *menu_switch_node = params.menu_switch_source_by_index_switch->lookup_default(
+      &params.node, nullptr);
+  if (!menu_switch_node) {
+    params.draw_standard(params.layout);
+    return;
+  }
+  const auto &menu_switch_storage = *static_cast<const NodeMenuSwitch *>(
+      menu_switch_node->storage);
+  BLI_assert(menu_switch_storage.data_type == SOCK_INT);
+  const NodeEnumItem *found_item = nullptr;
+  for (const int i : IndexRange(menu_switch_storage.enum_definition.items_num)) {
+    const NodeEnumItem &item = menu_switch_storage.enum_definition.items_array[i];
+    const bNodeSocket &menu_switch_input_socket = menu_switch_node->input_socket(1 + i);
+    if (menu_switch_input_socket.is_directly_linked()) {
+      params.draw_standard(params.layout);
+      return;
+    }
+    const auto &menu_switch_input_socket_value = *static_cast<const bNodeSocketValueInt *>(
+        menu_switch_input_socket.default_value);
+    if (menu_switch_input_socket_value.value == index) {
+      if (found_item) {
+        /* Found multiple items, so there is not a unique label for this index. */
+        params.draw_standard(params.layout);
+        return;
+      }
+      found_item = &item;
+    }
+  }
+  if (!found_item) {
+    params.draw_standard(params.layout);
+    return;
+  }
+  const std::string label = fmt::format("{}: {}", index, found_item->name);
+  params.draw_standard(params.layout, label);
+}
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
@@ -34,56 +81,74 @@ static void node_declare(NodeDeclarationBuilder &b)
   const eNodeSocketDatatype data_type = eNodeSocketDatatype(storage.data_type);
   const bool supports_fields = socket_type_supports_fields(data_type);
 
+  const StructureType structure_type = socket_type_always_single(data_type) ?
+                                           StructureType::Single :
+                                           StructureType::Dynamic;
+
   const Span<IndexSwitchItem> items = storage.items_span();
   auto &index = b.add_input<decl::Int>("Index").min(0).max(std::max<int>(0, items.size() - 1));
   if (supports_fields) {
-    index.supports_field();
+    index.supports_field().structure_type(structure_type);
   }
 
   for (const int i : items.index_range()) {
     const std::string identifier = IndexSwitchItemsAccessor::socket_identifier_for_item(items[i]);
     auto &input = b.add_input(data_type, std::to_string(i), std::move(identifier));
+    input.custom_draw(
+        [index = i](CustomSocketDrawParams &params) { draw_item_socket(params, index); });
     if (supports_fields) {
       input.supports_field();
     }
     /* Labels are ugly in combination with data-block pickers and are usually disabled. */
-    input.hide_label(ELEM(data_type, SOCK_OBJECT, SOCK_IMAGE, SOCK_COLLECTION, SOCK_MATERIAL));
+    input.optional_label(ELEM(data_type, SOCK_OBJECT, SOCK_IMAGE, SOCK_COLLECTION, SOCK_MATERIAL));
+    input.structure_type(structure_type);
   }
 
   auto &output = b.add_output(data_type, "Output");
   if (supports_fields) {
     output.dependent_field().reference_pass_all();
   }
-  else if (data_type == SOCK_GEOMETRY) {
+  if (bke::node_tree_reference_lifetimes::can_contain_referenced_data(data_type)) {
     output.propagate_all();
   }
+  if (bke::node_tree_reference_lifetimes::can_contain_reference(data_type)) {
+    output.reference_pass_all();
+  }
+  output.structure_type(structure_type);
 
-  b.add_input<decl::Extend>("", "__extend__");
+  b.add_input<decl::Extend>("", "__extend__").custom_draw([](CustomSocketDrawParams &params) {
+    uiLayout &layout = params.layout;
+    layout.emboss_set(ui::EmbossType::None);
+    PointerRNA op_ptr = layout.op("node.index_switch_item_add", "", ICON_ADD);
+    RNA_int_set(&op_ptr, "node_identifier", params.node.identifier);
+  });
 }
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "data_type", UI_ITEM_NONE, "", ICON_NONE);
+  layout->prop(ptr, "data_type", UI_ITEM_NONE, "", ICON_NONE);
 }
 
 static void node_layout_ex(uiLayout *layout, bContext *C, PointerRNA *ptr)
 {
   bNode &node = *static_cast<bNode *>(ptr->data);
   NodeIndexSwitch &storage = node_storage(node);
-  if (uiLayout *panel = uiLayoutPanel(C, layout, "index_switch_items", false, TIP_("Items"))) {
-    uiItemO(panel, IFACE_("Add Item"), ICON_ADD, "node.index_switch_item_add");
-    uiLayout *col = uiLayoutColumn(panel, false);
+  if (uiLayout *panel = layout->panel(C, "index_switch_items", false, IFACE_("Items"))) {
+    panel->op("node.index_switch_item_add", IFACE_("Add Item"), ICON_ADD);
+    uiLayout *col = &panel->column(false);
     for (const int i : IndexRange(storage.items_num)) {
-      uiLayout *row = uiLayoutRow(col, false);
-      uiItemL(row, node.input_socket(i + 1).name, ICON_NONE);
-      uiItemIntO(row, "", ICON_REMOVE, "node.index_switch_item_remove", "index", i);
+      uiLayout *row = &col->row(false);
+      row->label(node.input_socket(i + 1).name, ICON_NONE);
+      PointerRNA op_ptr = row->op("node.index_switch_item_remove", "", ICON_REMOVE);
+      RNA_int_set(&op_ptr, "index", i);
     }
   }
 }
 
 static void NODE_OT_index_switch_item_add(wmOperatorType *ot)
 {
-  socket_items::ops::add_item<IndexSwitchItemsAccessor>(ot, "Add Item", __func__, "Add bake item");
+  socket_items::ops::add_item<IndexSwitchItemsAccessor>(
+      ot, "Add Item", __func__, "Add an item to the index switch");
 }
 
 static void NODE_OT_index_switch_item_remove(wmOperatorType *ot)
@@ -100,13 +165,13 @@ static void node_operators()
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeIndexSwitch *data = MEM_cnew<NodeIndexSwitch>(__func__);
+  NodeIndexSwitch *data = MEM_callocN<NodeIndexSwitch>(__func__);
   data->data_type = SOCK_GEOMETRY;
   data->next_identifier = 0;
 
   BLI_assert(data->items == nullptr);
   const int default_items_num = 2;
-  data->items = MEM_cnew_array<IndexSwitchItem>(default_items_num, __func__);
+  data->items = MEM_calloc_arrayN<IndexSwitchItem>(default_items_num, __func__);
   for (const int i : IndexRange(default_items_num)) {
     data->items[i].identifier = data->next_identifier++;
   }
@@ -221,7 +286,7 @@ class LazyFunctionForIndexSwitchNode : public LazyFunction {
     const eNodeSocketDatatype data_type = eNodeSocketDatatype(storage.data_type);
     const bNodeSocket &index_socket = node.input_socket(0);
     const bNodeSocket &output_socket = node.output_socket(0);
-    const CPPType &cpp_type = *output_socket.typeinfo->geometry_nodes_cpp_type;
+    const CPPType &cpp_type = CPPType::get<SocketValueVariant>();
 
     debug_name_ = node.name;
     can_be_field_ = socket_type_supports_fields(data_type);
@@ -304,10 +369,10 @@ class LazyFunctionForIndexSwitchNode : public LazyFunction {
 
     std::unique_ptr<mf::MultiFunction> switch_fn = std::make_unique<IndexSwitchFunction>(
         *field_base_type_, values_num);
-    GField output_field(FieldOperation::Create(std::move(switch_fn), std::move(input_fields)));
+    GField output_field(FieldOperation::from(std::move(switch_fn), std::move(input_fields)));
 
     void *output_ptr = params.get_output_data_ptr(0);
-    new (output_ptr) SocketValueVariant(std::move(output_field));
+    SocketValueVariant::ConstructIn(output_ptr, std::move(output_field));
     params.output_set(0);
   }
 };
@@ -340,7 +405,9 @@ static void node_rna(StructRNA *srna)
                                                SOCK_COLLECTION,
                                                SOCK_MATERIAL,
                                                SOCK_IMAGE,
-                                               SOCK_MENU);
+                                               SOCK_MENU,
+                                               SOCK_BUNDLE,
+                                               SOCK_CLOSURE);
                                  });
       });
 }
@@ -354,32 +421,62 @@ static void node_free_storage(bNode *node)
 static void node_copy_storage(bNodeTree * /*dst_tree*/, bNode *dst_node, const bNode *src_node)
 {
   const NodeIndexSwitch &src_storage = node_storage(*src_node);
-  auto *dst_storage = MEM_cnew<NodeIndexSwitch>(__func__, src_storage);
+  auto *dst_storage = MEM_dupallocN<NodeIndexSwitch>(__func__, src_storage);
   dst_node->storage = dst_storage;
 
   socket_items::copy_array<IndexSwitchItemsAccessor>(*src_node, *dst_node);
 }
 
-static bool node_insert_link(bNodeTree *ntree, bNode *node, bNodeLink *link)
+static bool node_insert_link(bke::NodeInsertLinkParams &params)
 {
   return socket_items::try_add_item_via_any_extend_socket<IndexSwitchItemsAccessor>(
-      *ntree, *node, *node, *link);
+      params.ntree, params.node, params.node, params.link);
+}
+
+static void node_blend_write(const bNodeTree & /*tree*/, const bNode &node, BlendWriter &writer)
+{
+  socket_items::blend_write<IndexSwitchItemsAccessor>(&writer, node);
+}
+
+static void node_blend_read(bNodeTree & /*tree*/, bNode &node, BlendDataReader &reader)
+{
+  socket_items::blend_read_data<IndexSwitchItemsAccessor>(&reader, node);
+}
+
+static const bNodeSocket *node_internally_linked_input(const bNodeTree & /*tree*/,
+                                                       const bNode &node,
+                                                       const bNodeSocket & /*output_socket*/)
+{
+  const NodeIndexSwitch &src_storage = node_storage(node);
+  if (src_storage.items_num == 0) {
+    return nullptr;
+  }
+  /* Default to the 0 input. */
+  return &node.input_socket(1);
 }
 
 static void register_node()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_INDEX_SWITCH, "Index Switch", NODE_CLASS_CONVERTER);
+  geo_node_type_base(&ntype, "GeometryNodeIndexSwitch", GEO_NODE_INDEX_SWITCH);
+  ntype.ui_name = "Index Switch";
+  ntype.ui_description = "Choose between an arbitrary number of values with an index";
+  ntype.enum_name_legacy = "INDEX_SWITCH";
+  ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = node_declare;
   ntype.initfunc = node_init;
   ntype.insert_link = node_insert_link;
-  blender::bke::node_type_storage(&ntype, "NodeIndexSwitch", node_free_storage, node_copy_storage);
+  blender::bke::node_type_storage(ntype, "NodeIndexSwitch", node_free_storage, node_copy_storage);
   ntype.gather_link_search_ops = node_gather_link_searches;
   ntype.draw_buttons = node_layout;
   ntype.draw_buttons_ex = node_layout_ex;
   ntype.register_operators = node_operators;
-  blender::bke::node_register_type(&ntype);
+  ntype.ignore_inferred_input_socket_visibility = true;
+  ntype.blend_write_storage_content = node_blend_write;
+  ntype.blend_data_read_storage_content = node_blend_read;
+  ntype.internally_linked_input = node_internally_linked_input;
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }
@@ -393,23 +490,18 @@ std::unique_ptr<LazyFunction> get_index_switch_node_lazy_function(
     const bNode &node, GeometryNodesLazyFunctionGraphInfo &lf_graph_info)
 {
   using namespace node_geo_index_switch_cc;
-  BLI_assert(node.type == GEO_NODE_INDEX_SWITCH);
+  BLI_assert(node.type_legacy == GEO_NODE_INDEX_SWITCH);
   return std::make_unique<LazyFunctionForIndexSwitchNode>(node, lf_graph_info);
 }
 
 StructRNA *IndexSwitchItemsAccessor::item_srna = &RNA_IndexSwitchItem;
-int IndexSwitchItemsAccessor::node_type = GEO_NODE_INDEX_SWITCH;
 
-void IndexSwitchItemsAccessor::blend_write(BlendWriter *writer, const bNode &node)
+void IndexSwitchItemsAccessor::blend_write_item(BlendWriter * /*writer*/, const ItemT & /*item*/)
 {
-  const auto &storage = *static_cast<const NodeIndexSwitch *>(node.storage);
-  BLO_write_struct_array(writer, IndexSwitchItem, storage.items_num, storage.items);
 }
 
-void IndexSwitchItemsAccessor::blend_read_data(BlendDataReader *reader, bNode &node)
+void IndexSwitchItemsAccessor::blend_read_data_item(BlendDataReader * /*reader*/, ItemT & /*item*/)
 {
-  auto &storage = *static_cast<NodeIndexSwitch *>(node.storage);
-  BLO_read_struct_array(reader, IndexSwitchItem, storage.items_num, &storage.items);
 }
 
 }  // namespace blender::nodes

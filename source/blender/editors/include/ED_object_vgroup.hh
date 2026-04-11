@@ -8,15 +8,17 @@
 
 #pragma once
 
-#include "BLI_compiler_attrs.h"
+#include <optional>
 
-struct bDeformGroup;
 struct EnumPropertyItem;
 struct ID;
 struct MDeformVert;
 struct Object;
 struct PointerRNA;
 struct PropertyRNA;
+struct SpaceNode;
+struct bContext;
+struct bDeformGroup;
 
 #define WEIGHT_REPLACE 1
 #define WEIGHT_ADD 2
@@ -34,7 +36,11 @@ void vgroup_data_clamp_range(ID *id, int total);
  * Matching index only.
  */
 bool vgroup_array_copy(Object *ob, Object *ob_from);
-bool vgroup_parray_alloc(ID *id, MDeformVert ***dvert_arr, int *dvert_tot, bool use_vert_sel);
+bool vgroup_parray_alloc(ID *id,
+                         MDeformVert ***dvert_arr,
+                         int *dvert_tot,
+                         bool use_vert_sel,
+                         std::optional<int> current_frame = {});
 /**
  * For use with tools that use vgroup_parray_alloc with \a use_vert_sel ==
  * true. This finds the unselected mirror deform verts and copies the weights to them from the

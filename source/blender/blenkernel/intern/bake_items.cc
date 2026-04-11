@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "BKE_bake_items.hh"
-#include "BKE_bake_items_serialize.hh"
 #include "BKE_curves.hh"
 #include "BKE_grease_pencil.hh"
 #include "BKE_instances.hh"
@@ -12,8 +11,8 @@
 #include "BKE_volume.hh"
 #include "BKE_volume_grid.hh"
 
-#include "BLI_math_matrix_types.hh"
 #include "BLI_memory_counter.hh"
+#include "BLI_serialize.hh"
 
 #include "DNA_material_types.h"
 #include "DNA_volume_types.h"
@@ -54,52 +53,60 @@ static std::unique_ptr<BakeMaterialsList> materials_to_weak_references(
   return materials_list;
 }
 
+static void prepare_geometry_for_bake_recursive(GeometrySet &geometry,
+                                                BakeDataBlockMap *data_block_map)
+{
+  if (Mesh *mesh = geometry.get_mesh_for_write()) {
+    mesh->attributes_for_write().remove_anonymous();
+    mesh->runtime->bake_materials = materials_to_weak_references(
+        &mesh->mat, &mesh->totcol, data_block_map);
+  }
+  if (Curves *curves = geometry.get_curves_for_write()) {
+    curves->geometry.wrap().attributes_for_write().remove_anonymous();
+    curves->geometry.runtime->bake_materials = materials_to_weak_references(
+        &curves->mat, &curves->totcol, data_block_map);
+  }
+  if (GreasePencil *grease_pencil = geometry.get_grease_pencil_for_write()) {
+    for (GreasePencilDrawingBase *base : grease_pencil->drawings()) {
+      if (base->type != GP_DRAWING) {
+        continue;
+      }
+      greasepencil::Drawing &drawing = reinterpret_cast<GreasePencilDrawing *>(base)->wrap();
+      drawing.strokes_for_write().attributes_for_write().remove_anonymous();
+    }
+    grease_pencil->attributes_for_write().remove_anonymous();
+    grease_pencil->runtime->bake_materials = materials_to_weak_references(
+        &grease_pencil->material_array, &grease_pencil->material_array_num, data_block_map);
+  }
+  if (PointCloud *pointcloud = geometry.get_pointcloud_for_write()) {
+    pointcloud->attributes_for_write().remove_anonymous();
+    pointcloud->runtime->bake_materials = materials_to_weak_references(
+        &pointcloud->mat, &pointcloud->totcol, data_block_map);
+  }
+  if (Volume *volume = geometry.get_volume_for_write()) {
+    volume->runtime->bake_materials = materials_to_weak_references(
+        &volume->mat, &volume->totcol, data_block_map);
+  }
+  if (bke::Instances *instances = geometry.get_instances_for_write()) {
+    instances->attributes_for_write().remove_anonymous();
+    instances->ensure_geometry_instances();
+    for (bke::InstanceReference &reference : instances->references_for_write()) {
+      if (reference.type() == bke::InstanceReference::Type::GeometrySet) {
+        prepare_geometry_for_bake_recursive(reference.geometry_set(), data_block_map);
+      }
+      else {
+        /* Can only bake geometry instances currently. */
+        reference = bke::InstanceReference();
+      }
+    }
+  }
+}
+
 void GeometryBakeItem::prepare_geometry_for_bake(GeometrySet &main_geometry,
                                                  BakeDataBlockMap *data_block_map)
 {
   main_geometry.ensure_owns_all_data();
-  main_geometry.modify_geometry_sets([&](GeometrySet &geometry) {
-    if (Mesh *mesh = geometry.get_mesh_for_write()) {
-      mesh->attributes_for_write().remove_anonymous();
-      mesh->runtime->bake_materials = materials_to_weak_references(
-          &mesh->mat, &mesh->totcol, data_block_map);
-    }
-    if (Curves *curves = geometry.get_curves_for_write()) {
-      curves->geometry.wrap().attributes_for_write().remove_anonymous();
-      curves->geometry.runtime->bake_materials = materials_to_weak_references(
-          &curves->mat, &curves->totcol, data_block_map);
-    }
-    if (GreasePencil *grease_pencil = geometry.get_grease_pencil_for_write()) {
-      for (GreasePencilDrawingBase *base : grease_pencil->drawings()) {
-        if (base->type != GP_DRAWING) {
-          continue;
-        }
-        greasepencil::Drawing &drawing = reinterpret_cast<GreasePencilDrawing *>(base)->wrap();
-        drawing.strokes_for_write().attributes_for_write().remove_anonymous();
-      }
-      grease_pencil->attributes_for_write().remove_anonymous();
-      grease_pencil->runtime->bake_materials = materials_to_weak_references(
-          &grease_pencil->material_array, &grease_pencil->material_array_num, data_block_map);
-    }
-    if (PointCloud *pointcloud = geometry.get_pointcloud_for_write()) {
-      pointcloud->attributes_for_write().remove_anonymous();
-      pointcloud->runtime->bake_materials = materials_to_weak_references(
-          &pointcloud->mat, &pointcloud->totcol, data_block_map);
-    }
-    if (Volume *volume = geometry.get_volume_for_write()) {
-      volume->runtime->bake_materials = materials_to_weak_references(
-          &volume->mat, &volume->totcol, data_block_map);
-    }
-    if (bke::Instances *instances = geometry.get_instances_for_write()) {
-      instances->attributes_for_write().remove_anonymous();
-    }
-    geometry.keep_only_during_modify({GeometryComponent::Type::Mesh,
-                                      GeometryComponent::Type::Curve,
-                                      GeometryComponent::Type::GreasePencil,
-                                      GeometryComponent::Type::PointCloud,
-                                      GeometryComponent::Type::Volume,
-                                      GeometryComponent::Type::Instance});
-  });
+  prepare_geometry_for_bake_recursive(main_geometry, data_block_map);
 }
 
 static void restore_materials(Material ***materials,
@@ -112,7 +119,7 @@ static void restore_materials(Material ***materials,
   }
   BLI_assert(*materials == nullptr);
   *materials_num = materials_list->size();
-  *materials = MEM_cnew_array<Material *>(materials_list->size(), __func__);
+  *materials = MEM_calloc_arrayN<Material *>(materials_list->size(), __func__);
   if (!data_block_map) {
     return;
   }
@@ -126,39 +133,47 @@ static void restore_materials(Material ***materials,
   }
 }
 
+static void restore_data_blocks_recursive(GeometrySet &geometry, BakeDataBlockMap *data_block_map)
+{
+  if (Mesh *mesh = geometry.get_mesh_for_write()) {
+    restore_materials(
+        &mesh->mat, &mesh->totcol, std::move(mesh->runtime->bake_materials), data_block_map);
+  }
+  if (Curves *curves = geometry.get_curves_for_write()) {
+    restore_materials(&curves->mat,
+                      &curves->totcol,
+                      std::move(curves->geometry.runtime->bake_materials),
+                      data_block_map);
+  }
+  if (GreasePencil *grease_pencil = geometry.get_grease_pencil_for_write()) {
+    restore_materials(&grease_pencil->material_array,
+                      &grease_pencil->material_array_num,
+                      std::move(grease_pencil->runtime->bake_materials),
+                      data_block_map);
+  }
+  if (PointCloud *pointcloud = geometry.get_pointcloud_for_write()) {
+    restore_materials(&pointcloud->mat,
+                      &pointcloud->totcol,
+                      std::move(pointcloud->runtime->bake_materials),
+                      data_block_map);
+  }
+  if (Volume *volume = geometry.get_volume_for_write()) {
+    restore_materials(
+        &volume->mat, &volume->totcol, std::move(volume->runtime->bake_materials), data_block_map);
+  }
+  if (bke::Instances *instances = geometry.get_instances_for_write()) {
+    for (bke::InstanceReference &reference : instances->references_for_write()) {
+      if (reference.type() == bke::InstanceReference::Type::GeometrySet) {
+        restore_data_blocks_recursive(reference.geometry_set(), data_block_map);
+      }
+    }
+  }
+}
+
 void GeometryBakeItem::try_restore_data_blocks(GeometrySet &main_geometry,
                                                BakeDataBlockMap *data_block_map)
 {
-  main_geometry.modify_geometry_sets([&](GeometrySet &geometry) {
-    if (Mesh *mesh = geometry.get_mesh_for_write()) {
-      restore_materials(
-          &mesh->mat, &mesh->totcol, std::move(mesh->runtime->bake_materials), data_block_map);
-    }
-    if (Curves *curves = geometry.get_curves_for_write()) {
-      restore_materials(&curves->mat,
-                        &curves->totcol,
-                        std::move(curves->geometry.runtime->bake_materials),
-                        data_block_map);
-    }
-    if (GreasePencil *grease_pencil = geometry.get_grease_pencil_for_write()) {
-      restore_materials(&grease_pencil->material_array,
-                        &grease_pencil->material_array_num,
-                        std::move(grease_pencil->runtime->bake_materials),
-                        data_block_map);
-    }
-    if (PointCloud *pointcloud = geometry.get_pointcloud_for_write()) {
-      restore_materials(&pointcloud->mat,
-                        &pointcloud->totcol,
-                        std::move(pointcloud->runtime->bake_materials),
-                        data_block_map);
-    }
-    if (Volume *volume = geometry.get_volume_for_write()) {
-      restore_materials(&volume->mat,
-                        &volume->totcol,
-                        std::move(volume->runtime->bake_materials),
-                        data_block_map);
-    }
-  });
+  restore_data_blocks_recursive(main_geometry, data_block_map);
 }
 
 #ifdef WITH_OPENVDB
@@ -179,7 +194,7 @@ void VolumeGridBakeItem::count_memory(MemoryCounter &memory) const
 
 PrimitiveBakeItem::PrimitiveBakeItem(const CPPType &type, const void *value) : type_(type)
 {
-  value_ = MEM_mallocN_aligned(type.size(), type.alignment(), __func__);
+  value_ = MEM_mallocN_aligned(type.size, type.alignment, __func__);
   type.copy_construct(value, value_);
 }
 

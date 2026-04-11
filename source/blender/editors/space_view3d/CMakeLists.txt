@@ -5,20 +5,8 @@
 set(INC
   ../asset
   ../include
-  ../../asset_system
-  ../../blenkernel
-  ../../blenloader
-  ../../blentranslation
-  ../../bmesh
-  ../../draw
-  ../../functions
-  ../../gpu
-  ../../imbuf
   ../../makesrna
   ../../modifiers
-  ../../nodes
-  ../../render
-  ../../windowmanager
   ../../../../intern/mantaflow/extern
 
   # RNA_prototypes.hh
@@ -36,6 +24,7 @@ set(SRC
   view3d_context.cc
   view3d_cursor_snap.cc
   view3d_draw.cc
+  view3d_dropboxes.cc
   view3d_edit.cc
   view3d_gizmo_armature.cc
   view3d_gizmo_camera.cc
@@ -83,14 +72,27 @@ set(SRC
 
 set(LIB
   PRIVATE bf::animrig
+  PRIVATE bf::asset_system
   PRIVATE bf::blenfont
+  PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
+  PRIVATE bf::blenloader
+  PRIVATE bf::blentranslation
+  PRIVATE bf::bmesh
   PRIVATE bf::depsgraph
   PRIVATE bf::dna
+  PRIVATE bf::draw
   bf_editor_curves
   bf_editor_lattice
   bf_editor_mesh
+  PRIVATE bf::extern::fmtlib
+  PRIVATE bf::functions
+  PRIVATE bf::gpu
+  PRIVATE bf::imbuf
   PRIVATE bf::intern::guardedalloc
+  PRIVATE bf::nodes
+  PRIVATE bf::render
+  PRIVATE bf::windowmanager
 )
 
 if(WITH_PYTHON)

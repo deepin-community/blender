@@ -12,13 +12,14 @@
 #include "BLI_sort.hh"
 #include "BLI_task.hh"
 
+#include "GEO_foreach_geometry.hh"
 #include "GEO_reorder.hh"
 
 #include "NOD_rna_define.hh"
 
 #include "RNA_enum_types.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "node_geometry_util.hh"
@@ -27,17 +28,19 @@ namespace blender::nodes::node_geo_sort_elements_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Geometry>("Geometry");
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
+  b.add_default_layout();
+  b.add_input<decl::Geometry>("Geometry").description("Geometry to sort the elements of");
+  b.add_output<decl::Geometry>("Geometry").propagate_all().align_with_previous();
   b.add_input<decl::Bool>("Selection").default_value(true).field_on_all().hide_value();
   b.add_input<decl::Int>("Group ID").field_on_all().hide_value();
   b.add_input<decl::Float>("Sort Weight").field_on_all().hide_value();
-
-  b.add_output<decl::Geometry>("Geometry").propagate_all();
 }
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "domain", UI_ITEM_NONE, "", ICON_NONE);
+  layout->prop(ptr, "domain", UI_ITEM_NONE, "", ICON_NONE);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
@@ -222,7 +225,7 @@ static void node_geo_exec(GeoNodeExecParams params)
     }
   }
   else {
-    geometry_set.modify_geometry_sets([&](GeometrySet &geometry_set) {
+    geometry::foreach_real_geometry(geometry_set, [&](GeometrySet &geometry_set) {
       for (const auto [type, domains] : geometry::components_supported_reordering().items()) {
         const bke::GeometryComponent *src_component = geometry_set.get_component(type);
         if (src_component == nullptr || src_component->is_empty()) {
@@ -295,12 +298,16 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_SORT_ELEMENTS, "Sort Elements", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeSortElements", GEO_NODE_SORT_ELEMENTS);
+  ntype.ui_name = "Sort Elements";
+  ntype.ui_description = "Rearrange geometry elements, changing their indices";
+  ntype.enum_name_legacy = "SORT_ELEMENTS";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.declare = node_declare;
   ntype.initfunc = node_init;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

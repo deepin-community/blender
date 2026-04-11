@@ -8,17 +8,22 @@
 
 #pragma once
 
-struct bArmature;
+#include "DNA_listBase.h"
+
+#include "BLI_span.hh"
+
 struct Base;
-struct bContext;
 struct Bone;
-struct bPoseChannel;
 struct EditBone;
 struct GPUSelectResult;
+struct IDProperty;
 struct LinkData;
 struct ListBase;
 struct Object;
 struct Scene;
+struct bArmature;
+struct bContext;
+struct bPoseChannel;
 struct wmOperatorType;
 
 /* -------------------------------------------------------------------- */
@@ -159,6 +164,7 @@ struct tPChanFCurveLink {
 
   /** copy of custom properties at start of operator (to be restored before each modal step) */
   IDProperty *oldprops;
+  IDProperty *old_system_properties;
 };
 
 /* ----------- */
@@ -233,9 +239,6 @@ EditBone *make_boneList(ListBase *edbo, ListBase *bones, Bone *actBone);
 
 /* Duplicate method. */
 
-/** Call this before doing any duplication. */
-void preEditBoneDuplicate(ListBase *editbones);
-void postEditBoneDuplicate(ListBase *editbones, Object *ob);
 EditBone *duplicateEditBone(EditBone *cur_bone, const char *name, ListBase *editbones, Object *ob);
 
 /* Duplicate method (cross objects). */

@@ -25,6 +25,7 @@
 #include "ED_asset_list.hh"
 #include "ED_asset_mark_clear.hh"
 #include "ED_asset_type.hh"
+#include "ED_render.hh"
 
 #include "WM_types.hh"
 
@@ -56,6 +57,12 @@ bool mark_id(ID *id)
 
 void generate_preview(const bContext *C, ID *id)
 {
+  if (!ED_preview_id_is_supported(id)) {
+    return;
+  }
+
+  ED_preview_kill_jobs_for_id(CTX_wm_manager(C), id);
+
   PreviewImage *preview = BKE_previewimg_id_get(id);
   if (preview) {
     BKE_previewimg_clear(preview);

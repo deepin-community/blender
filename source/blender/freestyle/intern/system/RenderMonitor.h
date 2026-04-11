@@ -11,9 +11,7 @@
 
 #include "render_types.h"
 
-#ifdef WITH_CXX_GUARDEDALLOC
-#  include "MEM_guardedalloc.h"
-#endif
+#include "MEM_guardedalloc.h"
 
 namespace Freestyle {
 
@@ -30,7 +28,7 @@ class RenderMonitor {
   {
     if (_re && !info.empty()) {
       _re->i.infostr = info.c_str();
-      _re->stats_draw(&_re->i);
+      _re->display->stats_draw(&_re->i);
       _re->i.infostr = nullptr;
     }
   }
@@ -38,21 +36,19 @@ class RenderMonitor {
   inline void progress(float i)
   {
     if (_re) {
-      _re->progress(i);
+      _re->display->progress(i);
     }
   }
 
   inline bool testBreak()
   {
-    return _re && _re->test_break();
+    return _re && _re->display->test_break();
   }
 
  protected:
   Render *_re;
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:RenderMonitor")
-#endif
 };
 
 } /* namespace Freestyle */

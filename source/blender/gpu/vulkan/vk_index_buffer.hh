@@ -16,6 +16,7 @@ namespace blender::gpu {
 
 class VKIndexBuffer : public IndexBuf {
   VKBuffer buffer_;
+  bool data_uploaded_ = false;
 
  public:
   void upload_data() override;
@@ -29,6 +30,10 @@ class VKIndexBuffer : public IndexBuf {
   VkBuffer vk_handle() const
   {
     return buffer_get().vk_handle();
+  }
+  inline VkDeviceAddress device_address_get() const
+  {
+    return buffer_get().device_address_get();
   }
   VkIndexType vk_index_type() const
   {

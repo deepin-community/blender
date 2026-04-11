@@ -12,6 +12,7 @@
 #include "BLI_set.hh"
 #include "BLI_span.hh"
 #include "BLI_vector.hh"
+#include "BLI_virtual_array.hh"
 
 #include "BKE_subdiv_ccg.hh"
 
@@ -45,6 +46,9 @@ struct SculptSession;
 struct SubdivCCG;
 struct SubdivCCGCoord;
 namespace blender {
+namespace bke {
+class AttributeAccessor;
+}
 namespace bke::pbvh {
 class Node;
 class Tree;
@@ -77,9 +81,6 @@ void translations_from_new_positions(Span<float3> new_positions,
 void translations_from_new_positions(Span<float3> new_positions,
                                      Span<float3> old_positions,
                                      MutableSpan<float3> translations);
-
-void transform_positions(Span<float3> src, const float4x4 &transform, MutableSpan<float3> dst);
-void transform_positions(const float4x4 &transform, MutableSpan<float3> positions);
 
 /** Gather data from an array aligned with all geometry vertices. */
 template<typename T> void gather_data_mesh(Span<T> src, Span<int> indices, MutableSpan<T> dst);
@@ -164,13 +165,7 @@ struct MeshAttributeData {
   VArraySpan<bool> hide_poly;
   VArraySpan<int> face_sets;
 
-  explicit MeshAttributeData(const bke::AttributeAccessor &attributes)
-  {
-    this->mask = *attributes.lookup<float>(".sculpt_mask", bke::AttrDomain::Point);
-    this->hide_vert = *attributes.lookup<bool>(".hide_vert", bke::AttrDomain::Point);
-    this->hide_poly = *attributes.lookup<bool>(".hide_poly", bke::AttrDomain::Face);
-    this->face_sets = *attributes.lookup<int>(".sculpt_face_set", bke::AttrDomain::Face);
-  }
+  explicit MeshAttributeData(const Mesh &mesh);
 };
 
 void calc_factors_common_mesh(const Depsgraph &depsgraph,
@@ -191,6 +186,15 @@ void calc_factors_common_mesh_indexed(const Depsgraph &depsgraph,
                                       const bke::pbvh::MeshNode &node,
                                       Vector<float> &r_factors,
                                       Vector<float> &r_distances);
+void calc_factors_common_mesh_indexed(const Depsgraph &depsgraph,
+                                      const Brush &brush,
+                                      const Object &object,
+                                      const MeshAttributeData &attribute_data,
+                                      Span<float3> vert_positions,
+                                      Span<float3> vert_normals,
+                                      const bke::pbvh::MeshNode &node,
+                                      MutableSpan<float> factors,
+                                      MutableSpan<float> distances);
 void calc_factors_common_grids(const Depsgraph &depsgraph,
                                const Brush &brush,
                                const Object &object,
@@ -260,7 +264,7 @@ void fill_factor_from_hide_and_mask(const BMesh &bm,
 void calc_front_face(const float3 &view_normal, Span<float3> normals, MutableSpan<float> factors);
 void calc_front_face(const float3 &view_normal,
                      Span<float3> vert_normals,
-                     Span<int> vert_indices,
+                     Span<int> verts,
                      MutableSpan<float> factors);
 void calc_front_face(const float3 &view_normal,
                      const SubdivCCG &subdiv_ccg,
@@ -292,7 +296,7 @@ void filter_region_clip_factors(const SculptSession &ss,
  */
 void calc_brush_distances(const SculptSession &ss,
                           Span<float3> vert_positions,
-                          Span<int> vert_indices,
+                          Span<int> vert,
                           eBrushFalloffShape falloff_shape,
                           MutableSpan<float> r_distances);
 void calc_brush_distances(const SculptSession &ss,
@@ -300,8 +304,8 @@ void calc_brush_distances(const SculptSession &ss,
                           eBrushFalloffShape falloff_shape,
                           MutableSpan<float> r_distances);
 void calc_brush_distances_squared(const SculptSession &ss,
-                                  Span<float3> vert_positions,
-                                  Span<int> vert_indices,
+                                  Span<float3> positions,
+                                  Span<int> verts,
                                   eBrushFalloffShape falloff_shape,
                                   MutableSpan<float> r_distances);
 void calc_brush_distances_squared(const SculptSession &ss,
@@ -316,17 +320,10 @@ void filter_distances_with_radius(float radius, Span<float> distances, MutableSp
  * Calculate distances based on a "square" brush tip falloff and ignore vertices that are too far
  * away.
  */
+template<typename T>
 void calc_brush_cube_distances(const Brush &brush,
-                               const float4x4 &mat,
-                               Span<float3> positions,
-                               Span<int> verts,
-                               MutableSpan<float> r_distances,
-                               MutableSpan<float> factors);
-void calc_brush_cube_distances(const Brush &brush,
-                               const float4x4 &mat,
-                               Span<float3> positions,
-                               MutableSpan<float> r_distances,
-                               MutableSpan<float> factors);
+                               const Span<T> positions,
+                               const MutableSpan<float> r_distances);
 
 /**
  * Scale the distances based on the brush radius and the cached "hardness" setting, which increases
@@ -353,7 +350,7 @@ void calc_brush_strength_factors(const StrokeCache &cache,
 void calc_brush_texture_factors(const SculptSession &ss,
                                 const Brush &brush,
                                 Span<float3> vert_positions,
-                                Span<int> vert_indices,
+                                Span<int> vert,
                                 MutableSpan<float> factors);
 void calc_brush_texture_factors(const SculptSession &ss,
                                 const Brush &brush,
@@ -409,71 +406,64 @@ void clip_and_lock_translations(const Sculpt &sd,
                                 MutableSpan<float3> translations);
 
 /**
- * Applying final positions to shape keys is non-trivial because the mesh positions and the active
- * shape key positions must be kept in sync, and shape keys dependent on the active key must also
- * be modified.
- */
-void update_shape_keys(Object &object,
-                       const Mesh &mesh,
-                       const KeyBlock &active_key,
-                       Span<int> verts,
-                       Span<float3> translations,
-                       Span<float3> positions_orig);
-
-/**
  * Creates OffsetIndices based on each node's unique vertex count, allowing for easy slicing of a
  * new array.
  */
-OffsetIndices<int> create_node_vert_offsets(const Span<bke::pbvh::MeshNode> nodes,
-                                            const IndexMask &nodes_mask,
+OffsetIndices<int> create_node_vert_offsets(Span<bke::pbvh::MeshNode> nodes,
+                                            const IndexMask &node_mask,
                                             Array<int> &node_data);
 OffsetIndices<int> create_node_vert_offsets(const CCGKey &key,
-                                            const Span<bke::pbvh::GridsNode> nodes,
-                                            const IndexMask &nodes_mask,
+                                            Span<bke::pbvh::GridsNode> nodes,
+                                            const IndexMask &node_mask,
                                             Array<int> &node_data);
-OffsetIndices<int> create_node_vert_offsets_bmesh(const Span<bke::pbvh::BMeshNode> nodes,
-                                                  const IndexMask &nodes_mask,
+OffsetIndices<int> create_node_vert_offsets_bmesh(Span<bke::pbvh::BMeshNode> nodes,
+                                                  const IndexMask &node_mask,
                                                   Array<int> &node_data);
 
 /**
- * Find vertices connected to the indexed vertices across faces.
+ * Find vertices connected to the indexed vertices across faces. Neighbors connected across hidden
+ * faces are skipped.
  *
- * Does not handle boundary vertices differently, so this method is generally inappropriate for
- * functions that are related to coordinates. See #calc_vert_neighbors_interior
- *
- * \note A vector allocated per element is typically not a good strategy for performance because
- * of each vector's 24 byte overhead, non-contiguous memory, and the possibility of further heap
- * allocations. However, it's done here for now for two reasons:
- *  1. In typical quad meshes there are just 4 neighbors, which fit in the inline buffer.
- *  2. We want to avoid using edges, and the remaining topology map we have access to is the
- *     vertex to face map. That requires deduplication when building the neighbors, which
- *     requires some intermediate data structure like a vector anyway.
+ * See #calc_vert_neighbors_interior for a version that does extra filtering for boundary vertices.
  */
-void calc_vert_neighbors(OffsetIndices<int> faces,
-                         Span<int> corner_verts,
-                         GroupedSpan<int> vert_to_face,
-                         Span<bool> hide_poly,
-                         Span<int> verts,
-                         MutableSpan<Vector<int>> result);
-void calc_vert_neighbors(const SubdivCCG &subdiv_ccg,
-                         Span<int> grids,
-                         MutableSpan<Vector<SubdivCCGCoord>> result);
-void calc_vert_neighbors(Set<BMVert *, 0> verts, MutableSpan<Vector<BMVert *>> result);
+GroupedSpan<int> calc_vert_neighbors(OffsetIndices<int> faces,
+                                     Span<int> corner_verts,
+                                     GroupedSpan<int> vert_to_face,
+                                     Span<bool> hide_poly,
+                                     Span<int> verts,
+                                     Vector<int> &r_offset_data,
+                                     Vector<int> &r_data);
+GroupedSpan<int> calc_vert_neighbors(const SubdivCCG &subdiv_ccg,
+                                     Span<int> grids,
+                                     Vector<int> &r_offset_data,
+                                     Vector<int> &r_data);
+GroupedSpan<BMVert *> calc_vert_neighbors(Set<BMVert *, 0> verts,
+                                          Vector<int> &r_offset_data,
+                                          Vector<BMVert *> &r_data);
 
 /**
- * Find vertices connected to the indexed vertices across faces. For boundary vertices (stored in
- * the \a boundary_verts argument), only include other boundary vertices. Also skip connectivity
- * across hidden faces and skip neighbors of corner vertices.
- *
- * \note See #calc_vert_neighbors for information on why we use a Vector per element.
+ * Find vertices connected to the indexed vertices across faces. Neighbors connected across hidden
+ * faces are skipped. For boundary vertices (stored in the \a boundary_verts argument), only
+ * include other boundary vertices. Corner vertices are skipped entirely and will not have neighbor
+ * information populated.
  */
-void calc_vert_neighbors_interior(OffsetIndices<int> faces,
-                                  Span<int> corner_verts,
-                                  GroupedSpan<int> vert_to_face,
-                                  BitSpan boundary_verts,
-                                  Span<bool> hide_poly,
-                                  Span<int> verts,
-                                  MutableSpan<Vector<int>> result);
+GroupedSpan<int> calc_vert_neighbors_interior(OffsetIndices<int> faces,
+                                              Span<int> corner_verts,
+                                              GroupedSpan<int> vert_to_face,
+                                              BitSpan boundary_verts,
+                                              Span<bool> hide_poly,
+                                              Span<int> verts,
+                                              Vector<int> &r_offset_data,
+                                              Vector<int> &r_data);
+GroupedSpan<int> calc_vert_neighbors_interior(OffsetIndices<int> faces,
+                                              Span<int> corner_verts,
+                                              GroupedSpan<int> vert_to_face,
+                                              BitSpan boundary_verts,
+                                              Span<bool> hide_poly,
+                                              Span<int> verts,
+                                              Span<float> factors,
+                                              Vector<int> &r_offset_data,
+                                              Vector<int> &r_data);
 void calc_vert_neighbors_interior(OffsetIndices<int> faces,
                                   Span<int> corner_verts,
                                   BitSpan boundary_verts,

@@ -7,6 +7,7 @@
  */
 
 /* Screw modifier: revolves the edges about an axis */
+#include <algorithm>
 #include <climits>
 
 #include "BLI_utildefines.h"
@@ -31,7 +32,7 @@
 #include "BKE_lib_query.hh"
 #include "BKE_mesh.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "RNA_access.hh"
@@ -46,7 +47,7 @@
 
 #include "GEO_mesh_merge_by_distance.hh"
 
-#include "BLI_strict_flags.h" /* Keep last. */
+#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
 
 using namespace blender;
 
@@ -80,7 +81,7 @@ struct ScrewVertIter {
 };
 
 #define SV_UNUSED (UINT_MAX)
-#define SV_INVALID ((UINT_MAX)-1)
+#define SV_INVALID ((UINT_MAX) - 1)
 #define SV_IS_VALID(v) ((v) < SV_INVALID)
 
 static void screwvert_iter_init(ScrewVertIter *iter,
@@ -156,7 +157,7 @@ static Mesh *mesh_remove_doubles_on_axis(Mesh *result,
 
   if (tot_doubles != 0) {
     uint tot = totvert * step_tot;
-    int *full_doubles_map = static_cast<int *>(MEM_malloc_arrayN(tot, sizeof(int), __func__));
+    int *full_doubles_map = MEM_malloc_arrayN<int>(tot, __func__);
     copy_vn_i(full_doubles_map, int(tot), -1);
 
     uint tot_doubles_left = tot_doubles;
@@ -229,9 +230,9 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
   uint *vert_loop_map = nullptr; /* orig vert to orig loop */
 
   /* UV Coords */
-  const uint mloopuv_layers_tot = uint(
+  const uint uv_map_layers_tot = uint(
       CustomData_number_of_layers(&mesh->corner_data, CD_PROP_FLOAT2));
-  blender::Array<blender::float2 *> mloopuv_layers(mloopuv_layers_tot);
+  blender::Array<blender::float2 *> uv_map_layers(uv_map_layers_tot);
   float uv_u_scale;
   float uv_v_minmax[2] = {FLT_MAX, -FLT_MAX};
   float uv_v_range_inv;
@@ -376,9 +377,7 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
   }
   else {
     close = false;
-    if (step_tot < 2) {
-      step_tot = 2;
-    }
+    step_tot = std::max<uint>(step_tot, 2);
 
     maxVerts = totvert * step_tot;          /* -1 because we're joining back up */
     maxEdges = (totvert * (step_tot - 1)) + /* these are the edges between new verts */
@@ -397,8 +396,8 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
       mesh, int(maxVerts), int(maxEdges), int(maxPolys), int(maxPolys) * 4);
   /* The modifier doesn't support original index mapping on the edge or face domains. Remove
    * original index layers, since otherwise edges aren't displayed at all in wireframe view. */
-  CustomData_free_layers(&result->edge_data, CD_ORIGINDEX, result->edges_num);
-  CustomData_free_layers(&result->face_data, CD_ORIGINDEX, result->edges_num);
+  CustomData_free_layers(&result->edge_data, CD_ORIGINDEX);
+  CustomData_free_layers(&result->face_data, CD_ORIGINDEX);
 
   const blender::Span<float3> vert_positions_orig = mesh->vert_positions();
   const blender::Span<int2> edges_orig = mesh->edges();
@@ -424,15 +423,15 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
 
   CustomData_copy_data(&mesh->vert_data, &result->vert_data, 0, 0, int(totvert));
 
-  if (mloopuv_layers_tot) {
+  if (uv_map_layers_tot) {
     const float zero_co[3] = {0};
     plane_from_point_normal_v3(uv_axis_plane, zero_co, axis_vec);
   }
 
-  if (mloopuv_layers_tot) {
+  if (uv_map_layers_tot) {
     uint uv_lay;
-    for (uv_lay = 0; uv_lay < mloopuv_layers_tot; uv_lay++) {
-      mloopuv_layers[uv_lay] = static_cast<blender::float2 *>(CustomData_get_layer_n_for_write(
+    for (uv_lay = 0; uv_lay < uv_map_layers_tot; uv_lay++) {
+      uv_map_layers[uv_lay] = static_cast<blender::float2 *>(CustomData_get_layer_n_for_write(
           &result->corner_data, CD_PROP_FLOAT2, int(uv_lay), result->corners_num));
     }
 
@@ -462,12 +461,10 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
   /* build face -> edge map */
   if (faces_num) {
 
-    edge_face_map = static_cast<uint *>(
-        MEM_malloc_arrayN(totedge, sizeof(*edge_face_map), __func__));
+    edge_face_map = MEM_malloc_arrayN<uint>(totedge, __func__);
     memset(edge_face_map, 0xff, sizeof(*edge_face_map) * totedge);
 
-    vert_loop_map = static_cast<uint *>(
-        MEM_malloc_arrayN(totvert, sizeof(*vert_loop_map), __func__));
+    vert_loop_map = MEM_malloc_arrayN<uint>(totvert, __func__);
     memset(vert_loop_map, 0xff, sizeof(*vert_loop_map) * totvert);
 
     for (const int64_t i : faces_orig.index_range()) {
@@ -491,8 +488,7 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
      * Sort edge verts for correct face flipping
      * NOT REALLY NEEDED but face flipping is nice. */
 
-    vert_connect = static_cast<ScrewVertConnect *>(
-        MEM_malloc_arrayN(totvert, sizeof(ScrewVertConnect), __func__));
+    vert_connect = MEM_malloc_arrayN<ScrewVertConnect>(totvert, __func__);
     /* skip the first slice of verts. */
     // vert_connect = (ScrewVertConnect *) &medge_new[totvert];
     vc = vert_connect;
@@ -866,7 +862,7 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
       mat_nr = 0;
     }
 
-    if (has_mloop_orig == false && mloopuv_layers_tot) {
+    if (has_mloop_orig == false && uv_map_layers_tot) {
       uv_v_offset_a = dist_signed_to_plane_v3(vert_positions_new[edges_new[i][0]], uv_axis_plane);
       uv_v_offset_b = dist_signed_to_plane_v3(vert_positions_new[edges_new[i][1]], uv_axis_plane);
 
@@ -881,7 +877,7 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
       /* Polygon */
       if (has_mpoly_orig) {
         CustomData_copy_data(
-            &mesh->face_data, &result->face_data, int(face_index_orig), int(face_index), 1);
+            &mesh->face_data, &result->face_data, int(face_index_orig), face_index, 1);
         origindex[face_index] = int(face_index_orig);
       }
       else {
@@ -915,12 +911,12 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
                              new_loop_index + 3,
                              1);
 
-        if (mloopuv_layers_tot) {
+        if (uv_map_layers_tot) {
           uint uv_lay;
           const float uv_u_offset_a = float(step) * uv_u_scale;
           const float uv_u_offset_b = float(step + 1) * uv_u_scale;
-          for (uv_lay = 0; uv_lay < mloopuv_layers_tot; uv_lay++) {
-            blender::float2 *mluv = &mloopuv_layers[uv_lay][new_loop_index];
+          for (uv_lay = 0; uv_lay < uv_map_layers_tot; uv_lay++) {
+            blender::float2 *mluv = &uv_map_layers[uv_lay][new_loop_index];
 
             mluv[quad_ord[0]][0] += uv_u_offset_a;
             mluv[quad_ord[1]][0] += uv_u_offset_a;
@@ -930,12 +926,12 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
         }
       }
       else {
-        if (mloopuv_layers_tot) {
+        if (uv_map_layers_tot) {
           uint uv_lay;
           const float uv_u_offset_a = float(step) * uv_u_scale;
           const float uv_u_offset_b = float(step + 1) * uv_u_scale;
-          for (uv_lay = 0; uv_lay < mloopuv_layers_tot; uv_lay++) {
-            blender::float2 *mluv = &mloopuv_layers[uv_lay][new_loop_index];
+          for (uv_lay = 0; uv_lay < uv_map_layers_tot; uv_lay++) {
+            blender::float2 *mluv = &uv_map_layers[uv_lay][new_loop_index];
 
             copy_v2_fl2(mluv[quad_ord[0]], uv_u_offset_a, uv_v_offset_a);
             copy_v2_fl2(mluv[quad_ord[1]], uv_u_offset_a, uv_v_offset_b);
@@ -1021,6 +1017,7 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
 #endif
 
   sharp_faces.finish();
+  dst_material_index.finish();
 
   if (edge_face_map) {
     MEM_freeN(edge_face_map);
@@ -1039,8 +1036,6 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
                                          ob_axis != nullptr ? mtx_tx[3] : nullptr,
                                          ltmd->merge_dist);
   }
-
-  dst_material_index.finish();
 
   return result;
 }
@@ -1071,47 +1066,46 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
 
   PointerRNA screw_obj_ptr = RNA_pointer_get(ptr, "object");
 
-  uiLayoutSetPropSep(layout, true);
+  layout->use_property_split_set(true);
 
-  col = uiLayoutColumn(layout, false);
-  uiItemR(col, ptr, "angle", UI_ITEM_NONE, nullptr, ICON_NONE);
-  row = uiLayoutRow(col, false);
-  uiLayoutSetActive(row,
-                    RNA_pointer_is_null(&screw_obj_ptr) ||
-                        !RNA_boolean_get(ptr, "use_object_screw_offset"));
-  uiItemR(row, ptr, "screw_offset", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "iterations", UI_ITEM_NONE, nullptr, ICON_NONE);
+  col = &layout->column(false);
+  col->prop(ptr, "angle", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  row = &col->row(false);
+  row->active_set(RNA_pointer_is_null(&screw_obj_ptr) ||
+                  !RNA_boolean_get(ptr, "use_object_screw_offset"));
+  row->prop(ptr, "screw_offset", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  col->prop(ptr, "iterations", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  uiItemS(layout);
-  col = uiLayoutColumn(layout, false);
-  row = uiLayoutRow(col, false);
-  uiItemR(row, ptr, "axis", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "object", UI_ITEM_NONE, IFACE_("Axis Object"), ICON_NONE);
-  sub = uiLayoutColumn(col, false);
-  uiLayoutSetActive(sub, !RNA_pointer_is_null(&screw_obj_ptr));
-  uiItemR(sub, ptr, "use_object_screw_offset", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->separator();
+  col = &layout->column(false);
+  row = &col->row(false);
+  row->prop(ptr, "axis", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
+  col->prop(ptr, "object", UI_ITEM_NONE, IFACE_("Axis Object"), ICON_NONE);
+  sub = &col->column(false);
+  sub->active_set(!RNA_pointer_is_null(&screw_obj_ptr));
+  sub->prop(ptr, "use_object_screw_offset", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  uiItemS(layout);
+  layout->separator();
 
-  col = uiLayoutColumn(layout, true);
-  uiItemR(col, ptr, "steps", UI_ITEM_NONE, IFACE_("Steps Viewport"), ICON_NONE);
-  uiItemR(col, ptr, "render_steps", UI_ITEM_NONE, IFACE_("Render"), ICON_NONE);
+  col = &layout->column(true);
+  col->prop(ptr, "steps", UI_ITEM_NONE, IFACE_("Steps Viewport"), ICON_NONE);
+  col->prop(ptr, "render_steps", UI_ITEM_NONE, IFACE_("Render"), ICON_NONE);
 
-  uiItemS(layout);
+  layout->separator();
 
-  row = uiLayoutRowWithHeading(layout, true, IFACE_("Merge"));
-  uiItemR(row, ptr, "use_merge_vertices", UI_ITEM_NONE, "", ICON_NONE);
-  sub = uiLayoutRow(row, true);
-  uiLayoutSetActive(sub, RNA_boolean_get(ptr, "use_merge_vertices"));
-  uiItemR(sub, ptr, "merge_threshold", UI_ITEM_NONE, "", ICON_NONE);
+  row = &layout->row(true, IFACE_("Merge"));
+  row->prop(ptr, "use_merge_vertices", UI_ITEM_NONE, "", ICON_NONE);
+  sub = &row->row(true);
+  sub->active_set(RNA_boolean_get(ptr, "use_merge_vertices"));
+  sub->prop(ptr, "merge_threshold", UI_ITEM_NONE, "", ICON_NONE);
 
-  uiItemS(layout);
+  layout->separator();
 
-  row = uiLayoutRowWithHeading(layout, true, IFACE_("Stretch UVs"));
-  uiItemR(row, ptr, "use_stretch_u", toggles_flag, IFACE_("U"), ICON_NONE);
-  uiItemR(row, ptr, "use_stretch_v", toggles_flag, IFACE_("V"), ICON_NONE);
+  row = &layout->row(true, IFACE_("Stretch UVs"));
+  row->prop(ptr, "use_stretch_u", toggles_flag, IFACE_("U"), ICON_NONE);
+  row->prop(ptr, "use_stretch_v", toggles_flag, IFACE_("V"), ICON_NONE);
 
-  modifier_panel_end(layout, ptr);
+  modifier_error_message_draw(layout, ptr);
 }
 
 static void normals_panel_draw(const bContext * /*C*/, Panel *panel)
@@ -1121,12 +1115,12 @@ static void normals_panel_draw(const bContext * /*C*/, Panel *panel)
 
   PointerRNA *ptr = modifier_panel_get_property_pointers(panel, nullptr);
 
-  uiLayoutSetPropSep(layout, true);
+  layout->use_property_split_set(true);
 
-  col = uiLayoutColumn(layout, false);
-  uiItemR(col, ptr, "use_smooth_shade", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "use_normal_calculate", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "use_normal_flip", UI_ITEM_NONE, nullptr, ICON_NONE);
+  col = &layout->column(false);
+  col->prop(ptr, "use_smooth_shade", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  col->prop(ptr, "use_normal_calculate", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  col->prop(ptr, "use_normal_flip", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 static void panel_register(ARegionType *region_type)
@@ -1171,4 +1165,5 @@ ModifierTypeInfo modifierType_Screw = {
     /*blend_write*/ nullptr,
     /*blend_read*/ nullptr,
     /*foreach_cache*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
 };

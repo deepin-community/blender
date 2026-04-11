@@ -16,7 +16,7 @@ class WORLD_OT_convert_volume_to_mesh(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         world = cls._world_get(context)
-        if not world or not world.use_nodes:
+        if not world:
             return False
 
         ntree = world.node_tree
@@ -53,11 +53,9 @@ class WORLD_OT_convert_volume_to_mesh(bpy.types.Operator):
 
         material = bpy.data.materials.new(name)
         mesh.materials.append(material)
-        material.use_nodes = True
         volume_tree = material.node_tree
-        for node in volume_tree.nodes:
-            if node.type != 'OUTPUT_MATERIAL':
-                volume_tree.nodes.remove(node)
+        volume_tree.nodes.clear()
+        volume_tree.nodes.new("ShaderNodeOutputMaterial")
         volume_output = volume_tree.get_output_node('EEVEE')
 
         links_to_add = []
@@ -68,7 +66,8 @@ class WORLD_OT_convert_volume_to_mesh(bpy.types.Operator):
             volume_output.inputs["Volume"],
             world_output,
             world_output.inputs["Volume"],
-            links_to_add)
+            links_to_add,
+        )
         self._sync_links(volume_tree, links_to_add)
 
         # Add transparent volume for other render engines
@@ -87,7 +86,7 @@ class WORLD_OT_convert_volume_to_mesh(bpy.types.Operator):
 
         world.use_eevee_finite_volume = False
 
-        return {"FINISHED"}
+        return {'FINISHED'}
 
     @staticmethod
     def _world_get(context):

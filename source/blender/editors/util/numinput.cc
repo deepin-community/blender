@@ -19,7 +19,6 @@
 
 #include "BKE_context.hh"
 #include "BKE_report.hh"
-#include "BKE_scene.hh"
 #include "BKE_unit.hh"
 
 #include "DNA_scene_types.h"
@@ -32,6 +31,7 @@
 #endif
 
 #include "ED_numinput.hh"
+
 #include "UI_interface.hh"
 
 /* Numeric input which isn't allowing full numeric editing. */
@@ -85,7 +85,7 @@ void initNumInput(NumInput *n)
   n->str_cur = 0;
 }
 
-void outputNumInput(NumInput *n, char *str, const UnitSettings *unit_settings)
+void outputNumInput(NumInput *n, char *str, const UnitSettings &unit_settings)
 {
   short j;
   const int ln = NUM_STR_REP_LEN;
@@ -98,7 +98,7 @@ void outputNumInput(NumInput *n, char *str, const UnitSettings *unit_settings)
                         j;
 
     /* Use scale_length if needed! */
-    const float fac = float(BKE_scene_unit_scale(unit_settings, n->unit_type[j], 1.0));
+    const float fac = float(BKE_unit_value_scale(unit_settings, n->unit_type[j], 1.0));
 
     if (n->val_flag[i] & NUM_EDITED) {
       /* Get the best precision, allows us to draw '10.0001' as '10' instead! */
@@ -120,7 +120,7 @@ void outputNumInput(NumInput *n, char *str, const UnitSettings *unit_settings)
 #endif
 
         if (n->val_flag[i] & NUM_INVALID) {
-          STRNCPY(val, RPT_("Invalid"));
+          STRNCPY_UTF8(val, RPT_("Invalid"));
         }
         else {
           BKE_unit_value_as_string_adaptive(val,
@@ -134,35 +134,35 @@ void outputNumInput(NumInput *n, char *str, const UnitSettings *unit_settings)
         }
 
         /* +1 because of trailing '\0' */
-        BLI_strncpy(before_cursor, n->str, n->str_cur + 1);
-        BLI_snprintf(&str[j * ln],
-                     ln,
-                     "[%s%s|%s%s] = %s",
-                     heading_exp,
-                     before_cursor,
-                     &n->str[n->str_cur],
-                     trailing_exp,
-                     val);
+        BLI_strncpy_utf8(before_cursor, n->str, n->str_cur + 1);
+        BLI_snprintf_utf8(&str[j * ln],
+                          ln,
+                          "[%s%s|%s%s] = %s",
+                          heading_exp,
+                          before_cursor,
+                          &n->str[n->str_cur],
+                          trailing_exp,
+                          val);
       }
       else {
         const char *cur = (i == n->idx) ? "|" : "";
         if (n->unit_use_radians && n->unit_type[i] == B_UNIT_ROTATION) {
           /* Radian exception... */
-          BLI_snprintf(&str[j * ln], ln, "%s%.6gr%s", cur, n->val[i], cur);
+          BLI_snprintf_utf8(&str[j * ln], ln, "%s%.6gr%s", cur, n->val[i], cur);
         }
         else {
           char tstr[NUM_STR_REP_LEN];
           BKE_unit_value_as_string_adaptive(
               tstr, ln, double(n->val[i]), prec, n->unit_sys, n->unit_type[i], true, false);
-          BLI_snprintf(&str[j * ln], ln, "%s%s%s", cur, tstr, cur);
+          BLI_snprintf_utf8(&str[j * ln], ln, "%s%s%s", cur, tstr, cur);
         }
       }
     }
     else {
       const char *cur = (i == n->idx) ? "|" : "";
-      BLI_snprintf(&str[j * ln], ln, "%sNONE%s", cur, cur);
+      BLI_snprintf_utf8(&str[j * ln], ln, "%sNONE%s", cur, cur);
     }
-    /* We might have cut some multi-bytes utf8 chars
+    /* We might have cut some multi-bytes UTF8 chars
      * (e.g. trailing degrees symbol values can become only 'A'). */
     BLI_str_utf8_invalid_strip(&str[j * ln], strlen(&str[j * ln]));
   }
@@ -265,7 +265,7 @@ static bool editstr_insert_at_cursor(NumInput *n, const char *buf, const int buf
 
 bool user_string_to_number(bContext *C,
                            const char *str,
-                           const UnitSettings *unit,
+                           const UnitSettings &unit,
                            int type,
                            double *r_value,
                            const bool use_single_line_error,
@@ -276,17 +276,17 @@ bool user_string_to_number(bContext *C,
   err_info.use_single_line_error = use_single_line_error;
   err_info.r_string = r_error;
 
-  double unit_scale = BKE_scene_unit_scale(unit, type, 1.0);
+  const double unit_scale = BKE_unit_value_scale(unit, type, 1.0);
   if (BKE_unit_string_contains_unit(str, type)) {
     char str_unit_convert[256];
-    STRNCPY(str_unit_convert, str);
+    STRNCPY_UTF8(str_unit_convert, str);
     BKE_unit_replace_string(
-        str_unit_convert, sizeof(str_unit_convert), str, unit_scale, unit->system, type);
+        str_unit_convert, sizeof(str_unit_convert), str, unit_scale, unit.system, type);
 
     return BPY_run_string_as_number(C, nullptr, str_unit_convert, &err_info, r_value);
   }
 
-  int success = BPY_run_string_as_number(C, nullptr, str, &err_info, r_value);
+  bool success = BPY_run_string_as_number(C, nullptr, str, &err_info, r_value);
   *r_value = BKE_unit_apply_preferred_unit(unit, type, *r_value);
   *r_value /= unit_scale;
   return success;
@@ -474,8 +474,7 @@ bool handleNumInput(bContext *C, NumInput *n, const wmEvent *event)
 #if 0
     /* Those keys are not directly accessible in all layouts,
      * preventing to generate matching events.
-     * So we use a hack (ascii value) instead, see below.
-     */
+     * So we use a hack (ASCII value) instead, see below. */
     case EQUALKEY:
     case PADASTERKEY:
       if (!(n->flag & NUM_EDIT_FULL)) {
@@ -549,14 +548,14 @@ bool handleNumInput(bContext *C, NumInput *n, const wmEvent *event)
   }
 
   if ((!utf8_buf || !utf8_buf[0]) && ascii[0]) {
-    /* Fallback to ascii. */
+    /* Fall back to ascii. */
     utf8_buf = ascii;
   }
 
   if (utf8_buf && utf8_buf[0]) {
     if (!(n->flag & NUM_EDIT_FULL)) {
       /* In simple edit mode, we only keep a few chars as valid! */
-      /* no need to decode unicode, ascii is first char only */
+      /* no need to decode unicode, ASCII is first char only. */
       if (!editstr_is_simple_numinput(utf8_buf[0])) {
         return false;
       }
@@ -583,7 +582,7 @@ bool handleNumInput(bContext *C, NumInput *n, const wmEvent *event)
 
     double val;
     int success = user_string_to_number(
-        C, n->str, &sce->unit, n->unit_type[idx], &val, false, &error);
+        C, n->str, sce->unit, n->unit_type[idx], &val, false, &error);
 
     if (error) {
       ReportList *reports = CTX_wm_reports(C);

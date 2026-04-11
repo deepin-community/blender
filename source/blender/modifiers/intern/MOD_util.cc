@@ -8,27 +8,24 @@
 
 #include <cstring>
 
-#include "BLI_utildefines.h"
-
 #include "BLI_bitmap.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector.h"
 
-#include "DNA_image_types.h"
 #include "DNA_mesh_types.h"
 #include "DNA_modifier_types.h"
 #include "DNA_object_types.h"
+#include "DNA_texture_types.h"
 
 #include "BKE_action.hh" /* BKE_pose_channel_find_name */
 #include "BKE_attribute.hh"
+#include "BKE_customdata.hh"
 #include "BKE_deform.hh"
-#include "BKE_editmesh.hh"
 #include "BKE_image.hh"
 #include "BKE_lattice.hh"
 
 #include "BKE_modifier.hh"
 
-#include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
 
 #include "MOD_modifiertypes.hh"
@@ -147,7 +144,7 @@ void MOD_previous_vcos_store(ModifierData *md, const float (*vert_coords)[3])
   while ((md = md->next) && md->type == eModifierType_Armature) {
     ArmatureModifierData *amd = (ArmatureModifierData *)md;
     if (amd->multi && amd->vert_coords_prev == nullptr) {
-      amd->vert_coords_prev = static_cast<float(*)[3]>(MEM_dupallocN(vert_coords));
+      amd->vert_coords_prev = static_cast<float (*)[3]>(MEM_dupallocN(vert_coords));
     }
     else {
       break;

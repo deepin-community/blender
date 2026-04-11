@@ -2,12 +2,14 @@
  *
  * SPDX-License-Identifier: Apache-2.0 */
 
-#ifndef __SHADER_H__
-#define __SHADER_H__
+#pragma once
 
 #ifdef WITH_OSL
+#  include <cstdint> /* Needed before `sdlexec.h` for `int32_t` with GCC 15.1. */
 /* So no context pollution happens from indirectly included windows.h */
-#  include "util/windows.h"
+#  ifdef _WIN32
+#    include "util/windows.h"
+#  endif
 #  include <OSL/oslexec.h>
 #endif
 
@@ -21,6 +23,7 @@
 #include "util/string.h"
 #include "util/thread.h"
 #include "util/types.h"
+#include "util/unique_ptr.h"
 
 CCL_NAMESPACE_BEGIN
 
@@ -70,7 +73,7 @@ class Shader : public Node {
   NODE_DECLARE
 
   /* shader graph */
-  ShaderGraph *graph;
+  unique_ptr<ShaderGraph> graph;
 
   NODE_SOCKET_API(int, pass_id)
 
@@ -78,7 +81,6 @@ class Shader : public Node {
   NODE_SOCKET_API(EmissionSampling, emission_sampling_method)
   NODE_SOCKET_API(bool, use_transparent_shadow)
   NODE_SOCKET_API(bool, use_bump_map_correction)
-  NODE_SOCKET_API(bool, heterogeneous_volume)
   NODE_SOCKET_API(VolumeSampling, volume_sampling_method)
   NODE_SOCKET_API(int, volume_interpolation_method)
   NODE_SOCKET_API(float, volume_step_rate)
@@ -87,11 +89,13 @@ class Shader : public Node {
   NODE_SOCKET_API(DisplacementMethod, displacement_method)
 
   float prev_volume_step_rate;
+  bool prev_has_surface_shadow_transparency;
 
   /* synchronization */
   bool need_update_uvs;
   bool need_update_attribute;
   bool need_update_displacement;
+  bool shadow_transparency_needs_realloc;
 
   /* If the shader has only volume components, the surface is assumed to
    * be transparent.
@@ -109,11 +113,13 @@ class Shader : public Node {
   bool has_volume;
   bool has_displacement;
   bool has_surface_bssrdf;
-  bool has_bump;
+  bool has_bump_from_surface;
+  bool has_bump_from_displacement;
   bool has_bssrdf_bump;
   bool has_surface_spatial_varying;
   bool has_volume_spatial_varying;
   bool has_volume_attribute_dependency;
+  bool has_light_path_node;
 
   float3 emission_estimate;
   EmissionSampling emission_sampling;
@@ -126,15 +132,17 @@ class Shader : public Node {
   uint id;
 
 #ifdef WITH_OSL
-  /* osl shading state references */
-  OSL::ShaderGroupRef osl_surface_ref;
-  OSL::ShaderGroupRef osl_surface_bump_ref;
-  OSL::ShaderGroupRef osl_volume_ref;
-  OSL::ShaderGroupRef osl_displacement_ref;
+  /* Compiled osl shading state references. */
+  struct OSLCache {
+    OSL::ShaderGroupRef surface;
+    OSL::ShaderGroupRef bump;
+    OSL::ShaderGroupRef displacement;
+    OSL::ShaderGroupRef volume;
+  };
+  map<Device *, OSLCache> osl_cache;
 #endif
 
   Shader();
-  ~Shader();
 
   /* Estimate emission of this shader based on the shader graph. This works only in very simple
    * cases. But it helps improve light importance sampling in common cases.
@@ -143,7 +151,7 @@ class Shader : public Node {
    * entirely for a light. */
   void estimate_emission();
 
-  void set_graph(ShaderGraph *graph);
+  void set_graph(unique_ptr<ShaderGraph> &&graph);
   void tag_update(Scene *scene);
   void tag_used(Scene *scene);
 
@@ -156,6 +164,8 @@ class Shader : public Node {
   }
 
   bool need_update_geometry() const;
+
+  bool has_surface_shadow_transparency() const;
 };
 
 /* Shader Manager virtual base class
@@ -175,10 +185,8 @@ class ShaderManager {
     UPDATE_NONE = 0u,
   };
 
-  static ShaderManager *create(int shadingsystem, Device *device);
+  static unique_ptr<ShaderManager> create(const int shadingsystem);
   virtual ~ShaderManager();
-
-  virtual void reset(Scene *scene) = 0;
 
   virtual bool use_osl()
   {
@@ -186,15 +194,9 @@ class ShaderManager {
   }
 
   /* device update */
-  void device_update(Device *device, DeviceScene *dscene, Scene *scene, Progress &progress);
-  virtual void device_update_specific(Device *device,
-                                      DeviceScene *dscene,
-                                      Scene *scene,
-                                      Progress &progress) = 0;
+  void device_update_pre(Device *device, DeviceScene *dscene, Scene *scene, Progress &progress);
+  void device_update_post(Device *device, DeviceScene *dscene, Scene *scene, Progress &progress);
   virtual void device_free(Device *device, DeviceScene *dscene, Scene *scene) = 0;
-
-  void device_update_common(Device *device, DeviceScene *dscene, Scene *scene, Progress &progress);
-  void device_free_common(Device *device, DeviceScene *dscene, Scene *scene);
 
   /* get globally unique id for a type of attribute */
   virtual uint64_t get_attribute_id(ustring name);
@@ -210,39 +212,36 @@ class ShaderManager {
   /* Selective nodes compilation. */
   uint get_kernel_features(Scene *scene);
 
-  static void free_memory();
-
-  float linear_rgb_to_gray(float3 c);
-  float3 rec709_to_scene_linear(float3 c);
+  float linear_rgb_to_gray(const float3 c);
+  float3 rec709_to_scene_linear(const float3 c);
 
   string get_cryptomatte_materials(Scene *scene);
 
-  void tag_update(Scene *scene, uint32_t flag);
+  void tag_update(Scene *scene, const uint32_t flag);
 
   bool need_update() const;
 
   void init_xyz_transforms();
+
+  enum class SceneLinearSpace { Rec709, Rec2020, ACEScg, Unknown };
+
+  SceneLinearSpace get_scene_linear_space()
+  {
+    return scene_linear_space;
+  }
 
  protected:
   ShaderManager();
 
   uint32_t update_flags;
 
-  typedef unordered_map<ustring, uint64_t, ustringHash> AttributeIDMap;
+  using AttributeIDMap = unordered_map<ustring, uint64_t>;
   AttributeIDMap unique_attribute_id;
 
   static thread_mutex lookup_table_mutex;
 
   unordered_map<const float *, size_t> bsdf_tables;
-
-  template<std::size_t n>
-  size_t ensure_bsdf_table(DeviceScene *dscene, Scene *scene, const float (&table)[n])
-  {
-    return ensure_bsdf_table_impl(dscene, scene, table, n);
-  }
-  size_t ensure_bsdf_table_impl(DeviceScene *dscene, Scene *scene, const float *table, size_t n);
-
-  uint get_graph_kernel_features(ShaderGraph *graph);
+  size_t thin_film_table_offset_;
 
   thread_spin_lock attribute_lock_;
 
@@ -254,9 +253,30 @@ class ShaderManager {
   float3 rec709_to_r;
   float3 rec709_to_g;
   float3 rec709_to_b;
-  bool is_rec709;
+  SceneLinearSpace scene_linear_space;
+  vector<float> thin_film_table;
+
+  template<std::size_t n>
+  size_t ensure_bsdf_table(DeviceScene *dscene, Scene *scene, const float (&table)[n])
+  {
+    return ensure_bsdf_table_impl(dscene, scene, table, n);
+  }
+  size_t ensure_bsdf_table_impl(DeviceScene *dscene,
+                                Scene *scene,
+                                const float *table,
+                                const size_t n);
+
+  void compute_thin_film_table(const Transform &xyz_to_rgb);
+
+  uint get_graph_kernel_features(ShaderGraph *graph);
+
+  virtual void device_update_specific(Device *device,
+                                      DeviceScene *dscene,
+                                      Scene *scene,
+                                      Progress &progress) = 0;
+
+  void device_update_common(Device *device, DeviceScene *dscene, Scene *scene, Progress &progress);
+  void device_free_common(Device *device, DeviceScene *dscene, Scene *scene);
 };
 
 CCL_NAMESPACE_END
-
-#endif /* __SHADER_H__ */

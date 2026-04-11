@@ -15,7 +15,7 @@
 #include "BKE_layer.hh"
 #include "BKE_mesh.hh"
 #include "BKE_paint.hh"
-#include "BKE_pbvh_api.hh"
+#include "BKE_paint_bvh.hh"
 #include "BKE_subdiv_ccg.hh"
 
 #include "WM_api.hh"
@@ -24,7 +24,6 @@
 #include "mesh_brush_common.hh"
 #include "paint_intern.hh"
 #include "paint_mask.hh"
-#include "sculpt_automask.hh"
 #include "sculpt_hide.hh"
 #include "sculpt_intern.hh"
 #include "sculpt_smooth.hh"
@@ -121,7 +120,8 @@ struct FilterLocalData {
   Vector<int> visible_verts;
   Vector<float> node_mask;
   Vector<float> new_mask;
-  Vector<Vector<int>> vert_neighbors;
+  Vector<int> neighbor_offsets;
+  Vector<int> neighbor_data;
 };
 
 static void apply_new_mask_mesh(const Depsgraph &depsgraph,
@@ -139,7 +139,7 @@ static void apply_new_mask_mesh(const Depsgraph &depsgraph,
   node_mask.foreach_index(GrainSize(1), [&](const int i, const int pos) {
     const Span<int> verts = nodes[i].verts();
     const Span<float> new_node_mask = new_mask.slice(node_verts[pos]);
-    if (array_utils::indexed_data_equal<float>(mask, verts, new_mask)) {
+    if (array_utils::indexed_data_equal<float>(mask, verts, new_node_mask)) {
       return;
     }
     undo::push_node(depsgraph, object, &nodes[i], undo::Type::Mask);
@@ -154,7 +154,7 @@ static void apply_new_mask_mesh(const Depsgraph &depsgraph,
 
 static void smooth_mask_mesh(const OffsetIndices<int> faces,
                              const Span<int> corner_verts,
-                             const GroupedSpan<int> vert_to_face_map,
+                             const GroupedSpan<int> vert_to_face,
                              const Span<bool> hide_poly,
                              const Span<bool> hide_vert,
                              const Span<float> mask,
@@ -164,17 +164,28 @@ static void smooth_mask_mesh(const OffsetIndices<int> faces,
 {
   const Span<int> verts = node.verts();
 
-  tls.vert_neighbors.resize(verts.size());
-  const MutableSpan<Vector<int>> neighbors = tls.vert_neighbors;
-  calc_vert_neighbors(faces, corner_verts, vert_to_face_map, hide_poly, verts, neighbors);
+  const GroupedSpan<int> neighbors = calc_vert_neighbors(faces,
+                                                         corner_verts,
+                                                         vert_to_face,
+                                                         hide_poly,
+                                                         verts,
+                                                         tls.neighbor_offsets,
+                                                         tls.neighbor_data);
+
+  tls.node_mask.resize(verts.size());
+  const MutableSpan<float> node_mask = tls.node_mask;
+  gather_data_mesh(mask, verts, node_mask);
 
   smooth::neighbor_data_average_mesh(mask, neighbors, new_mask);
-  copy_old_hidden_mask_mesh(verts, hide_vert, mask, new_mask);
+  mask::mix_new_masks(new_mask, 0.5f, node_mask);
+  copy_old_hidden_mask_mesh(verts, hide_vert, mask, node_mask);
+  mask::clamp_mask(node_mask);
+  new_mask.copy_from(node_mask);
 }
 
 static void sharpen_mask_mesh(const OffsetIndices<int> faces,
                               const Span<int> corner_verts,
-                              const GroupedSpan<int> vert_to_face_map,
+                              const GroupedSpan<int> vert_to_face,
                               const Span<bool> hide_poly,
                               const Span<bool> hide_vert,
                               const Span<float> mask,
@@ -188,9 +199,13 @@ static void sharpen_mask_mesh(const OffsetIndices<int> faces,
   const MutableSpan<float> node_mask = tls.node_mask;
   gather_data_mesh(mask, verts, node_mask);
 
-  tls.vert_neighbors.resize(verts.size());
-  const MutableSpan<Vector<int>> neighbors = tls.vert_neighbors;
-  calc_vert_neighbors(faces, corner_verts, vert_to_face_map, hide_poly, verts, neighbors);
+  const GroupedSpan<int> neighbors = calc_vert_neighbors(faces,
+                                                         corner_verts,
+                                                         vert_to_face,
+                                                         hide_poly,
+                                                         verts,
+                                                         tls.neighbor_offsets,
+                                                         tls.neighbor_data);
 
   smooth::neighbor_data_average_mesh(mask, neighbors, new_mask);
 
@@ -200,7 +215,7 @@ static void sharpen_mask_mesh(const OffsetIndices<int> faces,
 
 static void grow_mask_mesh(const OffsetIndices<int> faces,
                            const Span<int> corner_verts,
-                           const GroupedSpan<int> vert_to_face_map,
+                           const GroupedSpan<int> vert_to_face,
                            const Span<bool> hide_poly,
                            const Span<bool> hide_vert,
                            const Span<float> mask,
@@ -210,9 +225,13 @@ static void grow_mask_mesh(const OffsetIndices<int> faces,
 {
   const Span<int> verts = node.verts();
 
-  tls.vert_neighbors.resize(verts.size());
-  const MutableSpan<Vector<int>> neighbors = tls.vert_neighbors;
-  calc_vert_neighbors(faces, corner_verts, vert_to_face_map, hide_poly, verts, neighbors);
+  const GroupedSpan<int> neighbors = calc_vert_neighbors(faces,
+                                                         corner_verts,
+                                                         vert_to_face,
+                                                         hide_poly,
+                                                         verts,
+                                                         tls.neighbor_offsets,
+                                                         tls.neighbor_data);
 
   for (const int i : verts.index_range()) {
     new_mask[i] = mask[verts[i]];
@@ -225,7 +244,7 @@ static void grow_mask_mesh(const OffsetIndices<int> faces,
 
 static void shrink_mask_mesh(const OffsetIndices<int> faces,
                              const Span<int> corner_verts,
-                             const GroupedSpan<int> vert_to_face_map,
+                             const GroupedSpan<int> vert_to_face,
                              const Span<bool> hide_poly,
                              const Span<bool> hide_vert,
                              const Span<float> mask,
@@ -235,9 +254,13 @@ static void shrink_mask_mesh(const OffsetIndices<int> faces,
 {
   const Span<int> verts = node.verts();
 
-  tls.vert_neighbors.resize(verts.size());
-  const MutableSpan<Vector<int>> neighbors = tls.vert_neighbors;
-  calc_vert_neighbors(faces, corner_verts, vert_to_face_map, hide_poly, verts, neighbors);
+  const GroupedSpan<int> neighbors = calc_vert_neighbors(faces,
+                                                         corner_verts,
+                                                         vert_to_face,
+                                                         hide_poly,
+                                                         verts,
+                                                         tls.neighbor_offsets,
+                                                         tls.neighbor_data);
 
   for (const int i : verts.index_range()) {
     new_mask[i] = mask[verts[i]];
@@ -354,11 +377,23 @@ static void apply_new_mask_grids(const Depsgraph &depsgraph,
 
 static void smooth_mask_grids(const SubdivCCG &subdiv_ccg,
                               const bke::pbvh::GridsNode &node,
+                              FilterLocalData &tls,
                               MutableSpan<float> new_mask)
 {
+  const CCGKey key = BKE_subdiv_ccg_key_top_level(subdiv_ccg);
+
   const Span<int> grids = node.grids();
+  const int grid_verts_num = grids.size() * key.grid_area;
+
+  tls.node_mask.resize(grid_verts_num);
+  const MutableSpan<float> node_mask = tls.node_mask;
+  gather_data_grids(subdiv_ccg, subdiv_ccg.masks.as_span(), grids, node_mask);
+
   smooth::average_data_grids(subdiv_ccg, subdiv_ccg.masks.as_span(), grids, new_mask);
-  copy_old_hidden_mask_grids(subdiv_ccg, grids, new_mask);
+  mask::mix_new_masks(new_mask, 0.5f, node_mask);
+  copy_old_hidden_mask_grids(subdiv_ccg, grids, node_mask);
+  mask::clamp_mask(node_mask);
+  new_mask.copy_from(node_mask);
 }
 
 static void sharpen_mask_grids(const SubdivCCG &subdiv_ccg,
@@ -555,13 +590,23 @@ static void apply_new_mask_bmesh(const Depsgraph &depsgraph,
   pbvh.tag_masks_changed(IndexMask::from_bools(node_changed, memory));
 }
 
-static void smooth_mask_bmesh(const int mask_offset,
+static void smooth_mask_bmesh(const BMesh &bm,
+                              const int mask_offset,
                               bke::pbvh::BMeshNode &node,
+                              FilterLocalData &tls,
                               MutableSpan<float> new_mask)
 {
   const Set<BMVert *, 0> &verts = BKE_pbvh_bmesh_node_unique_verts(&node);
+
+  tls.node_mask.resize(verts.size());
+  const MutableSpan<float> node_mask = tls.node_mask;
+  gather_mask_bmesh(bm, verts, node_mask);
+
   average_neighbor_mask_bmesh(mask_offset, verts, new_mask);
-  copy_old_hidden_mask_bmesh(mask_offset, verts, new_mask);
+  mask::mix_new_masks(new_mask, 0.5f, node_mask);
+  copy_old_hidden_mask_bmesh(mask_offset, verts, node_mask);
+  mask::clamp_mask(node_mask);
+  new_mask.copy_from(node_mask);
 }
 
 static void sharpen_mask_bmesh(const BMesh &bm,
@@ -589,7 +634,7 @@ static void grow_mask_bmesh(const int mask_offset,
 {
   const Set<BMVert *, 0> &verts = BKE_pbvh_bmesh_node_unique_verts(&node);
 
-  Vector<BMVert *, 64> neighbors;
+  BMeshNeighborVerts neighbors;
   int i = 0;
   for (BMVert *vert : verts) {
     new_mask[i] = BM_ELEM_CD_GET_FLOAT(vert, mask_offset);
@@ -608,7 +653,7 @@ static void shrink_mask_bmesh(const int mask_offset,
 {
   const Set<BMVert *, 0> &verts = BKE_pbvh_bmesh_node_unique_verts(&node);
 
-  Vector<BMVert *, 64> neighbors;
+  BMeshNeighborVerts neighbors;
   int i = 0;
   for (BMVert *vert : verts) {
     new_mask[i] = BM_ELEM_CD_GET_FLOAT(vert, mask_offset);
@@ -683,7 +728,7 @@ static bool decrease_contrast_mask_bmesh(const Depsgraph &depsgraph,
   return true;
 }
 
-static int sculpt_mask_filter_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus sculpt_mask_filter_exec(bContext *C, wmOperator *op)
 {
   const Scene &scene = *CTX_data_scene(C);
   Object &ob = *CTX_data_active_object(C);
@@ -842,8 +887,9 @@ static int sculpt_mask_filter_exec(bContext *C, wmOperator *op)
         switch (filter_type) {
           case FilterType::Smooth: {
             node_mask.foreach_index(GrainSize(1), [&](const int i, const int pos) {
+              FilterLocalData &tls = all_tls.local();
               smooth_mask_grids(
-                  subdiv_ccg, nodes[i], new_masks.as_mutable_span().slice(node_offsets[pos]));
+                  subdiv_ccg, nodes[i], tls, new_masks.as_mutable_span().slice(node_offsets[pos]));
             });
             apply_new_mask_grids(*depsgraph, ob, node_mask, node_offsets, new_masks);
             break;
@@ -900,7 +946,7 @@ static int sculpt_mask_filter_exec(bContext *C, wmOperator *op)
     case bke::pbvh::Type::BMesh: {
       MutableSpan<bke::pbvh::BMeshNode> nodes = pbvh.nodes<bke::pbvh::BMeshNode>();
       BMesh &bm = *ss.bm;
-      BM_mesh_elem_index_ensure(&bm, BM_VERT);
+      vert_random_access_ensure(ob);
       const int mask_offset = CustomData_get_offset_named(
           &bm.vdata, CD_PROP_FLOAT, ".sculpt_mask");
 
@@ -913,8 +959,12 @@ static int sculpt_mask_filter_exec(bContext *C, wmOperator *op)
         switch (filter_type) {
           case FilterType::Smooth: {
             node_mask.foreach_index(GrainSize(1), [&](const int i, const int pos) {
-              smooth_mask_bmesh(
-                  mask_offset, nodes[i], new_masks.as_mutable_span().slice(node_offsets[pos]));
+              FilterLocalData &tls = all_tls.local();
+              smooth_mask_bmesh(bm,
+                                mask_offset,
+                                nodes[i],
+                                tls,
+                                new_masks.as_mutable_span().slice(node_offsets[pos]));
             });
             apply_new_mask_bmesh(*depsgraph, ob, mask_offset, node_mask, node_offsets, new_masks);
             break;

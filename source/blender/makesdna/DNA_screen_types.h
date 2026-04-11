@@ -35,10 +35,13 @@ struct wmTooltipState;
 struct Panel_Runtime;
 #ifdef __cplusplus
 namespace blender::bke {
+struct ARegionRuntime;
 struct FileHandlerType;
-}
+}  // namespace blender::bke
+using ARegionRuntimeHandle = blender::bke::ARegionRuntime;
 using FileHandlerTypeHandle = blender::bke::FileHandlerType;
 #else
+typedef struct ARegionRuntimeHandle ARegionRuntimeHandle;
 typedef struct FileHandlerTypeHandle FileHandlerTypeHandle;
 #endif
 
@@ -47,6 +50,11 @@ typedef struct FileHandlerTypeHandle FileHandlerTypeHandle;
 #define AREAMAP_FROM_SCREEN(screen) ((ScrAreaMap *)&(screen)->vertbase)
 
 typedef struct bScreen {
+#ifdef __cplusplus
+  /** See #ID_Type comment for why this is here. */
+  static constexpr ID_Type id_type = ID_SCR;
+#endif
+
   ID id;
 
   /* TODO: Should become ScrAreaMap now.
@@ -97,6 +105,10 @@ typedef struct bScreen {
   /** Context callback. */
   void /*bContextDataCallback*/ *context;
 
+  /* Used to restore after SCREENFULL state. */
+  short fullscreen_flag;
+  char _pad2[6];
+
   /** Runtime. */
   struct wmTooltipState *tool_tip;
 
@@ -135,7 +147,12 @@ typedef struct LayoutPanelState {
   /** Identifier of the panel. */
   char *idname;
   uint8_t flag;
-  char _pad[7];
+  char _pad[3];
+  /**
+   * A logical time set from #layout_panel_states_clock when the panel is used by the UI. This is
+   * used to detect the least-recently-used panel states when some panel states should be removed.
+   */
+  uint32_t last_used;
 } LayoutPanelState;
 
 enum LayoutPanelStateFlag {
@@ -152,8 +169,7 @@ typedef struct Panel {
   /** Runtime for drawing. */
   struct uiLayout *layout;
 
-  /** Defined as #BKE_ST_MAXNAME. */
-  char panelname[64];
+  char panelname[/*BKE_ST_MAXNAME*/ 64];
   /** Panel name is identifier for restoring location. */
   char *drawname;
   /** Offset within the region. */
@@ -174,9 +190,17 @@ typedef struct Panel {
 
   /**
    * List of #LayoutPanelState. This stores the open-close-state of layout-panels created with
-   * `layout.panel(...)` in Python. For more information on layout-panels, see `uiLayoutPanelProp`.
+   * `layout.panel(...)` in Python. For more information on layout-panels, see
+   * `uiLayout::panel_prop`.
    */
   ListBase layout_panel_states;
+  /**
+   * This is increased whenever a layout panel state is used by the UI. This is used to allow for
+   * some garbage collection of panel states when #layout_panel_states becomes large. It works by
+   * removing all least-recently-used panel states up to a certain threshold.
+   */
+  uint32_t layout_panel_states_clock;
+  char _pad2[4];
 
   struct Panel_Runtime *runtime;
 } Panel;
@@ -283,9 +307,6 @@ typedef struct uiListDyn {
   int *items_filter_neworder;
 
   struct wmOperatorType *custom_drag_optype;
-  struct PointerRNA *custom_drag_opptr;
-  struct wmOperatorType *custom_activate_optype;
-  struct PointerRNA *custom_activate_opptr;
 } uiListDyn;
 
 typedef struct uiList { /* some list UI data need to be saved in file */
@@ -294,8 +315,7 @@ typedef struct uiList { /* some list UI data need to be saved in file */
   /** Runtime. */
   struct uiListType *type;
 
-  /** Defined as UI_MAX_NAME_STR. */
-  char list_id[128];
+  char list_id[/*UI_MAX_NAME_STR*/ 256];
 
   /** How items are laid out in the list. */
   int layout_type;
@@ -307,8 +327,8 @@ typedef struct uiList { /* some list UI data need to be saved in file */
   int list_last_activei;
 
   /* Filtering data. */
-  /** Defined as UI_MAX_NAME_STR. */
-  char filter_byname[128];
+  /** Defined as . */
+  char filter_byname[/*UI_MAX_NAME_STR*/ 256];
   int filter_flag;
   int filter_sort_flag;
 
@@ -319,10 +339,47 @@ typedef struct uiList { /* some list UI data need to be saved in file */
   uiListDyn *dyn_data;
 } uiList;
 
+typedef enum uiViewStateFlag {
+  UI_VIEW_SHOW_FILTER_OPTIONS = (1 << 0),
+} uiViewStateFlag;
+
+/** See #uiViewStateLink. */
+typedef struct uiViewState {
+  /**
+   * User set height of the view in unscaled pixels. A value of 0 means no custom height was set
+   * and the default should be used.
+   */
+  int custom_height;
+  /**
+   * Amount of vertical scrolling. View types decide on the unit:
+   * - Tree views: Number of items scrolled out of view (#scroll_offset of 5 means 5 items are
+   *   scrolled out of view).
+   */
+  int scroll_offset;
+  uint16_t flag; /* #uiViewStateFlag */
+  char _pad[6];
+
+  char search_string[/*UI_MAX_NAME_STR*/ 256];
+} uiViewState;
+
+/**
+ * Persistent storage for some state of views (#ui::AbstractView), for storage in a region. The
+ * view state is matched to the view using the view's idname.
+ *
+ * The actual state is stored in #uiViewState, so views can manage this conveniently without having
+ * to care about the idname and listbase pointers themselves.
+ */
+typedef struct uiViewStateLink {
+  struct uiViewStateLink *next, *prev;
+
+  char idname[/*BKE_ST_MAXNAME*/ 64];
+
+  uiViewState state;
+} uiViewStateLink;
+
 typedef struct TransformOrientation {
   struct TransformOrientation *next, *prev;
-  /** MAX_NAME. */
-  char name[64];
+  char name[/*MAX_NAME*/ 64];
   float mat[3][3];
   char _pad[4];
 } TransformOrientation;
@@ -331,8 +388,7 @@ typedef struct TransformOrientation {
 typedef struct uiPreview {
   struct uiPreview *next, *prev;
 
-  /** Defined as #BKE_ST_MAXNAME. */
-  char preview_id[64];
+  char preview_id[/*BKE_ST_MAXNAME*/ 64];
   short height;
 
   /* Unset on file read. */
@@ -395,15 +451,15 @@ typedef struct ScrArea {
   /** Rect bound by v1 v2 v3 v4. */
   rcti totrct;
 
+  /** eSpace_Type (SPACE_FOO). */
+  char spacetype;
   /**
    * eSpace_Type (SPACE_FOO).
    *
    * Temporarily used while switching area type, otherwise this should be SPACE_EMPTY.
-   * Also, versioning uses it to nicely replace deprecated * editors.
+   * Also, versioning uses it to nicely replace deprecated editors.
    * It's been there for ages, name doesn't fit any more.
    */
-  char spacetype;
-  /** #eSpace_Type (SPACE_FOO). */
   char butspacetype;
   short butspacetype_subtype;
 
@@ -450,27 +506,6 @@ typedef struct ScrArea {
   ScrArea_Runtime runtime;
 } ScrArea;
 
-typedef struct ARegion_Runtime {
-  /** Panel category to use between 'layout' and 'draw'. */
-  const char *category;
-
-  /**
-   * The visible part of the region, use with region overlap not to draw
-   * on top of the overlapping regions.
-   *
-   * Lazy initialize, zero'd when unset, relative to #ARegion.winrct x/y min. */
-  rcti visible_rect;
-
-  /* The offset needed to not overlap with window scroll-bars. Only used by HUD regions for now. */
-  int offset_x, offset_y;
-
-  /** Maps #uiBlock::name to uiBlock for faster lookups. */
-  struct GHash *block_name_map;
-
-  /* Dummy panel used in popups so they can support layout panels. */
-  Panel *popup_block_panel;
-} ARegion_Runtime;
-
 typedef struct ARegion {
   struct ARegion *next, *prev;
 
@@ -478,8 +513,6 @@ typedef struct ARegion {
   View2D v2d;
   /** Coordinates of region. */
   rcti winrct;
-  /** Runtime for partial redraw, same or smaller than winrct. */
-  rcti drawrct;
   /** Size. */
   short winx, winy;
   /**
@@ -487,10 +520,7 @@ typedef struct ARegion {
    * where zero represents no scroll - the first category always shows first at the top.
    */
   int category_scroll;
-  char _pad0[4];
 
-  /** Region is currently visible on screen. */
-  short visible;
   /** Window, header, etc. identifier for drawing. */
   short regiontype;
   /** How it should split. */
@@ -504,20 +534,13 @@ typedef struct ARegion {
    */
   short sizex, sizey;
 
-  /** Private, cached notifier events. */
-  short do_draw;
-  /** Private, cached notifier events. */
-  short do_draw_paintcursor;
   /** Private, set for indicate drawing overlapped. */
   short overlap;
   /** Temporary copy of flag settings for clean full-screen. */
   short flagfullscreen;
 
-  /** Callbacks for this region type. */
-  struct ARegionType *type;
+  char _pad[2];
 
-  /** #uiBlock. */
-  ListBase uiblocks;
   /** Panel. */
   ListBase panels;
   /** Stack of panel categories. */
@@ -526,23 +549,16 @@ typedef struct ARegion {
   ListBase ui_lists;
   /** #uiPreview. */
   ListBase ui_previews;
-  /** #wmEventHandler. */
-  ListBase handlers;
-  /** Panel categories runtime. */
-  ListBase panels_category;
+  /**
+   * Permanent state storage of #ui::AbstractView instances, so hiding regions with views or
+   * loading files remembers the view state.
+   */
+  ListBase view_states; /* #uiViewStateLink */
 
-  /** Gizmo-map of this region. */
-  struct wmGizmoMap *gizmo_map;
-  /** Blend in/out. */
-  struct wmTimer *regiontimer;
-  struct wmDrawBuffer *draw_buffer;
-
-  /** Use this string to draw info. */
-  char *headerstr;
   /** XXX 2.50, need spacedata equivalent? */
   void *regiondata;
 
-  ARegion_Runtime runtime;
+  ARegionRuntimeHandle *runtime;
 } ARegion;
 
 /** #ScrArea.flag */
@@ -571,7 +587,7 @@ enum {
   AREA_FLAG_OFFSCREEN = (1 << 9),
 };
 
-#define AREAGRID 4
+#define AREAGRID 1
 #define AREAMINX 29
 #define HEADER_PADDING_Y 6
 #define HEADERY (20 + HEADER_PADDING_Y)
@@ -587,9 +603,21 @@ enum {
   SCREENNORMAL = 0,
   /** One editor taking over the screen. */
   SCREENMAXIMIZED = 1,
-  /** One editor taking over the screen with no bare-minimum UI elements. */
+  /**
+   * One editor taking over the screen with no bare-minimum UI elements.
+   *
+   * Besides making the area full-screen this disables navigation & statistics because
+   * this is part of a stereo 3D pipeline where these elements would interfere, see: !142418.
+   */
   SCREENFULL = 2,
 };
+
+/** #bScreen.fullscreen_flag */
+typedef enum eScreen_Fullscreen_Flag {
+  FULLSCREEN_RESTORE_GIZMO_NAVIGATE = (1 << 0),
+  FULLSCREEN_RESTORE_TEXT = (1 << 1),
+  FULLSCREEN_RESTORE_STATS = (1 << 2),
+} eScreen_Fullscreen_Flag;
 
 /** #bScreen.redraws_flag */
 typedef enum eScreen_Redraws_Flag {
@@ -628,7 +656,6 @@ enum {
 enum {
   UILST_LAYOUT_DEFAULT = 0,
   UILST_LAYOUT_COMPACT = 1,
-  UILST_LAYOUT_GRID = 2,
   UILST_LAYOUT_BIG_PREVIEW_GRID = 3,
 };
 
@@ -777,6 +804,7 @@ enum {
    * wouldn't exist. Runtime only flag. */
   RGN_FLAG_POLL_FAILED = (1 << 10),
   RGN_FLAG_RESIZE_RESPECT_BUTTON_SECTIONS = (1 << 11),
+  RGN_FLAG_INDICATE_OVERFLOW = (1 << 12),
 };
 
 /** #ARegion.do_draw */
@@ -805,8 +833,6 @@ enum {
 };
 
 typedef struct AssetShelfSettings {
-  struct AssetShelfSettings *next, *prev;
-
   AssetLibraryReference asset_library_reference;
 
   ListBase enabled_catalog_paths; /* #AssetCatalogPathLink */
@@ -837,7 +863,7 @@ typedef struct AssetShelf {
 
   /** Identifier that matches the #AssetShelfType.idname this shelf was created with. Used to
    * restore the #AssetShelf.type pointer below on file read. */
-  char idname[64]; /* MAX_NAME */
+  char idname[/*MAX_NAME*/ 64];
   /** Runtime. */
   struct AssetShelfType *type;
 

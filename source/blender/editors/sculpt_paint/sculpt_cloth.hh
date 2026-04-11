@@ -11,7 +11,7 @@
 #include "BLI_array.hh"
 #include "BLI_index_mask_fwd.hh"
 #include "BLI_map.hh"
-#include "BLI_math_vector.hh"
+#include "BLI_math_vector_types.hh"
 #include "BLI_vector.hh"
 
 #include "BKE_collision.h"
@@ -152,6 +152,11 @@ void plane_falloff_preview_draw(uint gpuattr,
 IndexMask brush_affected_nodes_gather(const Object &object,
                                       const Brush &brush,
                                       IndexMaskMemory &memory);
+
+void do_cloth_brush(const Depsgraph &depsgraph,
+                    const Sculpt &sd,
+                    Object &object,
+                    const IndexMask &node_mask);
 
 bool is_cloth_deform_brush(const Brush &brush);
 

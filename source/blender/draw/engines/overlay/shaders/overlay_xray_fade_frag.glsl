@@ -2,20 +2,38 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "infos/overlay_antialiasing_infos.hh"
+
+FRAGMENT_SHADER_CREATE_INFO(overlay_xray_fade)
+
 void main()
 {
-  float depth = texture(depthTex, uvcoordsvar.xy).r;
-  float depth_xray = texture(xrayDepthTex, uvcoordsvar.xy).r;
-#ifdef OVERLAY_NEXT
-  float depth_xray_infront = texture(xrayDepthTexInfront, uvcoordsvar.xy).r;
-  if (((depth_xray_infront == 1.0) && (depth > depth_xray)) || (depth > depth_xray_infront)) {
-    fragColor = vec4(opacity);
-  }
-  else {
-    discard;
+  /* TODO(fclem): Cleanup naming. Here the xray depth mean the scene depth (from workbench) and
+   * simple depth is the overlay depth. */
+  float depth_infront = textureLod(depth_txInfront, screen_uv, 0.0f).r;
+  float depth_xray_infront = textureLod(xray_depth_txInfront, screen_uv, 0.0f).r;
+  if (depth_infront != 1.0f) {
+    if (depth_xray_infront < depth_infront) {
+      frag_color = float4(opacity);
+      return;
+    }
+
+    gpu_discard_fragment();
     return;
   }
-#else
-  fragColor = vec4((depth < 1.0 && depth > depth_xray) ? opacity : 1.0);
-#endif
+
+  float depth = textureLod(depth_tx, screen_uv, 0.0f).r;
+  float depth_xray = textureLod(xray_depth_tx, screen_uv, 0.0f).r;
+  /* Merge infront depth. */
+  if (depth_xray_infront != 1.0f) {
+    depth_xray = 0.0f;
+  }
+
+  if (depth_xray < depth) {
+    frag_color = float4(opacity);
+    return;
+  }
+
+  gpu_discard_fragment();
+  return;
 }

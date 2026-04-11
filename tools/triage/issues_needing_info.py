@@ -12,6 +12,9 @@ Example usage:
 
     python ./issues_needing_info.py --username mano-wii
 """
+__all__ = (
+    "main",
+)
 
 import argparse
 import datetime
@@ -60,7 +63,7 @@ def main() -> None:
         dest="username",
         type=str,
         required=False,
-        help="Username registred in Gitea")
+        help="Username registered in Gitea")
 
     args = parser.parse_args()
     username = args.username

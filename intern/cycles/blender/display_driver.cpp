@@ -4,6 +4,8 @@
 
 #include "GPU_context.hh"
 #include "GPU_immediate.hh"
+#include "GPU_platform.hh"
+#include "GPU_platform_backend_enum.h"
 #include "GPU_shader.hh"
 #include "GPU_state.hh"
 #include "GPU_texture.hh"
@@ -12,9 +14,9 @@
 
 #include "blender/display_driver.h"
 
-#include "device/device.h"
 #include "util/log.h"
 #include "util/math.h"
+#include "util/vector.h"
 
 CCL_NAMESPACE_BEGIN
 
@@ -35,7 +37,7 @@ unique_ptr<BlenderDisplayShader> BlenderDisplayShader::create(BL::RenderEngine &
 int BlenderDisplayShader::get_position_attrib_location()
 {
   if (position_attribute_location_ == -1) {
-    GPUShader *shader_program = get_shader_program();
+    blender::gpu::Shader *shader_program = get_shader_program();
     position_attribute_location_ = GPU_shader_get_attribute(shader_program,
                                                             position_attribute_name);
   }
@@ -45,7 +47,7 @@ int BlenderDisplayShader::get_position_attrib_location()
 int BlenderDisplayShader::get_tex_coord_attrib_location()
 {
   if (tex_coord_attribute_location_ == -1) {
-    GPUShader *shader_program = get_shader_program();
+    blender::gpu::Shader *shader_program = get_shader_program();
     tex_coord_attribute_location_ = GPU_shader_get_attribute(shader_program,
                                                              tex_coord_attribute_name);
   }
@@ -55,14 +57,20 @@ int BlenderDisplayShader::get_tex_coord_attrib_location()
 /* --------------------------------------------------------------------
  * BlenderFallbackDisplayShader.
  */
-static GPUShader *compile_fallback_shader(void)
+static blender::gpu::Shader *compile_fallback_shader()
 {
   /* NOTE: Compilation errors are logged to console. */
-  GPUShader *shader = GPU_shader_create_from_info_name("gpu_shader_cycles_display_fallback");
+  blender::gpu::Shader *shader = GPU_shader_create_from_info_name(
+      "gpu_shader_cycles_display_fallback");
   return shader;
 }
 
-GPUShader *BlenderFallbackDisplayShader::bind(int width, int height)
+BlenderFallbackDisplayShader::~BlenderFallbackDisplayShader()
+{
+  destroy_shader();
+}
+
+blender::gpu::Shader *BlenderFallbackDisplayShader::bind(const int width, const int height)
 {
   create_shader_if_needed();
 
@@ -72,7 +80,7 @@ GPUShader *BlenderFallbackDisplayShader::bind(int width, int height)
 
   /* Bind shader now to enable uniform assignment. */
   GPU_shader_bind(shader_program_);
-  int slot = 0;
+  const int slot = 0;
   GPU_shader_uniform_int_ex(shader_program_, image_texture_location_, 1, 1, &slot);
   float size[2];
   size[0] = width;
@@ -86,7 +94,7 @@ void BlenderFallbackDisplayShader::unbind()
   GPU_shader_unbind();
 }
 
-GPUShader *BlenderFallbackDisplayShader::get_shader_program()
+blender::gpu::Shader *BlenderFallbackDisplayShader::get_shader_program()
 {
   return shader_program_;
 }
@@ -101,20 +109,20 @@ void BlenderFallbackDisplayShader::create_shader_if_needed()
 
   shader_program_ = compile_fallback_shader();
   if (!shader_program_) {
-    LOG(ERROR) << "Failed to compile fallback shader";
+    LOG_ERROR << "Failed to compile fallback shader";
     return;
   }
 
   image_texture_location_ = GPU_shader_get_uniform(shader_program_, "image_texture");
   if (image_texture_location_ < 0) {
-    LOG(ERROR) << "Shader doesn't contain the 'image_texture' uniform.";
+    LOG_ERROR << "Shader doesn't contain the 'image_texture' uniform.";
     destroy_shader();
     return;
   }
 
   fullscreen_location_ = GPU_shader_get_uniform(shader_program_, "fullscreen");
   if (fullscreen_location_ < 0) {
-    LOG(ERROR) << "Shader doesn't contain the 'fullscreen' uniform.";
+    LOG_ERROR << "Shader doesn't contain the 'fullscreen' uniform.";
     destroy_shader();
     return;
   }
@@ -139,7 +147,7 @@ BlenderDisplaySpaceShader::BlenderDisplaySpaceShader(BL::RenderEngine &b_engine,
   DCHECK(b_engine_.support_display_space_shader(b_scene_));
 }
 
-GPUShader *BlenderDisplaySpaceShader::bind(int /*width*/, int /*height*/)
+blender::gpu::Shader *BlenderDisplaySpaceShader::bind(int /*width*/, int /*height*/)
 {
   b_engine_.bind_display_space_shader(b_scene_);
   return GPU_shader_get_bound();
@@ -150,13 +158,13 @@ void BlenderDisplaySpaceShader::unbind()
   b_engine_.unbind_display_space_shader();
 }
 
-GPUShader *BlenderDisplaySpaceShader::get_shader_program()
+blender::gpu::Shader *BlenderDisplaySpaceShader::get_shader_program()
 {
   if (!shader_program_) {
     shader_program_ = GPU_shader_get_bound();
   }
   if (!shader_program_) {
-    LOG(ERROR) << "Error retrieving shader program for display space shader.";
+    LOG_ERROR << "Error retrieving shader program for display space shader.";
   }
 
   return shader_program_;
@@ -221,12 +229,12 @@ class DisplayGPUTexture {
                                         max(width, 1),
                                         max(height, 1),
                                         1,
-                                        GPU_RGBA16F,
+                                        blender::gpu::TextureFormat::SFLOAT_16_16_16_16,
                                         GPU_TEXTURE_USAGE_GENERAL,
                                         nullptr);
 
     if (!gpu_texture) {
-      LOG(ERROR) << "Error creating texture.";
+      LOG_ERROR << "Error creating texture.";
       return false;
     }
 
@@ -254,7 +262,7 @@ class DisplayGPUTexture {
   /* Texture resource allocated by the GPU module.
    *
    * NOTE: Allocated on the render engine's context. */
-  GPUTexture *gpu_texture = nullptr;
+  blender::gpu::Texture *gpu_texture = nullptr;
 
   /* Dimensions of the texture in pixels. */
   int width = 0;
@@ -306,15 +314,18 @@ class DisplayGPUPixelBuffer {
     return *this;
   }
 
-  bool gpu_resources_ensure(const uint new_width, const uint new_height)
+  bool gpu_resources_ensure(const uint new_width, const uint new_height, bool &buffer_recreated)
   {
-    const size_t required_size = sizeof(half4) * new_width * new_height * 4;
+    buffer_recreated = false;
+
+    const size_t required_size = sizeof(half4) * new_width * new_height;
 
     /* Try to re-use the existing PBO if it has usable size. */
     if (gpu_pixel_buffer) {
       if (new_width != width || new_height != height ||
           GPU_pixel_buffer_size(gpu_pixel_buffer) < required_size)
       {
+        buffer_recreated = true;
         gpu_resources_destroy();
       }
     }
@@ -326,10 +337,11 @@ class DisplayGPUPixelBuffer {
     /* Create pixel buffer if not already created. */
     if (!gpu_pixel_buffer) {
       gpu_pixel_buffer = GPU_pixel_buffer_create(required_size);
+      buffer_recreated = true;
     }
 
     if (gpu_pixel_buffer == nullptr) {
-      LOG(ERROR) << "Error creating texture pixel buffer object.";
+      LOG_ERROR << "Error creating texture pixel buffer object.";
       return false;
     }
 
@@ -364,7 +376,7 @@ class DisplayGPUPixelBuffer {
  protected:
   void reset()
   {
-    gpu_pixel_buffer = 0;
+    gpu_pixel_buffer = nullptr;
     width = 0;
     height = 0;
   }
@@ -387,9 +399,9 @@ class DrawTile {
     texture.gpu_resources_destroy();
   }
 
-  inline bool ready_to_draw() const
+  bool ready_to_draw() const
   {
-    return texture.gpu_texture != 0;
+    return texture.gpu_texture != nullptr;
   }
 
   /* Texture which contains pixels of the tile. */
@@ -459,14 +471,14 @@ BlenderDisplayDriver::~BlenderDisplayDriver()
 void BlenderDisplayDriver::next_tile_begin()
 {
   if (!tiles_->current_tile.tile.ready_to_draw()) {
-    LOG(ERROR)
+    LOG_ERROR
         << "Unexpectedly moving to the next tile without any data provided for current tile.";
     return;
   }
 
   /* Moving to the next tile without giving render data for the current tile is not an expected
    * situation. */
-  DCHECK(!need_clear_);
+  DCHECK(!need_zero_);
   /* Texture should have been updated from the PBO at this point. */
   DCHECK(!tiles_->current_tile.need_update_texture_pixels);
 
@@ -474,8 +486,8 @@ void BlenderDisplayDriver::next_tile_begin()
 }
 
 bool BlenderDisplayDriver::update_begin(const Params &params,
-                                        int texture_width,
-                                        int texture_height)
+                                        const int texture_width,
+                                        const int texture_height)
 {
   /* Note that it's the responsibility of BlenderDisplayDriver to ensure updating and drawing
    * the texture does not happen at the same time. This is achieved indirectly.
@@ -497,9 +509,9 @@ bool BlenderDisplayDriver::update_begin(const Params &params,
   /* Clear storage of all finished tiles when display clear is requested.
    * Do it when new tile data is provided to handle the display clear flag in a single place.
    * It also makes the logic reliable from the whether drawing did happen or not point of view. */
-  if (need_clear_) {
+  if (need_zero_) {
     tiles_->finished_tiles.gl_resources_destroy_and_clear();
-    need_clear_ = false;
+    need_zero_ = false;
   }
 
   /* Update PBO dimensions if needed.
@@ -513,13 +525,20 @@ bool BlenderDisplayDriver::update_begin(const Params &params,
    * mode faster. */
   const int buffer_width = params.size.x;
   const int buffer_height = params.size.y;
+  bool interop_recreated = false;
 
-  if (!current_tile_buffer_object.gpu_resources_ensure(buffer_width, buffer_height) ||
+  if (!current_tile_buffer_object.gpu_resources_ensure(
+          buffer_width, buffer_height, interop_recreated) ||
       !current_tile.texture.gpu_resources_ensure(texture_width, texture_height))
   {
+    graphics_interop_buffer_.clear();
     tiles_->current_tile.gpu_resources_destroy();
     gpu_context_disable();
     return false;
+  }
+
+  if (interop_recreated) {
+    graphics_interop_buffer_.clear();
   }
 
   /* Store an updated parameters of the current tile.
@@ -535,7 +554,7 @@ static void update_tile_texture_pixels(const DrawTileAndPBO &tile)
   const DisplayGPUTexture &texture = tile.tile.texture;
 
   if (!DCHECK_NOTNULL(tile.buffer_object.gpu_pixel_buffer)) {
-    LOG(ERROR) << "Display driver tile pixel buffer unavailable.";
+    LOG_ERROR << "Display driver tile pixel buffer unavailable.";
     return;
   }
   GPU_texture_update_sub_from_pixel_buffer(texture.gpu_texture,
@@ -588,14 +607,22 @@ void BlenderDisplayDriver::update_end()
 
 half4 *BlenderDisplayDriver::map_texture_buffer()
 {
+  /* With multi device rendering, Cycles can switch between using graphics interop
+   * and not. For the denoised image it may be able to use graphics interop as that
+   * buffer is written to by one device, while the noisy renders can not use it.
+   *
+   * We need to clear the graphics interop buffer on that switch, as GPU_pixel_buffer_map
+   * may recreate the buffer or handle. */
+  graphics_interop_buffer_.clear();
+
   GPUPixelBuffer *pix_buf = tiles_->current_tile.buffer_object.gpu_pixel_buffer;
   if (!DCHECK_NOTNULL(pix_buf)) {
-    LOG(ERROR) << "Display driver tile pixel buffer unavailable.";
+    LOG_ERROR << "Display driver tile pixel buffer unavailable.";
     return nullptr;
   }
   half4 *mapped_rgba_pixels = reinterpret_cast<half4 *>(GPU_pixel_buffer_map(pix_buf));
   if (!mapped_rgba_pixels) {
-    LOG(ERROR) << "Error mapping BlenderDisplayDriver pixel buffer object.";
+    LOG_ERROR << "Error mapping BlenderDisplayDriver pixel buffer object.";
   }
   return mapped_rgba_pixels;
 }
@@ -604,7 +631,7 @@ void BlenderDisplayDriver::unmap_texture_buffer()
 {
   GPUPixelBuffer *pix_buf = tiles_->current_tile.buffer_object.gpu_pixel_buffer;
   if (!DCHECK_NOTNULL(pix_buf)) {
-    LOG(ERROR) << "Display driver tile pixel buffer unavailable.";
+    LOG_ERROR << "Display driver tile pixel buffer unavailable.";
     return;
   }
   GPU_pixel_buffer_unmap(pix_buf);
@@ -614,16 +641,56 @@ void BlenderDisplayDriver::unmap_texture_buffer()
  * Graphics interoperability.
  */
 
-BlenderDisplayDriver::GraphicsInterop BlenderDisplayDriver::graphics_interop_get()
+GraphicsInteropDevice BlenderDisplayDriver::graphics_interop_get_device()
 {
-  GraphicsInterop interop_dst;
+  GraphicsInteropDevice interop_device;
 
-  interop_dst.buffer_width = tiles_->current_tile.buffer_object.width;
-  interop_dst.buffer_height = tiles_->current_tile.buffer_object.height;
-  interop_dst.opengl_pbo_id = GPU_pixel_buffer_get_native_handle(
-      tiles_->current_tile.buffer_object.gpu_pixel_buffer);
+  switch (GPU_backend_get_type()) {
+    case GPU_BACKEND_OPENGL:
+      interop_device.type = GraphicsInteropDevice::OPENGL;
+      break;
+    case GPU_BACKEND_VULKAN:
+      interop_device.type = GraphicsInteropDevice::VULKAN;
+      break;
+    case GPU_BACKEND_METAL:
+      interop_device.type = GraphicsInteropDevice::METAL;
+      break;
+    case GPU_BACKEND_NONE:
+    case GPU_BACKEND_ANY:
+      interop_device.type = GraphicsInteropDevice::NONE;
+      break;
+  }
 
-  return interop_dst;
+  blender::Span<uint8_t> uuid = GPU_platform_uuid();
+  interop_device.uuid.resize(uuid.size());
+  std::copy_n(uuid.data(), uuid.size(), interop_device.uuid.data());
+
+  return interop_device;
+}
+
+void BlenderDisplayDriver::graphics_interop_update_buffer()
+{
+  if (graphics_interop_buffer_.is_empty()) {
+    GraphicsInteropDevice::Type type = GraphicsInteropDevice::NONE;
+    switch (GPU_backend_get_type()) {
+      case GPU_BACKEND_OPENGL:
+        type = GraphicsInteropDevice::OPENGL;
+        break;
+      case GPU_BACKEND_VULKAN:
+        type = GraphicsInteropDevice::VULKAN;
+        break;
+      case GPU_BACKEND_METAL:
+        type = GraphicsInteropDevice::METAL;
+        break;
+      case GPU_BACKEND_NONE:
+      case GPU_BACKEND_ANY:
+        break;
+    }
+
+    GPUPixelBufferNativeHandle handle = GPU_pixel_buffer_get_native_handle(
+        tiles_->current_tile.buffer_object.gpu_pixel_buffer);
+    graphics_interop_buffer_.assign(type, handle.handle, handle.size);
+  }
 }
 
 void BlenderDisplayDriver::graphics_interop_activate()
@@ -640,12 +707,12 @@ void BlenderDisplayDriver::graphics_interop_deactivate()
  * Drawing.
  */
 
-void BlenderDisplayDriver::clear()
+void BlenderDisplayDriver::zero()
 {
-  need_clear_ = true;
+  need_zero_ = true;
 }
 
-void BlenderDisplayDriver::set_zoom(float zoom_x, float zoom_y)
+void BlenderDisplayDriver::set_zoom(const float zoom_x, const float zoom_y)
 {
   zoom_ = make_float2(zoom_x, zoom_y);
 }
@@ -655,8 +722,8 @@ void BlenderDisplayDriver::set_zoom(float zoom_x, float zoom_y)
  *
  * NOTE: The buffer needs to be bound. */
 static void vertex_draw(const DisplayDriver::Params &params,
-                        int texcoord_attribute,
-                        int position_attribute)
+                        const int texcoord_attribute,
+                        const int position_attribute)
 {
   const int x = params.full_offset.x;
   const int y = params.full_offset.y;
@@ -693,7 +760,7 @@ static void draw_tile(const float2 &zoom,
   const DisplayGPUTexture &texture = draw_tile.texture;
 
   if (!DCHECK_NOTNULL(texture.gpu_texture)) {
-    LOG(ERROR) << "Display driver tile GPU texture resource unavailable.";
+    LOG_ERROR << "Display driver tile GPU texture resource unavailable.";
     return;
   }
 
@@ -754,7 +821,7 @@ void BlenderDisplayDriver::draw(const Params &params)
 {
   gpu_context_lock();
 
-  if (need_clear_) {
+  if (need_zero_) {
     /* Texture is requested to be cleared and was not yet cleared.
      *
      * Do early return which should be equivalent of drawing all-zero texture.
@@ -767,13 +834,18 @@ void BlenderDisplayDriver::draw(const Params &params)
   GPU_fence_wait(gpu_upload_sync_);
   GPU_blend(GPU_BLEND_ALPHA_PREMULT);
 
-  GPUShader *active_shader = display_shader_->bind(params.full_size.x, params.full_size.y);
+  blender::gpu::Shader *active_shader = display_shader_->bind(params.full_size.x,
+                                                              params.full_size.y);
 
   GPUVertFormat *format = immVertexFormat();
   const int texcoord_attribute = GPU_vertformat_attr_add(
-      format, display_shader_->tex_coord_attribute_name, GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
+      format,
+      ccl::BlenderDisplayShader::tex_coord_attribute_name,
+      blender::gpu::VertAttrType::SFLOAT_32_32);
   const int position_attribute = GPU_vertformat_attr_add(
-      format, display_shader_->position_attribute_name, GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
+      format,
+      ccl::BlenderDisplayShader::position_attribute_name,
+      blender::gpu::VertAttrType::SFLOAT_32_32);
 
   /* NOTE: Shader is bound again through IMM to register this shader with the IMM module
    * and perform required setup for IMM rendering. This is required as the IMM module
@@ -804,20 +876,20 @@ void BlenderDisplayDriver::draw(const Params &params)
 
   gpu_context_unlock();
 
-  VLOG_DEVICE_STATS << "Display driver number of textures: " << DisplayGPUTexture::num_used;
-  VLOG_DEVICE_STATS << "Display driver number of PBOs: " << DisplayGPUPixelBuffer::num_used;
+  LOG_TRACE << "Display driver number of textures: " << DisplayGPUTexture::num_used;
+  LOG_TRACE << "Display driver number of PBOs: " << DisplayGPUPixelBuffer::num_used;
 }
 
 void BlenderDisplayDriver::gpu_context_create()
 {
   if (!RE_engine_gpu_context_create(reinterpret_cast<RenderEngine *>(b_engine_.ptr.data))) {
-    LOG(ERROR) << "Error creating GPU context.";
+    LOG_ERROR << "Error creating GPU context.";
     return;
   }
 
   /* Create global GPU resources for display driver. */
   if (!gpu_resources_create()) {
-    LOG(ERROR) << "Error creating GPU resources for Cycles Display Driver.";
+    LOG_ERROR << "Error creating GPU resources for Display Driver.";
     return;
   }
 }
@@ -851,7 +923,7 @@ bool BlenderDisplayDriver::gpu_resources_create()
 {
   /* Ensure context is active for resource creation. */
   if (!gpu_context_enable()) {
-    LOG(ERROR) << "Error enabling GPU context.";
+    LOG_ERROR << "Error enabling GPU context.";
     return false;
   }
 
@@ -859,7 +931,7 @@ bool BlenderDisplayDriver::gpu_resources_create()
   gpu_render_sync_ = GPU_fence_create();
 
   if (!DCHECK_NOTNULL(gpu_upload_sync_) || !DCHECK_NOTNULL(gpu_render_sync_)) {
-    LOG(ERROR) << "Error creating GPU synchronization primitives.";
+    LOG_ERROR << "Error creating GPU synchronization primitives.";
     assert(0);
     return false;
   }
@@ -871,6 +943,10 @@ bool BlenderDisplayDriver::gpu_resources_create()
 void BlenderDisplayDriver::gpu_resources_destroy()
 {
   gpu_context_enable();
+
+  display_shader_.reset();
+
+  graphics_interop_buffer_.clear();
 
   tiles_->current_tile.gpu_resources_destroy();
   tiles_->finished_tiles.gl_resources_destroy_and_clear();

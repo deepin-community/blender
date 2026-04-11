@@ -8,10 +8,7 @@
 
 #include <cstddef>
 
-#include "MEM_guardedalloc.h"
-
 #include "BLI_task.h"
-#include "BLI_utildefines.h"
 
 #include "BLT_translation.hh"
 
@@ -26,7 +23,7 @@
 
 #include "RNA_access.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "RNA_prototypes.hh"
@@ -214,7 +211,7 @@ static void foreach_tex_link(ModifierData *md, Object *ob, TexWalkFunc walk, voi
   FluidModifierData *fmd = (FluidModifierData *)md;
 
   if (fmd->type == MOD_FLUID_TYPE_FLOW && fmd->flow) {
-    PointerRNA ptr = RNA_pointer_create(&ob->id, &RNA_FluidFlowSettings, fmd->flow);
+    PointerRNA ptr = RNA_pointer_create_discrete(&ob->id, &RNA_FluidFlowSettings, fmd->flow);
     PropertyRNA *prop = RNA_struct_find_property(&ptr, "noise_texture");
 
     walk(user_data, ob, md, &ptr, prop);
@@ -227,9 +224,9 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
 
   PointerRNA *ptr = modifier_panel_get_property_pointers(panel, nullptr);
 
-  uiItemL(layout, RPT_("Settings are inside the Physics tab"), ICON_NONE);
+  layout->label(RPT_("Settings are inside the Physics tab"), ICON_NONE);
 
-  modifier_panel_end(layout, ptr);
+  modifier_error_message_draw(layout, ptr);
 }
 
 static void panel_register(ARegionType *region_type)
@@ -270,4 +267,5 @@ ModifierTypeInfo modifierType_Fluid = {
     /*blend_write*/ nullptr,
     /*blend_read*/ nullptr,
     /*foreach_cache*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
 };

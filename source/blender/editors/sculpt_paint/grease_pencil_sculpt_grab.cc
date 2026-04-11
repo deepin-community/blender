@@ -9,13 +9,13 @@
 #include "BKE_paint.hh"
 
 #include "BLI_index_mask.hh"
-#include "BLI_math_matrix.hh"
 #include "BLI_task.hh"
 
 #include "DEG_depsgraph_query.hh"
 
 #include "DNA_grease_pencil_types.h"
 #include "DNA_view3d_types.h"
+
 #include "ED_grease_pencil.hh"
 #include "ED_view3d.hh"
 
@@ -76,7 +76,7 @@ void GrabOperation::foreach_grabbed_drawing(
   ARegion &region = *CTX_wm_region(&C);
   RegionView3D &rv3d = *CTX_wm_region_view3d(&C);
   Object &object = *CTX_data_active_object(&C);
-  Object &object_eval = *DEG_get_evaluated_object(&depsgraph, &object);
+  Object &object_eval = *DEG_get_evaluated(&depsgraph, &object);
   GreasePencil &grease_pencil = *static_cast<GreasePencil *>(object.data);
 
   bool changed = false;
@@ -123,20 +123,19 @@ void GrabOperation::on_stroke_begin(const bContext &C, const InputSample &start_
   Brush &brush = *BKE_paint_brush(&paint);
   const Depsgraph &depsgraph = *CTX_data_depsgraph_pointer(&C);
   Object &ob_orig = *CTX_data_active_object(&C);
-  Object &ob_eval = *DEG_get_evaluated_object(&depsgraph, &ob_orig);
+  Object &ob_eval = *DEG_get_evaluated(&depsgraph, &ob_orig);
   GreasePencil &grease_pencil = *static_cast<GreasePencil *>(ob_orig.data);
 
-  const bool is_masking = GPENCIL_ANY_SCULPT_MASK(
-      eGP_Sculpt_SelectMaskFlag(scene.toolsettings->gpencil_selectmode_sculpt));
-
   init_brush(brush);
+  init_auto_masking(C, start_sample);
 
   this->prev_mouse_position = start_sample.mouse_position;
 
-  const Vector<MutableDrawingInfo> drawings = get_drawings_for_painting(C);
+  const Vector<MutableDrawingInfo> drawings = get_drawings_with_masking_for_stroke_operation(C);
   this->drawing_data.reinitialize(drawings.size());
   threading::parallel_for_each(drawings.index_range(), [&](const int i) {
     const MutableDrawingInfo &info = drawings[i];
+    const AutoMaskingInfo &auto_mask_info = this->auto_masking_info_per_drawing[i];
     BLI_assert(info.layer_index >= 0);
     PointWeights &data = this->drawing_data[i];
 
@@ -154,19 +153,18 @@ void GrabOperation::on_stroke_begin(const bContext &C, const InputSample &start_
                                        info.frame_number,
                                        info.multi_frame_falloff,
                                        info.drawing};
-    IndexMaskMemory selection_memory;
-    IndexMask selection = point_selection_mask(params, is_masking, selection_memory);
 
-    Array<float2> view_positions = calculate_view_positions(params, selection);
+    const Array<float2> view_positions = view_positions_from_point_mask(params,
+                                                                        auto_mask_info.point_mask);
 
     /* Cache points under brush influence. */
     Vector<float> weights;
-    IndexMask point_mask = brush_point_influence_mask(scene,
+    IndexMask point_mask = brush_point_influence_mask(paint,
                                                       brush,
                                                       start_sample.mouse_position,
                                                       1.0f,
                                                       info.multi_frame_falloff,
-                                                      selection,
+                                                      auto_mask_info.point_mask,
                                                       view_positions,
                                                       weights,
                                                       data.memory);
@@ -202,8 +200,8 @@ void GrabOperation::on_stroke_extended(const bContext &C, const InputSample &ext
         MutableSpan<float3> positions = curves.positions_for_write();
         mask.foreach_index(GrainSize(4096), [&](const int point_i, const int index) {
           /* Translate the point with the influence factor. */
-          positions[point_i] = projection_fn(deformation.positions[point_i],
-                                             mouse_delta_win * weights[index]);
+          positions[point_i] += compute_orig_delta(
+              projection_fn, deformation, point_i, mouse_delta_win * weights[index]);
         });
 
         params.drawing.tag_positions_changed();

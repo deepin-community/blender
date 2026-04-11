@@ -11,12 +11,10 @@
 
 #include "../generic/py_capi_rna.hh"
 #include "../generic/py_capi_utils.hh"
-#include "../generic/python_compat.hh"
+#include "../generic/python_compat.hh" /* IWYU pragma: keep. */
 #include "../generic/python_utildefines.hh"
 
 #include "../mathutils/mathutils.hh"
-
-#include "BLI_utildefines.h"
 
 #include "BKE_context.hh"
 
@@ -73,14 +71,14 @@ static int py_msgbus_rna_key_from_py(PyObject *py_sub,
   if (BPy_PropertyRNA_Check(py_sub)) {
     BPy_PropertyRNA *data_prop = (BPy_PropertyRNA *)py_sub;
     PYRNA_PROP_CHECK_INT(data_prop);
-    msg_key_params->ptr = data_prop->ptr;
+    msg_key_params->ptr = *data_prop->ptr;
     msg_key_params->prop = data_prop->prop;
   }
   else if (BPy_StructRNA_Check(py_sub)) {
     /* NOTE: this isn't typically used since we don't edit structs directly. */
     BPy_StructRNA *data_srna = (BPy_StructRNA *)py_sub;
     PYRNA_STRUCT_CHECK_INT(data_srna);
-    msg_key_params->ptr = data_srna->ptr;
+    msg_key_params->ptr = *data_srna->ptr;
   }
   /* TODO: property / type, not instance. */
   else if (PyType_Check(py_sub)) {
@@ -143,17 +141,16 @@ static void bpy_msgbus_notify(bContext *C,
 {
   PyGILState_STATE gilstate;
   bpy_context_set(C, &gilstate);
+  const bool is_write_ok = pyrna_write_check();
+  if (!is_write_ok) {
+    pyrna_write_set(true);
+  }
 
   PyObject *user_data = static_cast<PyObject *>(msg_val->user_data);
   BLI_assert(PyTuple_GET_SIZE(user_data) == BPY_MSGBUS_USER_DATA_LEN);
 
   PyObject *callback_args = PyTuple_GET_ITEM(user_data, 0);
   PyObject *callback_notify = PyTuple_GET_ITEM(user_data, 1);
-
-  const bool is_write_ok = pyrna_write_check();
-  if (!is_write_ok) {
-    pyrna_write_set(true);
-  }
 
   PyObject *ret = PyObject_CallObject(callback_notify, callback_args);
 
@@ -168,11 +165,10 @@ static void bpy_msgbus_notify(bContext *C,
     Py_DECREF(ret);
   }
 
-  bpy_context_clear(C, &gilstate);
-
   if (!is_write_ok) {
     pyrna_write_set(false);
   }
+  bpy_context_clear(C, &gilstate);
 }
 
 /* Follow wmMsgSubscribeValueFreeDataFn spec */
@@ -194,7 +190,7 @@ static void bpy_msgbus_subscribe_value_free_data(wmMsgSubscribeKey * /*msg_key*/
 PyDoc_STRVAR(
     /* Wrap. */
     bpy_msgbus_subscribe_rna_doc,
-    ".. function:: subscribe_rna(key, owner, args, notify, options=set())\n"
+    ".. function:: subscribe_rna(key, owner, args, notify, *, options=set())\n"
     "\n"
     "   Register a message bus subscription. It will be cleared when another blend file is\n"
     "   loaded, or can be cleared explicitly via :func:`bpy.msgbus.clear_by_owner`.\n"
@@ -276,7 +272,7 @@ static PyObject *bpy_msgbus_subscribe_rna(PyObject * /*self*/, PyObject *args, P
   /* NOTE: we may want to have a way to pass this in. */
   bContext *C = BPY_context_get();
   wmMsgBus *mbus = CTX_wm_message_bus(C);
-  wmMsgParams_RNA msg_key_params = {{nullptr}};
+  wmMsgParams_RNA msg_key_params = {{}};
 
   wmMsgSubscribeValue msg_val_params = {nullptr};
 
@@ -358,7 +354,7 @@ static PyObject *bpy_msgbus_publish_rna(PyObject * /*self*/, PyObject *args, PyO
   /* NOTE: we may want to have a way to pass this in. */
   bContext *C = BPY_context_get();
   wmMsgBus *mbus = CTX_wm_message_bus(C);
-  wmMsgParams_RNA msg_key_params = {{nullptr}};
+  wmMsgParams_RNA msg_key_params = {{}};
 
   if (py_msgbus_rna_key_from_py(py_sub, &msg_key_params, error_prefix) == -1) {
     return nullptr;
@@ -383,9 +379,14 @@ static PyObject *bpy_msgbus_clear_by_owner(PyObject * /*self*/, PyObject *py_own
   Py_RETURN_NONE;
 }
 
-#if (defined(__GNUC__) && !defined(__clang__))
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wcast-function-type"
+#ifdef __GNUC__
+#  ifdef __clang__
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wcast-function-type"
+#  else
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wcast-function-type"
+#  endif
 #endif
 
 static PyMethodDef BPy_msgbus_methods[] = {
@@ -404,8 +405,12 @@ static PyMethodDef BPy_msgbus_methods[] = {
     {nullptr, nullptr, 0, nullptr},
 };
 
-#if (defined(__GNUC__) && !defined(__clang__))
-#  pragma GCC diagnostic pop
+#ifdef __GNUC__
+#  ifdef __clang__
+#    pragma clang diagnostic pop
+#  else
+#    pragma GCC diagnostic pop
+#  endif
 #endif
 
 static PyModuleDef _bpy_msgbus_def = {

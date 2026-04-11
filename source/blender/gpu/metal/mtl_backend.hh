@@ -11,12 +11,12 @@
 #include "BLI_vector.hh"
 
 #include "gpu_backend.hh"
+#include "gpu_shader_private.hh"
 #include "mtl_capabilities.hh"
 
 namespace blender::gpu {
 
 class Batch;
-class DrawList;
 class FrameBuffer;
 class QueryPool;
 class Shader;
@@ -36,15 +36,14 @@ class MTLBackend : public GPUBackend {
     return MTLBackend::capabilities;
   }
 
-  ~MTLBackend()
+  ~MTLBackend() override
   {
     MTLBackend::platform_exit();
   }
 
-  void delete_resources() override
-  {
-    /* Delete any resources with context active. */
-  }
+  void init_resources() override;
+
+  void delete_resources() override;
 
   static bool metal_is_supported();
   static MTLBackend *get()
@@ -60,7 +59,6 @@ class MTLBackend : public GPUBackend {
    * due to allocation of Objective-C objects. */
   Context *context_alloc(void *ghost_window, void *ghost_context) override;
   Batch *batch_alloc() override;
-  DrawList *drawlist_alloc(int list_length) override;
   Fence *fence_alloc() override;
   FrameBuffer *framebuffer_alloc(const char *name) override;
   IndexBuf *indexbuf_alloc() override;
@@ -76,7 +74,7 @@ class MTLBackend : public GPUBackend {
   /* Render Frame Coordination. */
   void render_begin() override;
   void render_end() override;
-  void render_step() override;
+  void render_step(bool force_resource_release = false) override;
   bool is_inside_render_boundary();
 
  private:

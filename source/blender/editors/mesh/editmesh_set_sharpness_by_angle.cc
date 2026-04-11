@@ -10,7 +10,6 @@
 #include "BLI_math_vector.hh"
 
 #include "DNA_mesh_types.h"
-#include "DNA_scene_types.h"
 
 #include "BKE_context.hh"
 #include "BKE_editmesh.hh"
@@ -30,7 +29,7 @@
 
 namespace blender::ed::mesh {
 
-static int set_sharpness_by_angle_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus set_sharpness_by_angle_exec(bContext *C, wmOperator *op)
 {
   const float angle_limit_cos = std::cos(RNA_float_get(op->ptr, "angle"));
   const bool extend = RNA_boolean_get(op->ptr, "extend");

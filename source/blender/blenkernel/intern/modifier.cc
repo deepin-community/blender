@@ -13,7 +13,6 @@
 
 #include <cfloat>
 #include <chrono>
-#include <cmath>
 #include <cstdarg>
 #include <cstddef>
 #include <cstdlib>
@@ -23,9 +22,9 @@
 
 #include "DNA_armature_types.h"
 #include "DNA_cloth_types.h"
+#include "DNA_colorband_types.h"
 #include "DNA_dynamicpaint_types.h"
 #include "DNA_fluid_types.h"
-#include "DNA_gpencil_modifier_types.h"
 #include "DNA_mesh_types.h"
 #include "DNA_object_fluidsim_types.h"
 #include "DNA_object_force_types.h"
@@ -38,10 +37,10 @@
 #include "BLI_listbase.h"
 #include "BLI_path_utils.hh"
 #include "BLI_rand.hh"
-#include "BLI_session_uid.h"
 #include "BLI_string.h"
 #include "BLI_string_utf8.h"
 #include "BLI_string_utils.hh"
+#include "BLI_threads.h"
 #include "BLI_utildefines.h"
 
 #include "BLT_translation.hh"
@@ -51,16 +50,20 @@
 #include "BKE_editmesh_cache.hh"
 #include "BKE_effect.h"
 #include "BKE_fluid.h"
+#include "BKE_geometry_set.hh"
 #include "BKE_global.hh"
 #include "BKE_idtype.hh"
 #include "BKE_key.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
+#include "BKE_library.hh"
 #include "BKE_mesh.hh"
+#include "BKE_mesh_topology_state.hh"
 #include "BKE_mesh_wrapper.hh"
 #include "BKE_multires.hh"
 #include "BKE_object.hh"
 #include "BKE_pointcache.h"
+#include "BKE_report.hh"
 #include "BKE_screen.hh"
 
 /* may move these, only for BKE_modifier_path_relbase */
@@ -76,7 +79,7 @@
 
 #include "CLG_log.h"
 
-static CLG_LogRef LOG = {"bke.modifier"};
+static CLG_LogRef LOG = {"object.modifier"};
 static ModifierTypeInfo *modifier_types[NUM_MODIFIER_TYPES] = {nullptr};
 static VirtualModifierData virtualModifierCommonData;
 
@@ -167,7 +170,7 @@ ModifierData *BKE_modifier_new(int type)
 static void modifier_free_data_id_us_cb(void * /*user_data*/,
                                         Object * /*ob*/,
                                         ID **idpoin,
-                                        int cb_flag)
+                                        const LibraryForeachIDCallbackFlag cb_flag)
 {
   ID *id = *idpoin;
   if (id != nullptr && (cb_flag & IDWALK_CB_USER) != 0) {
@@ -304,7 +307,7 @@ ModifierData *BKE_modifier_copy_ex(const ModifierData *md, int flag)
 {
   ModifierData *md_dst = modifier_allocate_and_init(ModifierType(md->type));
 
-  STRNCPY(md_dst->name, md->name);
+  STRNCPY_UTF8(md_dst->name, md->name);
   BKE_modifier_copydata_ex(md, md_dst, flag);
 
   return md_dst;
@@ -335,7 +338,7 @@ void BKE_modifier_copydata_generic(const ModifierData *md_src,
 static void modifier_copy_data_id_us_cb(void * /*user_data*/,
                                         Object * /*ob*/,
                                         ID **idpoin,
-                                        int cb_flag)
+                                        const LibraryForeachIDCallbackFlag cb_flag)
 {
   ID *id = *idpoin;
   if (id != nullptr && (cb_flag & IDWALK_CB_USER) != 0) {
@@ -553,7 +556,7 @@ CDMaskLink *BKE_modifier_calc_data_masks(const Scene *scene,
   for (; md; md = md->next) {
     const ModifierTypeInfo *mti = BKE_modifier_get_info(ModifierType(md->type));
 
-    curr = MEM_cnew<CDMaskLink>(__func__);
+    curr = MEM_callocN<CDMaskLink>(__func__);
 
     if (BKE_modifier_is_enabled(scene, md, required_mode)) {
       if (mti->type == ModifierTypeType::OnlyDeform) {
@@ -909,16 +912,53 @@ Mesh *BKE_modifier_modify_mesh(ModifierData *md, const ModifierEvalContext *ctx,
   return mti->modify_mesh(md, ctx, mesh);
 }
 
-void BKE_modifier_deform_verts(ModifierData *md,
+bool BKE_modifier_deform_verts(ModifierData *md,
                                const ModifierEvalContext *ctx,
                                Mesh *mesh,
                                blender::MutableSpan<blender::float3> positions)
 {
+  using namespace blender::bke;
   const ModifierTypeInfo *mti = BKE_modifier_get_info(ModifierType(md->type));
-  mti->deform_verts(md, ctx, mesh, positions);
-  if (mesh) {
-    mesh->tag_positions_changed();
+
+  if (mti->deform_verts) {
+    mti->deform_verts(md, ctx, mesh, positions);
+    if (mesh) {
+      mesh->tag_positions_changed();
+    }
+    return true;
   }
+  /* Try to emulate #deform_verts by deforming a mesh. */
+  if (mti->modify_geometry_set) {
+    /* Prepare mesh with vertices at the given positions. */
+    GeometrySet geometry;
+    if (mesh) {
+      geometry = GeometrySet::from_mesh(mesh, GeometryOwnershipType::ReadOnly);
+    }
+    else {
+      geometry = GeometrySet::from_mesh(BKE_mesh_new_nomain(positions.size(), 0, 0, 0));
+    }
+    Mesh *mesh_to_deform = geometry.get_mesh_for_write();
+    mesh_to_deform->vert_positions_for_write().copy_from(positions);
+    mesh_to_deform->tag_positions_changed();
+
+    /* Remember the topology of the mesh before passing it to the modifier. */
+    const MeshTopologyState old_topology{*mesh_to_deform};
+
+    /* Call the modifier and "hope" that it just deforms the mesh. */
+    mti->modify_geometry_set(md, ctx, &geometry);
+
+    /* Extract the deformed vertex positions if the topology has not changed. */
+    if (const Mesh *deformed_mesh = geometry.get_mesh()) {
+      if (old_topology.same_topology_as(*deformed_mesh)) {
+        positions.copy_from(deformed_mesh->vert_positions());
+        if (mesh) {
+          mesh->tag_positions_changed();
+        }
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 void BKE_modifier_deform_vertsEM(ModifierData *md,
@@ -950,6 +990,9 @@ Mesh *BKE_modifier_get_evaluated_mesh_from_evaluated_object(Object *ob_eval)
     /* 'em' might not exist yet in some cases, just after loading a .blend file, see #57878. */
     if (em != nullptr) {
       mesh = const_cast<Mesh *>(BKE_object_get_editmesh_eval_final(ob_eval));
+      if (mesh != nullptr) {
+        mesh = BKE_mesh_wrapper_ensure_subdivision(mesh);
+      }
     }
   }
   if (mesh == nullptr) {
@@ -961,13 +1004,13 @@ Mesh *BKE_modifier_get_evaluated_mesh_from_evaluated_object(Object *ob_eval)
 
 ModifierData *BKE_modifier_get_original(const Object *object, ModifierData *md)
 {
-  const Object *object_orig = DEG_get_original_object((Object *)object);
+  const Object *object_orig = DEG_get_original((Object *)object);
   return BKE_modifiers_findby_persistent_uid(object_orig, md->persistent_uid);
 }
 
 ModifierData *BKE_modifier_get_evaluated(Depsgraph *depsgraph, Object *object, ModifierData *md)
 {
-  Object *object_eval = DEG_get_evaluated_object(depsgraph, object);
+  Object *object_eval = DEG_get_evaluated(depsgraph, object);
   if (object_eval == object) {
     return md;
   }
@@ -979,13 +1022,13 @@ void BKE_modifiers_persistent_uid_init(const Object &object, ModifierData &md)
   uint64_t hash = blender::get_default_hash(blender::StringRef(md.name));
   if (ID_IS_LINKED(&object)) {
     hash = blender::get_default_hash(hash,
-                                     blender::StringRef(object.id.lib->runtime.filepath_abs));
+                                     blender::StringRef(object.id.lib->runtime->filepath_abs));
   }
   if (ID_IS_OVERRIDE_LIBRARY_REAL(&object)) {
     BLI_assert(ID_IS_LINKED(object.id.override_library->reference));
     hash = blender::get_default_hash(
         hash,
-        blender::StringRef(object.id.override_library->reference->lib->runtime.filepath_abs));
+        blender::StringRef(object.id.override_library->reference->lib->runtime->filepath_abs));
   }
   blender::RandomNumberGenerator rng{uint32_t(hash)};
   while (true) {

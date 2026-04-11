@@ -2,22 +2,16 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include <algorithm>
-
 #include "curves_sculpt_intern.hh"
 
-#include "BLI_kdtree.h"
 #include "BLI_math_geom.h"
 #include "BLI_math_matrix_types.hh"
-#include "BLI_rand.hh"
 #include "BLI_vector.hh"
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
 
-#include "BKE_attribute_math.hh"
 #include "BKE_brush.hh"
-#include "BKE_bvhutils.hh"
 #include "BKE_colortools.hh"
 #include "BKE_context.hh"
 #include "BKE_crazyspace.hh"
@@ -32,14 +26,13 @@
 #include "DNA_curves_types.h"
 #include "DNA_object_types.h"
 #include "DNA_screen_types.h"
-#include "DNA_space_types.h"
 
 #include "ED_screen.hh"
 #include "ED_view3d.hh"
 
-#include "UI_interface.hh"
-
 #include "WM_api.hh"
+
+#include <numeric>
 
 /**
  * The code below uses a prefix naming convention to indicate the coordinate space:
@@ -83,7 +76,7 @@ struct CombOperationExecutor {
   CombOperation *self_ = nullptr;
   CurvesSculptCommonContext ctx_;
 
-  const CurvesSculpt *curves_sculpt_ = nullptr;
+  CurvesSculpt *curves_sculpt_ = nullptr;
   const Brush *brush_ = nullptr;
   float brush_radius_base_re_;
   float brush_radius_factor_;
@@ -114,15 +107,15 @@ struct CombOperationExecutor {
     curves_ob_orig_ = CTX_data_active_object(&C);
     curves_id_orig_ = static_cast<Curves *>(curves_ob_orig_->data);
     curves_orig_ = &curves_id_orig_->geometry.wrap();
-    if (curves_orig_->curves_num() == 0) {
+    if (curves_orig_->is_empty()) {
       return;
     }
 
     curves_sculpt_ = ctx_.scene->toolsettings->curves_sculpt;
     brush_ = BKE_paint_brush_for_read(&curves_sculpt_->paint);
-    brush_radius_base_re_ = BKE_brush_size_get(ctx_.scene, brush_);
+    brush_radius_base_re_ = BKE_brush_radius_get(&curves_sculpt_->paint, brush_);
     brush_radius_factor_ = brush_radius_factor(*brush_, stroke_extension);
-    brush_strength_ = brush_strength_get(*ctx_.scene, *brush_, stroke_extension);
+    brush_strength_ = brush_strength_get(curves_sculpt_->paint, *brush_, stroke_extension);
 
     const eBrushFalloffShape falloff_shape = eBrushFalloffShape(brush_->falloff_shape);
 
@@ -137,11 +130,13 @@ struct CombOperationExecutor {
     brush_pos_diff_re_ = brush_pos_re_ - brush_pos_prev_re_;
 
     if (stroke_extension.is_first) {
-      if (falloff_shape == PAINT_FALLOFF_SHAPE_SPHERE) {
+      if (falloff_shape == PAINT_FALLOFF_SHAPE_SPHERE || (U.uiflag & USER_ORBIT_SELECTION)) {
         this->initialize_spherical_brush_reference_point();
       }
-      self_->constraint_solver_.initialize(
-          *curves_orig_, curve_selection_, curves_id_orig_->flag & CV_SCULPT_COLLISION_ENABLED);
+      self_->constraint_solver_.initialize(*curves_orig_,
+                                           curve_selection_,
+                                           curves_id_orig_->flag & CV_SCULPT_COLLISION_ENABLED,
+                                           curves_id_orig_->surface_collision_distance);
 
       self_->curve_lengths_.reinitialize(curves_orig_->curves_num());
       const Span<float> segment_lengths = self_->constraint_solver_.segment_lengths();
@@ -392,6 +387,9 @@ struct CombOperationExecutor {
                                                                    brush_radius_base_re_);
     if (brush_3d.has_value()) {
       self_->brush_3d_ = *brush_3d;
+      remember_stroke_position(
+          *curves_sculpt_,
+          math::transform_point(transforms_.curves_to_world, self_->brush_3d_.position_cu));
     }
   }
 };

@@ -24,7 +24,8 @@
  *   result in better performance, due to better cache utilization.
  */
 
-#include "BLI_sys_types.h"
+#include <cstdint>
+#include <type_traits>
 
 namespace blender {
 

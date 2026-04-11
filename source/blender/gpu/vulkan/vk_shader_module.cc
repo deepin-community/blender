@@ -8,7 +8,6 @@
 
 #include "vk_shader_module.hh"
 #include "vk_backend.hh"
-#include "vk_memory.hh"
 #include "vk_shader.hh"
 
 #include <iomanip>
@@ -17,8 +16,7 @@
 namespace blender::gpu {
 VKShaderModule::~VKShaderModule()
 {
-  VKDevice &device = VKBackend::get().device;
-  VKDiscardPool &discard_pool = device.discard_pool_for_current_thread();
+  VKDiscardPool &discard_pool = VKDiscardPool::discard_pool_get();
   if (vk_shader_module != VK_NULL_HANDLE) {
     discard_pool.discard_shader_module(vk_shader_module);
     vk_shader_module = VK_NULL_HANDLE;
@@ -34,8 +32,6 @@ void VKShaderModule::finalize(StringRefNull name)
     return;
   }
 
-  VK_ALLOCATION_CALLBACKS;
-
   VkShaderModuleCreateInfo create_info = {};
   create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
   if (!spirv_binary.is_empty()) {
@@ -49,8 +45,7 @@ void VKShaderModule::finalize(StringRefNull name)
   }
 
   const VKDevice &device = VKBackend::get().device;
-  vkCreateShaderModule(
-      device.vk_handle(), &create_info, vk_allocation_callbacks, &vk_shader_module);
+  vkCreateShaderModule(device.vk_handle(), &create_info, nullptr, &vk_shader_module);
   debug::object_label(vk_shader_module, name.c_str());
 }
 

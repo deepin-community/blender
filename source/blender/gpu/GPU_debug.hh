@@ -61,9 +61,8 @@
 
 #pragma once
 
-#include "BLI_sys_types.h"
-
 #define GPU_DEBUG_SHADER_COMPILATION_GROUP "Shader Compilation"
+#define GPU_DEBUG_SHADER_SPECIALIZATION_GROUP "Shader Specialization"
 
 void GPU_debug_group_begin(const char *name);
 void GPU_debug_group_end();

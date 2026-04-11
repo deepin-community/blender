@@ -4,7 +4,9 @@
 
 #include "node_shader_util.hh"
 
-#include "UI_interface.hh"
+#include "BLI_math_base.h"
+
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 namespace blender::nodes::node_shader_ambient_occlusion_cc {
@@ -20,9 +22,9 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_shader_buts_ambient_occlusion(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "samples", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "inside", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "only_local", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  layout->prop(ptr, "samples", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  layout->prop(ptr, "inside", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  layout->prop(ptr, "only_local", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
 static int node_shader_gpu_ambient_occlusion(GPUMaterial *mat,
@@ -67,7 +69,7 @@ NODE_SHADER_MATERIALX_BEGIN
    * res.set_input("maxdistance", maxdistance);
    * \endcode
    */
-  return get_output_default(socket_out_->name, NodeItem::Type::Any);
+  return get_output_default(socket_out_->identifier, NodeItem::Type::Any);
 }
 #endif
 NODE_SHADER_MATERIALX_END
@@ -81,12 +83,18 @@ void register_node_type_sh_ambient_occlusion()
 
   static blender::bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, SH_NODE_AMBIENT_OCCLUSION, "Ambient Occlusion", NODE_CLASS_INPUT);
+  sh_node_type_base(&ntype, "ShaderNodeAmbientOcclusion", SH_NODE_AMBIENT_OCCLUSION);
+  ntype.ui_name = "Ambient Occlusion";
+  ntype.ui_description =
+      "Compute how much the hemisphere above the shading point is occluded, for example to add "
+      "weathering effects to corners.\nNote: For Cycles, this may slow down renders significantly";
+  ntype.enum_name_legacy = "AMBIENT_OCCLUSION";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_shader_buts_ambient_occlusion;
   ntype.initfunc = file_ns::node_shader_init_ambient_occlusion;
   ntype.gpu_fn = file_ns::node_shader_gpu_ambient_occlusion;
   ntype.materialx_fn = file_ns::node_shader_materialx;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

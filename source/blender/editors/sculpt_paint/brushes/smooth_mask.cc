@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "editors/sculpt_paint/brushes/types.hh"
+#include "editors/sculpt_paint/brushes/brushes.hh"
 
 #include "DNA_brush_types.h"
 
@@ -11,7 +11,6 @@
 #include "BKE_subdiv_ccg.hh"
 
 #include "BLI_enumerable_thread_specific.hh"
-#include "BLI_math_base.hh"
 
 #include "editors/sculpt_paint/mesh_brush_common.hh"
 #include "editors/sculpt_paint/paint_intern.hh"
@@ -21,7 +20,9 @@
 #include "editors/sculpt_paint/sculpt_intern.hh"
 #include "editors/sculpt_paint/sculpt_smooth.hh"
 
-namespace blender::ed::sculpt_paint {
+#include "bmesh.hh"
+
+namespace blender::ed::sculpt_paint::brushes {
 
 inline namespace smooth_mask_cc {
 
@@ -29,7 +30,8 @@ struct LocalData {
   Vector<float3> positions;
   Vector<float> factors;
   Vector<float> distances;
-  Vector<Vector<int>> vert_neighbors;
+  Vector<int> neighbor_offsets;
+  Vector<int> neighbor_data;
   Vector<float> masks;
   Vector<float> new_masks;
 };
@@ -50,21 +52,6 @@ static Vector<float> iteration_strengths(const float strength)
   result.append_n_times(1.0f, count);
   result.append(last);
   return result;
-}
-
-static void calc_smooth_masks_faces(const OffsetIndices<int> faces,
-                                    const Span<int> corner_verts,
-                                    const GroupedSpan<int> vert_to_face_map,
-                                    const Span<bool> hide_poly,
-                                    const Span<int> verts,
-                                    const Span<float> masks,
-                                    LocalData &tls,
-                                    const MutableSpan<float> new_masks)
-{
-  tls.vert_neighbors.resize(verts.size());
-  calc_vert_neighbors(faces, corner_verts, vert_to_face_map, hide_poly, verts, tls.vert_neighbors);
-  const Span<Vector<int>> vert_neighbors = tls.vert_neighbors;
-  smooth::neighbor_data_average_mesh(masks, vert_neighbors, new_masks);
 }
 
 static void apply_masks_faces(const Depsgraph &depsgraph,
@@ -152,14 +139,17 @@ static void do_smooth_brush_mesh(const Depsgraph &depsgraph,
      * neighboring nodes. */
     node_mask.foreach_index(GrainSize(1), [&](const int i, const int pos) {
       LocalData &tls = all_tls.local();
-      calc_smooth_masks_faces(faces,
-                              corner_verts,
-                              vert_to_face_map,
-                              hide_poly,
-                              nodes[i].verts(),
-                              mask.span.as_span(),
-                              tls,
-                              new_masks.as_mutable_span().slice(node_vert_offsets[pos]));
+      const GroupedSpan<int> neighbors = calc_vert_neighbors(faces,
+                                                             corner_verts,
+                                                             vert_to_face_map,
+                                                             hide_poly,
+                                                             nodes[i].verts(),
+                                                             tls.neighbor_offsets,
+                                                             tls.neighbor_data);
+      smooth::neighbor_data_average_mesh(
+          mask.span.as_span(),
+          neighbors,
+          new_masks.as_mutable_span().slice(node_vert_offsets[pos]));
     });
 
     node_mask.foreach_index(GrainSize(1), [&](const int i, const int pos) {
@@ -318,8 +308,7 @@ void do_smooth_mask_brush(const Depsgraph &depsgraph,
     }
     case bke::pbvh::Type::BMesh: {
       threading::EnumerableThreadSpecific<LocalData> all_tls;
-      BM_mesh_elem_index_ensure(ss.bm, BM_VERT);
-      BM_mesh_elem_table_ensure(ss.bm, BM_VERT);
+      vert_random_access_ensure(object);
       const int mask_offset = CustomData_get_offset_named(
           &ss.bm->vdata, CD_PROP_FLOAT, ".sculpt_mask");
       for (const float strength : iteration_strengths(brush_strength)) {
@@ -336,4 +325,4 @@ void do_smooth_mask_brush(const Depsgraph &depsgraph,
   }
 }
 
-}  // namespace blender::ed::sculpt_paint
+}  // namespace blender::ed::sculpt_paint::brushes

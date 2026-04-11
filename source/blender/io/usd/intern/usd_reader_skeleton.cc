@@ -13,28 +13,23 @@
 
 namespace blender::io::usd {
 
-bool USDSkeletonReader::valid() const
+void USDSkeletonReader::create_object(Main *bmain)
 {
-  return skel_ && USDXformReader::valid();
-}
-
-void USDSkeletonReader::create_object(Main *bmain, const double /*motionSampleTime*/)
-{
-  object_ = BKE_object_add_only_object(bmain, OB_ARMATURE, name_.c_str());
-
   bArmature *arm = BKE_armature_add(bmain, name_.c_str());
+
+  object_ = BKE_object_add_only_object(bmain, OB_ARMATURE, name_.c_str());
   object_->data = arm;
 }
 
-void USDSkeletonReader::read_object_data(Main *bmain, const double motionSampleTime)
+void USDSkeletonReader::read_object_data(Main *bmain, const pxr::UsdTimeCode time)
 {
-  if (!object_ || !object_->data || !skel_) {
+  if (!object_ || !object_->data) {
     return;
   }
 
   import_skeleton(bmain, object_, skel_, reports());
 
-  USDXformReader::read_object_data(bmain, motionSampleTime);
+  USDXformReader::read_object_data(bmain, time);
 }
 
 }  // namespace blender::io::usd

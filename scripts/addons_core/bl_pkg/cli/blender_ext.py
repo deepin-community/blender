@@ -27,7 +27,7 @@ import zipfile
 
 from typing import (
     Any,
-    Generator,
+    Iterator,
     IO,
     NamedTuple,
 )
@@ -465,7 +465,7 @@ def path_from_url(path: str) -> str:
     return result
 
 
-def random_acii_lines(*, seed: int | str, width: int) -> Generator[str, None, None]:
+def random_acii_lines(*, seed: int | str, width: int) -> Iterator[str]:
     """
     Generate random ASCII text [A-Za-z0-9].
     Intended not to compress well, it's possible to simulate downloading a large package.
@@ -522,7 +522,7 @@ def scandir_recursive_impl(
         path: str,
         *,
         filter_fn: Callable[[str, bool], bool],
-) -> Generator[tuple[str, str], None, None]:
+) -> Iterator[tuple[str, str]]:
     """Recursively yield DirEntry objects for given directory."""
     for entry in os.scandir(path):
         if entry.is_symlink():
@@ -548,7 +548,7 @@ def scandir_recursive_impl(
 def scandir_recursive(
         path: str,
         filter_fn: Callable[[str, bool], bool],
-) -> Generator[tuple[str, str], None, None]:
+) -> Iterator[tuple[str, str]]:
     yield from scandir_recursive_impl(path, path, filter_fn=filter_fn)
 
 
@@ -690,13 +690,24 @@ def rmtree_with_fallback_or_error_pseudo_atomic(
 def build_paths_expand_iter(
         path: str,
         path_list: Sequence[str],
-) -> Generator[tuple[str, str], None, None]:
+) -> Iterator[tuple[str, str]]:
     """
     Expand paths from a path list which always uses "/" slashes.
     """
     path_swap = os.sep != "/"
     path_strip = path.rstrip(os.sep)
     for filepath in path_list:
+        # This is needed so it's possible to compare relative paths against string literals.
+        # So it's possible to know if a path list includes a path or not.
+        #
+        # Simple path normalization:
+        # - Remove redundant slashes.
+        # - Strip all `./`.
+        while "//" in filepath:
+            filepath = filepath.replace("//", "/")
+        while filepath.startswith("./"):
+            filepath = filepath[2:]
+
         if path_swap:
             filepath = filepath.replace("/", "\\")
 
@@ -1290,6 +1301,26 @@ class PathPatternMatch:
 # -----------------------------------------------------------------------------
 # URL Downloading
 
+
+# NOTE:
+# - Using return arguments isn't ideal but is better than including
+#   a static value in the iterator.
+# - Other data could be added here as needed (response headers if the caller needs them).
+class DataRetrieveInfo:
+    """
+    When accessing a file from a URL or from the file-system,
+    this is a "return" argument so the caller can know the size of the chunks it's iterating over,
+    or -1 when the size is not known.
+    """
+    __slots__ = (
+        "size_hint",
+    )
+    size_hint: int
+
+    def __init__(self) -> None:
+        self.size_hint = -1
+
+
 # Originally based on `urllib.request.urlretrieve`.
 def url_retrieve_to_data_iter(
         url: str,
@@ -1298,21 +1329,16 @@ def url_retrieve_to_data_iter(
         headers: dict[str, str],
         chunk_size: int,
         timeout_in_seconds: float,
-) -> Generator[tuple[bytes, int, Any], None, None]:
+        retrieve_info: DataRetrieveInfo,
+) -> Iterator[bytes]:
     """
-    Retrieve a URL into a temporary location on disk.
+    Iterate over byte data downloaded from a URL
+    limited to ``chunk_size``.
 
-    Requires a URL argument. If a filename is passed, it is used as
-    the temporary file location. The reporthook argument should be
-    a callable that accepts a block number, a read size, and the
-    total file size of the URL target. The data argument should be
-    valid URL encoded data.
-
-    If a filename is passed and the URL points to a local resource,
-    the result is a copy from local file to new file.
-
-    Returns a tuple containing the path to the newly created
-    data file as well as the resulting HTTPMessage object.
+    - The ``retrieve_info.size_hint``
+      will be set once the iterator starts and can be used for progress display.
+    - The iterator will start with an empty block, so the size can be known
+      before time is spent downloading data.
     """
     from urllib.error import ContentTooShortError
     from urllib.request import urlopen
@@ -1334,7 +1360,10 @@ def url_retrieve_to_data_iter(
         if "content-length" in response_headers:
             size = int(response_headers["Content-Length"])
 
-        yield (b'', size, response_headers)
+        retrieve_info.size_hint = size
+
+        # Yield an empty block so progress display may start.
+        yield b""
 
         if timeout_in_seconds <= 0.0:
             while True:
@@ -1342,22 +1371,23 @@ def url_retrieve_to_data_iter(
                 if not block:
                     break
                 read += len(block)
-                yield (block, size, response_headers)
+                yield block
         else:
             while True:
                 block = read_with_timeout(fp, chunk_size, timeout_in_seconds=timeout_in_seconds)
                 if not block:
                     break
                 read += len(block)
-                yield (block, size, response_headers)
+                yield block
 
     if size >= 0 and read < size:
         raise ContentTooShortError(
-            "retrieval incomplete: got only %i out of %i bytes" % (read, size),
+            "retrieval incomplete: got only {:d} out of {:d} bytes".format(read, size),
             response_headers,
         )
 
 
+# See `url_retrieve_to_data_iter` doc-string.
 def url_retrieve_to_filepath_iter(
         url: str,
         filepath: str,
@@ -1366,69 +1396,77 @@ def url_retrieve_to_filepath_iter(
         data: Any | None = None,
         chunk_size: int,
         timeout_in_seconds: float,
-) -> Generator[tuple[int, int, Any], None, None]:
+        retrieve_info: DataRetrieveInfo,
+) -> Iterator[int]:
     # Handle temporary file setup.
     with open(filepath, 'wb') as fh_output:
-        for block, size, response_headers in url_retrieve_to_data_iter(
+        for block in url_retrieve_to_data_iter(
                 url,
                 headers=headers,
                 data=data,
                 chunk_size=chunk_size,
                 timeout_in_seconds=timeout_in_seconds,
+                retrieve_info=retrieve_info,
         ):
             fh_output.write(block)
-            yield (len(block), size, response_headers)
+            yield len(block)
 
 
+# See `url_retrieve_to_data_iter` doc-string.
 def filepath_retrieve_to_filepath_iter(
         filepath_src: str,
         filepath: str,
         *,
         chunk_size: int,
         timeout_in_seconds: float,
-) -> Generator[tuple[int, int], None, None]:
+        retrieve_info: DataRetrieveInfo,
+) -> Iterator[int]:
     # TODO: `timeout_in_seconds`.
     # Handle temporary file setup.
     _ = timeout_in_seconds
     with open(filepath_src, 'rb') as fh_input:
-        size = os.fstat(fh_input.fileno()).st_size
+        retrieve_info.size_hint = os.fstat(fh_input.fileno()).st_size
+        yield 0
         with open(filepath, 'wb') as fh_output:
             while (block := fh_input.read(chunk_size)):
                 fh_output.write(block)
-                yield (len(block), size)
+                yield len(block)
 
 
 def url_retrieve_to_data_iter_or_filesystem(
         url: str,
         headers: dict[str, str],
+        *,
         chunk_size: int,
         timeout_in_seconds: float,
-) -> Generator[bytes, None, None]:
+        retrieve_info: DataRetrieveInfo,
+) -> Iterator[bytes]:
     if url_is_filesystem(url):
         with open(path_from_url(url), "rb") as fh_source:
+            retrieve_info.size_hint = os.fstat(fh_source.fileno()).st_size
+            yield b""
             while (block := fh_source.read(chunk_size)):
                 yield block
     else:
-        for (
-                block,
-                _size,
-                _response_headers,
-        ) in url_retrieve_to_data_iter(
+        yield from url_retrieve_to_data_iter(
             url,
             headers=headers,
             chunk_size=chunk_size,
             timeout_in_seconds=timeout_in_seconds,
-        ):
-            yield block
+            retrieve_info=retrieve_info,
+        )
 
 
+# See `url_retrieve_to_data_iter` doc-string.
 def url_retrieve_to_filepath_iter_or_filesystem(
         url: str,
         filepath: str,
+        *,
         headers: dict[str, str],
         chunk_size: int,
         timeout_in_seconds: float,
-) -> Generator[tuple[int, int], None, None]:
+        retrieve_info: DataRetrieveInfo,
+) -> Iterator[int]:
     """
     Callers should catch: ``(Exception, KeyboardInterrupt)`` and convert them to message using:
     ``url_retrieve_exception_as_message``.
@@ -1439,16 +1477,17 @@ def url_retrieve_to_filepath_iter_or_filesystem(
             filepath,
             chunk_size=chunk_size,
             timeout_in_seconds=timeout_in_seconds,
+            retrieve_info=retrieve_info,
         )
     else:
-        for (read, size, _response_headers) in url_retrieve_to_filepath_iter(
+        yield from url_retrieve_to_filepath_iter(
             url,
             filepath,
             headers=headers,
             chunk_size=chunk_size,
             timeout_in_seconds=timeout_in_seconds,
-        ):
-            yield (read, size)
+            retrieve_info=retrieve_info,
+        )
 
 
 def url_retrieve_exception_is_connectivity(
@@ -1492,7 +1531,7 @@ def url_retrieve_exception_as_message(
 
 def pkg_idname_is_valid_or_error(pkg_idname: str) -> str | None:
     if not pkg_idname.isidentifier():
-        return "Not a valid identifier"
+        return "Not a valid Python identifier"
     if "__" in pkg_idname:
         return "Only single separators are supported"
     if pkg_idname.startswith("_"):
@@ -1517,7 +1556,7 @@ def pkg_manifest_validate_terse_description_or_error(value: str) -> str | None:
     elif value[-1] in {")", "]", "}"}:
         pass  # Allow closing brackets (sometimes used to mention formats).
     else:
-        return "alpha-numeric suffix expected, the string must not end with punctuation"
+        return "alphanumeric suffix expected, the string must not end with punctuation"
     return None
 
 
@@ -2281,7 +2320,7 @@ def python_versions_from_wheel(wheel_filename: str) -> set[tuple[int] | tuple[in
     abi_tag = wheel_filename_split[-2]
 
     # NOTE(@ideasman42): when the ABI is set, simply return the major version,
-    # This is needed because older version of CPython (3.6) for e.g. are compatible with newer versions of CPython,
+    # This is needed because older version of CPython (3.6) for example are compatible with newer versions of CPython,
     # but returning the old version causes it not to register as being compatible.
     # So return the ABI version to allow any version of CPython 3.x.
     #
@@ -2369,7 +2408,7 @@ def build_paths_filter_by_platform(
         build_paths: list[tuple[str, str]],
         wheel_range: tuple[int, int],
         platforms: tuple[str, ...],
-) -> Generator[tuple[list[tuple[str, str]], str], None, None]:
+) -> Iterator[tuple[list[tuple[str, str]], str]]:
     if not platforms:
         yield (build_paths, "")
         return
@@ -2407,6 +2446,24 @@ def repository_filter_skip(
         skip_message_fn: Callable[[str], None] | None,
         error_fn: Callable[[Exception], None],
 ) -> bool:
+    """
+    This function takes an ``item`` which represents un-validated extension meta-data.
+    Return True when the extension should be excluded.
+
+    The meta-data is a subset of the ``blender_manifest.toml`` which is extracted
+    into the ``index.json`` hosted by a remote server.
+
+    Filtering will exclude extensions when:
+
+    - They're incompatible with Blender, Python or the platform defined by the ``filter_*`` arguments.
+      ``skip_message_fn`` callback will run with the cause of the incompatibility.
+    - The meta-data is malformed, it doesn't confirm to ``blender_manifest.toml`` data-types.
+      ``error_fn`` callback will run with the cause of the error.
+
+    This is used so Blender's extensions listing only shows compatible extensions as well as
+    reporting errors if the user attempts to install an extension which isn't compatible with their system.
+    """
+
     if (platforms := item.get("platforms")) is not None:
         if not isinstance(platforms, list):
             # Possibly noisy, but this should *not* be happening on a regular basis.
@@ -2778,7 +2835,7 @@ def pkg_manifest_detect_duplicates(
             del python_versions_full
 
     # This can be expanded with additional values as needed.
-    # We could in principle have ABI flags (debug/release) for e.g.
+    # We could in principle have ABI flags (debug/release) for example
     PkgCfgKey = tuple[
         # Platform.
         str,
@@ -2965,8 +3022,9 @@ def repo_sync_from_remote(
             return False
 
         try:
+            retrieve_info = DataRetrieveInfo()
             read_total = 0
-            for (read, size) in url_retrieve_to_filepath_iter_or_filesystem(
+            for read in url_retrieve_to_filepath_iter_or_filesystem(
                     remote_json_url,
                     local_json_path_temp,
                     headers=url_request_headers_create(
@@ -2976,14 +3034,16 @@ def repo_sync_from_remote(
                     ),
                     chunk_size=CHUNK_SIZE_DEFAULT,
                     timeout_in_seconds=timeout_in_seconds,
+                    retrieve_info=retrieve_info,
             ):
-                request_exit |= msglog.progress("Downloading...", read_total, size, 'BYTE')
+                request_exit |= msglog.progress("Downloading...", read_total, retrieve_info.size_hint, 'BYTE')
                 if request_exit:
                     break
                 read_total += read
             del read_total
+            del retrieve_info
         except (Exception, KeyboardInterrupt) as ex:
-            msg = url_retrieve_exception_as_message(ex, prefix="sync", url=remote_url)
+            msg = url_retrieve_exception_as_message(ex, prefix="sync", url=remote_json_url)
             if demote_connection_errors_to_status and url_retrieve_exception_is_connectivity(ex):
                 msglog.status(msg)
             else:
@@ -3888,11 +3948,12 @@ class subcmd_client:
                     ),
                     chunk_size=CHUNK_SIZE_DEFAULT,
                     timeout_in_seconds=timeout_in_seconds,
+                    retrieve_info=DataRetrieveInfo(),  # Unused.
             ):
                 result.write(block)
 
         except (Exception, KeyboardInterrupt) as ex:
-            msg = url_retrieve_exception_as_message(ex, prefix="list", url=remote_url)
+            msg = url_retrieve_exception_as_message(ex, prefix="list", url=remote_json_url)
             if demote_connection_errors_to_status and url_retrieve_exception_is_connectivity(ex):
                 msglog.status(msg)
             else:
@@ -3909,7 +3970,7 @@ class subcmd_client:
             return False
 
         if isinstance((repo_gen_dict := pkg_repo_data_from_json_or_error(result_dict)), str):
-            msglog.fatal_error("unexpected contants in JSON {:s}".format(repo_gen_dict))
+            msglog.fatal_error("unexpected contents in JSON {:s}".format(repo_gen_dict))
             return False
         del result_dict
 
@@ -4339,6 +4400,7 @@ class subcmd_client:
                                     ),
                                     chunk_size=CHUNK_SIZE_DEFAULT,
                                     timeout_in_seconds=timeout_in_seconds,
+                                    retrieve_info=DataRetrieveInfo(),  # Unused.
                             ):
                                 request_exit |= msglog.progress(
                                     "Downloading \"{:s}\"".format(pkg_idname),
@@ -4358,7 +4420,7 @@ class subcmd_client:
                         # Unlike querying information which might reasonably be skipped.
                         msglog.fatal_error(
                             url_retrieve_exception_as_message(
-                                ex, prefix="install", url=remote_url))
+                                ex, prefix="install", url=filepath_remote_archive))
                         return False
 
                     if request_exit:
@@ -4590,12 +4652,25 @@ class subcmd_author:
             # Make default build options if none are provided.
             manifest_build = PkgManifest_Build(
                 paths=None,
+                # Limit exclusions to:
+                # - Python cache since extensions are written in Python.
+                # - Dot-files since this is standard *enough*.
+                # - ZIP archives to exclude packages that have been build.
+                # - BLEND file backups since this is for Blender extensions,
+                #   it makes sense to skip them.
+                #
+                # Further, it's not the purpose of this exclusion list to support all known file-system lint,
+                # as it changes over time and *could* result in false positives.
+                #
+                # Extension authors are expected to declare exclude patterns based on their development environment.
                 paths_exclude_pattern=[
                     "__pycache__/",
                     # Hidden dot-files.
                     ".*",
                     # Any packages built in-source.
                     "/*.zip",
+                    # Backup `.blend` files.
+                    "*.blend[1-9]",
                 ],
             )
 
@@ -4609,7 +4684,13 @@ class subcmd_author:
 
         # Manifest & wheels.
         if build_paths_extra:
-            build_paths.extend(build_paths_expand_iter(pkg_source_dir, build_paths_extra))
+            build_paths.extend(build_paths_expand_iter(
+                pkg_source_dir,
+                # When "paths" is set, paths after `build_paths_extra_skip_index` have been added,
+                # see: `PkgManifest_Build.from_dict_all_errors`.
+                build_paths_extra if manifest_build.paths is None else
+                build_paths_extra[:build_paths_extra_skip_index],
+            ))
 
         if manifest_build.paths is not None:
             build_paths.extend(build_paths_expand_iter(pkg_source_dir, manifest_build.paths))
@@ -4672,6 +4753,20 @@ class subcmd_author:
             except Exception as ex:
                 msglog.fatal_error("Error building path list \"{:s}\"".format(str(ex)))
                 return False
+
+        if manifest.type == "add-on":
+            # We could have a more generic way to find expected files,
+            # for now perform specific checks.
+            is_valid_python_package = False
+            for _, filepath_rel in build_paths:
+                # Other Python module suffixes besides `.py` can be used.
+                if filepath_rel.startswith("__init__."):
+                    is_valid_python_package = True
+                    break
+            if not is_valid_python_package:
+                msglog.fatal_error("Not a Python package: missing \"__init__.*\" file, typically \"__init__.py\"")
+                return False
+            del is_valid_python_package
 
         request_exit = False
 
@@ -4794,7 +4889,7 @@ class subcmd_author:
             *,
             manifest: PkgManifest,
             # NOTE: This path is only for inclusion in the error message,
-            # the path may not exist on the file-system (it may refer to a path inside an archive for e.g.).
+            # the path may not exist on the file-system (it may refer to a path inside an archive for example).
             pkg_manifest_filepath: str,
             valid_tags_filepath: str,
     ) -> bool:
@@ -5072,18 +5167,22 @@ def unregister():
             *,
             time_duration: float,
             time_delay: float,
+            steps_limit: int,
     ) -> bool:
         import time
         request_exit = False
         time_start = time.time() if (time_duration > 0.0) else 0.0
         size_beg = 0
-        size_end = 100
+        size_end = steps_limit
         while time_duration == 0.0 or (time.time() - time_start < time_duration):
             request_exit |= msglog.progress("Demo", size_beg, size_end, 'BYTE')
             if request_exit:
                 break
             size_beg += 1
             if size_beg > size_end:
+                # Limit by the number of steps.
+                if time_duration == 0.0:
+                    break
                 size_beg = 0
             time.sleep(time_delay)
         if request_exit:
@@ -5391,15 +5490,15 @@ def argparse_create_dummy_repo(subparsers: "argparse._SubParsersAction[argparse.
         ),
     )
 
+
 # -----------------------------------------------------------------------------
 # Dummy Output
-
 
 def argparse_create_dummy_progress(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
     subparse = subparsers.add_parser(
         "dummy-progress",
         help="Dummy progress output.",
-        description="Demo output.",
+        description="Demo output, included for testing.",
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
@@ -5422,6 +5521,16 @@ def argparse_create_dummy_progress(subparsers: "argparse._SubParsersAction[argpa
         default=0.05,
     )
 
+    subparse.add_argument(
+        "--steps-limit",
+        dest="steps_limit",
+        type=int,
+        help=(
+            "The number of steps to report"
+        ),
+        default=100,
+    )
+
     generic_arg_output_type(subparse)
 
     subparse.set_defaults(
@@ -5429,9 +5538,13 @@ def argparse_create_dummy_progress(subparsers: "argparse._SubParsersAction[argpa
             msglog_from_args(args),
             time_duration=args.time_duration,
             time_delay=args.time_delay,
+            steps_limit=max(1, args.steps_limit),
         ),
     )
 
+
+# -----------------------------------------------------------------------------
+# Top Level Argument Parser
 
 def argparse_create(
         args_internal: bool = True,
@@ -5546,6 +5659,9 @@ def main(
 
     # Run early to prevent a `KeyboardInterrupt` exception.
     signal.signal(signal.SIGINT, signal_handler_sigint)
+    if sys.platform == "win32":
+        # WIN32 needs to check for break as sending SIGINT isn't supported from the caller, see #131947.
+        signal.signal(signal.SIGBREAK, signal_handler_sigint)
 
     # Needed on WIN32 which doesn't default to `utf-8`.
     for fh in (sys.stdout, sys.stderr):

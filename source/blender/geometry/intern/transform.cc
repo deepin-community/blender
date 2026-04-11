@@ -8,8 +8,8 @@
 
 #include "GEO_transform.hh"
 
-#include "BLI_math_base.h"
 #include "BLI_math_matrix.h"
+#include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_task.hh"
 
@@ -36,21 +36,6 @@ static void translate_positions(MutableSpan<float3> positions, const float3 &tra
       position += translation;
     }
   });
-}
-
-static void transform_positions(MutableSpan<float3> positions, const float4x4 &matrix)
-{
-  threading::parallel_for(positions.index_range(), 1024, [&](const IndexRange range) {
-    for (float3 &position : positions.slice(range)) {
-      position = math::transform_point(matrix, position);
-    }
-  });
-}
-
-static void transform_mesh(Mesh &mesh, const float4x4 &transform)
-{
-  transform_positions(mesh.vert_positions_for_write(), transform);
-  mesh.tag_positions_changed();
 }
 
 static void translate_pointcloud(PointCloud &pointcloud, const float3 translation)
@@ -82,7 +67,7 @@ static void transform_pointcloud(PointCloud &pointcloud, const float4x4 &transfo
   bke::MutableAttributeAccessor attributes = pointcloud.attributes_for_write();
   bke::SpanAttributeWriter position = attributes.lookup_or_add_for_write_span<float3>(
       "position", bke::AttrDomain::Point);
-  transform_positions(position.span, transform);
+  math::transform_points(transform, position.span);
   position.finish();
 }
 
@@ -128,9 +113,10 @@ static void transform_instances(bke::Instances &instances, const float4x4 &trans
   });
 }
 
-static bool transform_volume(Volume &volume, const float4x4 &transform)
+static void transform_volume(Volume &volume,
+                             const float4x4 &transform,
+                             TransformGeometryErrors &r_errors)
 {
-  bool found_too_small_scale = false;
 #ifdef WITH_OPENVDB
   openvdb::Mat4s vdb_matrix;
   memcpy(vdb_matrix.asPointer(), &transform, sizeof(float[4][4]));
@@ -144,7 +130,7 @@ static bool transform_volume(Volume &volume, const float4x4 &transform)
     grid_matrix = transform * grid_matrix;
     const float determinant = math::determinant(grid_matrix);
     if (!BKE_volume_grid_determinant_valid(determinant)) {
-      found_too_small_scale = true;
+      r_errors.volume_too_small = true;
       /* Clear the tree because it is too small. */
       bke::volume_grid::clear_tree(*volume_grid);
       if (determinant == 0) {
@@ -160,24 +146,29 @@ static bool transform_volume(Volume &volume, const float4x4 &transform)
         grid_matrix.z_axis() = math::normalize(grid_matrix.z_axis());
       }
     }
-    bke::volume_grid::set_transform_matrix(*volume_grid, grid_matrix);
+    try {
+      bke::volume_grid::set_transform_matrix(*volume_grid, grid_matrix);
+    }
+    catch (...) {
+      r_errors.bad_volume_transform = true;
+    }
   }
 
 #else
-  UNUSED_VARS(volume, transform);
+  UNUSED_VARS(volume, transform, r_errors);
 #endif
-  return found_too_small_scale;
 }
 
 static void translate_volume(Volume &volume, const float3 translation)
 {
-  transform_volume(volume, math::from_location<float4x4>(translation));
+  TransformGeometryErrors errors;
+  transform_volume(volume, math::from_location<float4x4>(translation), errors);
 }
 
 static void transform_curve_edit_hints(bke::CurvesEditHints &edit_hints, const float4x4 &transform)
 {
   if (const std::optional<MutableSpan<float3>> positions = edit_hints.positions_for_write()) {
-    transform_positions(*positions, transform);
+    math::transform_points(transform, *positions);
   }
   float3x3 deform_mat;
   copy_m3_m4(deform_mat.ptr(), transform.ptr());
@@ -191,6 +182,33 @@ static void transform_curve_edit_hints(bke::CurvesEditHints &edit_hints, const f
   }
   else {
     edit_hints.deform_mats.emplace(edit_hints.curves_id_orig.geometry.point_num, deform_mat);
+  }
+}
+
+static void transform_grease_pencil_edit_hints(bke::GreasePencilEditHints &edit_hints,
+                                               const float4x4 &transform)
+{
+  if (!edit_hints.drawing_hints) {
+    return;
+  }
+
+  for (bke::GreasePencilDrawingEditHints &drawing_hints : *edit_hints.drawing_hints) {
+    if (const std::optional<MutableSpan<float3>> positions = drawing_hints.positions_for_write()) {
+      math::transform_points(transform, *positions);
+    }
+    float3x3 deform_mat = transform.view<3, 3>();
+    if (drawing_hints.deform_mats.has_value()) {
+      MutableSpan<float3x3> deform_mats = *drawing_hints.deform_mats;
+      threading::parallel_for(deform_mats.index_range(), 1024, [&](const IndexRange range) {
+        for (const int64_t i : range) {
+          deform_mats[i] = deform_mat * deform_mats[i];
+        }
+      });
+    }
+    else if (drawing_hints.drawing_orig) {
+      drawing_hints.deform_mats.emplace(drawing_hints.drawing_orig->strokes().points_num(),
+                                        deform_mat);
+    }
   }
 }
 
@@ -217,11 +235,14 @@ static void translate_gizmos_edit_hints(bke::GizmoEditHints &edit_hints, const f
 
 void translate_geometry(bke::GeometrySet &geometry, const float3 translation)
 {
+  if (math::is_zero(translation)) {
+    return;
+  }
   if (Curves *curves = geometry.get_curves_for_write()) {
     curves->geometry.wrap().translate(translation);
   }
   if (Mesh *mesh = geometry.get_mesh_for_write()) {
-    BKE_mesh_translate(mesh, translation, false);
+    bke::mesh_translate(*mesh, translation, false);
   }
   if (PointCloud *pointcloud = geometry.get_pointcloud_for_write()) {
     translate_pointcloud(*pointcloud, translation);
@@ -246,12 +267,15 @@ void translate_geometry(bke::GeometrySet &geometry, const float3 translation)
 std::optional<TransformGeometryErrors> transform_geometry(bke::GeometrySet &geometry,
                                                           const float4x4 &transform)
 {
+  if (transform == float4x4::identity()) {
+    return std::nullopt;
+  }
   TransformGeometryErrors errors;
   if (Curves *curves = geometry.get_curves_for_write()) {
     curves->geometry.wrap().transform(transform);
   }
   if (Mesh *mesh = geometry.get_mesh_for_write()) {
-    transform_mesh(*mesh, transform);
+    bke::mesh_transform(*mesh, transform, false);
   }
   if (PointCloud *pointcloud = geometry.get_pointcloud_for_write()) {
     transform_pointcloud(*pointcloud, transform);
@@ -260,13 +284,18 @@ std::optional<TransformGeometryErrors> transform_geometry(bke::GeometrySet &geom
     transform_greasepencil(*grease_pencil, transform);
   }
   if (Volume *volume = geometry.get_volume_for_write()) {
-    errors.volume_too_small = transform_volume(*volume, transform);
+    transform_volume(*volume, transform, errors);
   }
   if (bke::Instances *instances = geometry.get_instances_for_write()) {
     transform_instances(*instances, transform);
   }
   if (bke::CurvesEditHints *curve_edit_hints = geometry.get_curve_edit_hints_for_write()) {
     transform_curve_edit_hints(*curve_edit_hints, transform);
+  }
+  if (bke::GreasePencilEditHints *grease_pencil_edit_hints =
+          geometry.get_grease_pencil_edit_hints_for_write())
+  {
+    transform_grease_pencil_edit_hints(*grease_pencil_edit_hints, transform);
   }
   if (bke::GizmoEditHints *gizmo_edit_hints = geometry.get_gizmo_edit_hints_for_write()) {
     transform_gizmo_edit_hints(*gizmo_edit_hints, transform);
@@ -284,7 +313,7 @@ void transform_mesh(Mesh &mesh,
                     const float3 scale)
 {
   const float4x4 matrix = math::from_loc_rot_scale<float4x4>(translation, rotation, scale);
-  transform_mesh(mesh, matrix);
+  bke::mesh_transform(mesh, matrix, false);
 }
 
 }  // namespace blender::geometry

@@ -9,10 +9,9 @@
 
 #include "BLI_array.hh"
 #include "BLI_index_mask.hh"
-#include "BLI_math_vector.hh"
+#include "BLI_math_vector_types.hh"
 #include "BLI_set.hh"
-
-#include "BKE_pbvh.hh"
+#include "DNA_scene_types.h"
 
 struct Brush;
 struct Scene;
@@ -109,6 +108,7 @@ struct Cache {
 
   /* Texture distortion data. */
   const Brush *brush;
+  const Paint *paint;
   Scene *scene;
   // struct MTex *mtex;
 

@@ -25,10 +25,10 @@ static VArray<int> construct_curve_point_count_gvarray(const bke::CurvesGeometry
   auto count_fn = [points_by_curve](int64_t i) { return points_by_curve[i].size(); };
 
   if (domain == AttrDomain::Curve) {
-    return VArray<int>::ForFunc(curves.curves_num(), count_fn);
+    return VArray<int>::from_func(curves.curves_num(), count_fn);
   }
   if (domain == AttrDomain::Point) {
-    VArray<int> count = VArray<int>::ForFunc(curves.curves_num(), count_fn);
+    VArray<int> count = VArray<int>::from_func(curves.curves_num(), count_fn);
     return curves.adapt_domain<int>(std::move(count), AttrDomain::Curve, AttrDomain::Point);
   }
 
@@ -78,10 +78,15 @@ static void node_geo_exec(GeoNodeExecParams params)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-  geo_node_type_base(&ntype, GEO_NODE_INPUT_SPLINE_LENGTH, "Spline Length", NODE_CLASS_INPUT);
+  geo_node_type_base(&ntype, "GeometryNodeSplineLength", GEO_NODE_INPUT_SPLINE_LENGTH);
+  ntype.ui_name = "Spline Length";
+  ntype.ui_description =
+      "Retrieve the total length of each spline, as a distance or as a number of points";
+  ntype.enum_name_legacy = "SPLINE_LENGTH";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

@@ -6,12 +6,10 @@
 
 #include "NOD_rna_define.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "BKE_geometry_fields.hh"
-
-#include "BLI_task.hh"
 
 #include "RNA_enum_types.hh"
 
@@ -21,20 +19,22 @@ namespace blender::nodes::node_geo_evaluate_on_domain_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
+  b.add_default_layout();
   const bNode *node = b.node_or_null();
 
   if (node != nullptr) {
     const eCustomDataType data_type = eCustomDataType(node->custom2);
     b.add_input(data_type, "Value").supports_field();
-
-    b.add_output(data_type, "Value").field_source_reference_all();
+    b.add_output(data_type, "Value").field_source_reference_all().align_with_previous();
   }
 }
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "data_type", UI_ITEM_NONE, "", ICON_NONE);
-  uiItemR(layout, ptr, "domain", UI_ITEM_NONE, "", ICON_NONE);
+  layout->prop(ptr, "data_type", UI_ITEM_NONE, "", ICON_NONE);
+  layout->prop(ptr, "domain", UI_ITEM_NONE, "", ICON_NONE);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
@@ -91,14 +91,18 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(
-      &ntype, GEO_NODE_EVALUATE_ON_DOMAIN, "Evaluate on Domain", NODE_CLASS_CONVERTER);
+  geo_node_type_base(&ntype, "GeometryNodeFieldOnDomain", GEO_NODE_EVALUATE_ON_DOMAIN);
+  ntype.ui_name = "Evaluate on Domain";
+  ntype.ui_description =
+      "Retrieve values from a field on a different domain besides the domain from the context";
+  ntype.enum_name_legacy = "FIELD_ON_DOMAIN";
+  ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
   ntype.initfunc = node_init;
   ntype.declare = node_declare;
   ntype.gather_link_search_ops = node_gather_link_searches;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

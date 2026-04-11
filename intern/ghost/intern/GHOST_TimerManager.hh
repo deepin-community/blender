@@ -90,9 +90,7 @@ class GHOST_TimerManager {
 
   using TTimerVector = std::vector<GHOST_TimerTask *>;
   /** The list with event consumers. */
-  TTimerVector m_timers;
+  TTimerVector timers_;
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("GHOST:GHOST_TimerManager")
-#endif
 };

@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <cmath>
+
+#include "BLI_math_numbers.hh"
+
 #include "BKE_attribute.hh"
 #include "BKE_mesh.hh"
 
@@ -253,7 +257,7 @@ int ConeConfig::calculate_total_corners()
 static void calculate_cone_verts(const ConeConfig &config, MutableSpan<float3> positions)
 {
   Array<float2> circle(config.circle_segments);
-  const float angle_delta = 2.0f * (M_PI / float(config.circle_segments));
+  const float angle_delta = 2.0f * (math::numbers::pi / float(config.circle_segments));
   float angle = 0.0f;
   for (const int i : IndexRange(config.circle_segments)) {
     circle[i].x = std::cos(angle);
@@ -530,14 +534,14 @@ static void calculate_cone_uvs(const ConeConfig &config, Mesh *mesh, const Strin
 
   Array<float2> circle(config.circle_segments);
   float angle = 0.0f;
-  const float angle_delta = 2.0f * M_PI / float(config.circle_segments);
+  const float angle_delta = 2.0f * math::numbers::pi / float(config.circle_segments);
   for (const int i : IndexRange(config.circle_segments)) {
     circle[i].x = std::cos(angle) * 0.225f;
     circle[i].y = std::sin(angle) * 0.225f;
     angle += angle_delta;
   }
 
-  int loop_index = 0;
+  int corner = 0;
 
   /* Left circle of the UV representing the top fill or top cone tip. */
   if (config.top_is_point || config.fill_type != ConeFillType::None) {
@@ -550,16 +554,16 @@ static void calculate_cone_uvs(const ConeConfig &config, Mesh *mesh, const Strin
     if (config.top_has_center_vert) {
       /* Cone tip itself or triangle fan center of the fill. */
       for (const int i : IndexRange(config.circle_segments)) {
-        uvs[loop_index++] = radius_factor_delta * circle[i] + center_left;
-        uvs[loop_index++] = radius_factor_delta * circle[(i + 1) % config.circle_segments] +
-                            center_left;
-        uvs[loop_index++] = center_left;
+        uvs[corner++] = radius_factor_delta * circle[i] + center_left;
+        uvs[corner++] = radius_factor_delta * circle[(i + 1) % config.circle_segments] +
+                        center_left;
+        uvs[corner++] = center_left;
       }
     }
     else if (!config.top_is_point && config.fill_type == ConeFillType::NGon) {
       /* N-gon at the center of the fill. */
       for (const int i : IndexRange(config.circle_segments)) {
-        uvs[loop_index++] = radius_factor_delta * circle[i] + center_left;
+        uvs[corner++] = radius_factor_delta * circle[i] + center_left;
       }
     }
     /* The rest of the top fill is made out of quad rings. */
@@ -567,12 +571,12 @@ static void calculate_cone_uvs(const ConeConfig &config, Mesh *mesh, const Strin
       const float inner_radius_factor = i * radius_factor_delta;
       const float outer_radius_factor = (i + 1) * radius_factor_delta;
       for (const int j : IndexRange(config.circle_segments)) {
-        uvs[loop_index++] = inner_radius_factor * circle[j] + center_left;
-        uvs[loop_index++] = outer_radius_factor * circle[j] + center_left;
-        uvs[loop_index++] = outer_radius_factor * circle[(j + 1) % config.circle_segments] +
-                            center_left;
-        uvs[loop_index++] = inner_radius_factor * circle[(j + 1) % config.circle_segments] +
-                            center_left;
+        uvs[corner++] = inner_radius_factor * circle[j] + center_left;
+        uvs[corner++] = outer_radius_factor * circle[j] + center_left;
+        uvs[corner++] = outer_radius_factor * circle[(j + 1) % config.circle_segments] +
+                        center_left;
+        uvs[corner++] = inner_radius_factor * circle[(j + 1) % config.circle_segments] +
+                        center_left;
       }
     }
   }
@@ -585,10 +589,10 @@ static void calculate_cone_uvs(const ConeConfig &config, Mesh *mesh, const Strin
 
     for (const int i : IndexRange(config.side_segments)) {
       for (const int j : IndexRange(config.circle_segments)) {
-        uvs[loop_index++] = float2(j * x_delta, i * y_delta + bottom);
-        uvs[loop_index++] = float2(j * x_delta, (i + 1) * y_delta + bottom);
-        uvs[loop_index++] = float2((j + 1) * x_delta, (i + 1) * y_delta + bottom);
-        uvs[loop_index++] = float2((j + 1) * x_delta, i * y_delta + bottom);
+        uvs[corner++] = float2(j * x_delta, i * y_delta + bottom);
+        uvs[corner++] = float2(j * x_delta, (i + 1) * y_delta + bottom);
+        uvs[corner++] = float2((j + 1) * x_delta, (i + 1) * y_delta + bottom);
+        uvs[corner++] = float2((j + 1) * x_delta, i * y_delta + bottom);
       }
     }
   }
@@ -607,30 +611,30 @@ static void calculate_cone_uvs(const ConeConfig &config, Mesh *mesh, const Strin
       const float outer_radius_factor = 1.0f - i * radius_factor_delta;
       const float inner_radius_factor = 1.0f - (i + 1) * radius_factor_delta;
       for (const int j : IndexRange(config.circle_segments)) {
-        uvs[loop_index++] = outer_radius_factor * circle[j] + center_right;
-        uvs[loop_index++] = inner_radius_factor * circle[j] + center_right;
-        uvs[loop_index++] = inner_radius_factor * circle[(j + 1) % config.circle_segments] +
-                            center_right;
-        uvs[loop_index++] = outer_radius_factor * circle[(j + 1) % config.circle_segments] +
-                            center_right;
+        uvs[corner++] = outer_radius_factor * circle[j] + center_right;
+        uvs[corner++] = inner_radius_factor * circle[j] + center_right;
+        uvs[corner++] = inner_radius_factor * circle[(j + 1) % config.circle_segments] +
+                        center_right;
+        uvs[corner++] = outer_radius_factor * circle[(j + 1) % config.circle_segments] +
+                        center_right;
       }
     }
 
     if (config.bottom_has_center_vert) {
       /* Cone tip itself or triangle fan center of the fill. */
       for (const int i : IndexRange(config.circle_segments)) {
-        uvs[loop_index++] = radius_factor_delta * circle[i] + center_right;
-        uvs[loop_index++] = center_right;
-        uvs[loop_index++] = radius_factor_delta * circle[(i + 1) % config.circle_segments] +
-                            center_right;
+        uvs[corner++] = radius_factor_delta * circle[i] + center_right;
+        uvs[corner++] = center_right;
+        uvs[corner++] = radius_factor_delta * circle[(i + 1) % config.circle_segments] +
+                        center_right;
       }
     }
     else if (!config.bottom_is_point && config.fill_type == ConeFillType::NGon) {
       /* N-gon at the center of the fill. */
       for (const int i : IndexRange(config.circle_segments)) {
         /* Go backwards because of reversed face normal. */
-        uvs[loop_index++] = radius_factor_delta * circle[config.circle_segments - 1 - i] +
-                            center_right;
+        uvs[corner++] = radius_factor_delta * circle[config.circle_segments - 1 - i] +
+                        center_right;
       }
     }
   }

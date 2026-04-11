@@ -4,6 +4,8 @@
 
 #include "node_shader_util.hh"
 
+#include "BLI_math_base.h"
+
 namespace blender::nodes::node_shader_eevee_specular_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
@@ -59,6 +61,10 @@ static int node_shader_gpu_eevee_specular(GPUMaterial *mat,
   bool use_coat = socket_not_zero(6);
 
   eGPUMaterialFlag flag = GPU_MATFLAG_DIFFUSE | GPU_MATFLAG_GLOSSY;
+
+  if (in[1].might_be_tinted()) {
+    flag |= GPU_MATFLAG_REFLECTION_MAYBE_COLORED;
+  }
   if (use_coat) {
     flag |= GPU_MATFLAG_COAT;
   }
@@ -81,10 +87,17 @@ void register_node_type_sh_eevee_specular()
 
   static blender::bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, SH_NODE_EEVEE_SPECULAR, "Specular BSDF", NODE_CLASS_SHADER);
+  sh_node_type_base(&ntype, "ShaderNodeEeveeSpecular", SH_NODE_EEVEE_SPECULAR);
+  ntype.ui_name = "Specular BSDF";
+  ntype.ui_description =
+      "Similar to the Principled BSDF node but uses the specular workflow instead of metallic, "
+      "which functions by specifying the facing (along normal) reflection color. Energy is not "
+      "conserved, so the result may not be physically accurate";
+  ntype.enum_name_legacy = "EEVEE_SPECULAR";
+  ntype.nclass = NODE_CLASS_SHADER;
   ntype.declare = file_ns::node_declare;
   ntype.add_ui_poll = object_eevee_shader_nodes_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_eevee_specular;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

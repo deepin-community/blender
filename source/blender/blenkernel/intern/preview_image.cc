@@ -6,7 +6,6 @@
  * \ingroup bke
  */
 
-#include <iostream>
 #include <string>
 
 #include "DNA_ID.h"
@@ -25,7 +24,6 @@
 
 #include "BLI_ghash.h"
 #include "BLI_string.h"
-#include "BLI_string_ref.hh"
 #ifndef NDEBUG
 #  include "BLI_threads.h"
 #endif
@@ -75,7 +73,7 @@ static PreviewImage *previewimg_deferred_create(const char *filepath, ThumbSourc
 
 PreviewImage *BKE_previewimg_create()
 {
-  PreviewImage *prv = static_cast<PreviewImage *>(MEM_callocN(sizeof(PreviewImage), __func__));
+  PreviewImage *prv = MEM_callocN<PreviewImage>(__func__);
 
   for (int i = 0; i < NUM_ICON_SIZES; i++) {
     prv->flag[i] |= PRV_CHANGED;
@@ -153,7 +151,7 @@ PreviewImage *BKE_previewimg_copy(const PreviewImage *prv)
     return nullptr;
   }
 
-  PreviewImage *prv_img = static_cast<PreviewImage *>(MEM_mallocN(sizeof(PreviewImage), __func__));
+  PreviewImage *prv_img = MEM_mallocN<PreviewImage>(__func__);
   *prv_img = blender::dna::shallow_copy(*prv);
   prv_img->runtime = MEM_new<blender::bke::PreviewImageRuntime>(__func__, *prv->runtime);
 
@@ -262,7 +260,7 @@ void BKE_previewimg_id_custom_set(ID *id, const char *filepath)
 
 bool BKE_previewimg_id_supports_jobs(const ID *id)
 {
-  return ELEM(GS(id->name), ID_OB, ID_MA, ID_TE, ID_LA, ID_WO, ID_IM, ID_BR, ID_GR);
+  return ELEM(GS(id->name), ID_OB, ID_MA, ID_TE, ID_LA, ID_WO, ID_IM, ID_BR, ID_GR, ID_SCE);
 }
 
 void BKE_previewimg_deferred_release(PreviewImage *prv)
@@ -356,6 +354,10 @@ PreviewImage *BKE_previewimg_cached_thumbnail_read(const char *name,
 void BKE_previewimg_cached_release(const char *name)
 {
   BLI_assert(BLI_thread_is_main());
+  if (!gCachedPreviews) {
+    /* Static cache was already freed including all contained previews. Can happen on shutdown. */
+    return;
+  }
 
   PreviewImage *prv = (PreviewImage *)BLI_ghash_popkey(gCachedPreviews, name, MEM_freeN);
 
@@ -434,7 +436,7 @@ std::optional<int> BKE_previewimg_deferred_thumb_source_get(const PreviewImage *
   return prv->runtime->deferred_loading_data->source;
 }
 
-ImBuf *BKE_previewimg_to_imbuf(PreviewImage *prv, const int size)
+ImBuf *BKE_previewimg_to_imbuf(const PreviewImage *prv, const int size)
 {
   const uint w = prv->w[size];
   const uint h = prv->h[size];
@@ -444,7 +446,7 @@ ImBuf *BKE_previewimg_to_imbuf(PreviewImage *prv, const int size)
 
   if (w > 0 && h > 0 && rect) {
     /* first allocate imbuf for copying preview into it */
-    ima = IMB_allocImBuf(w, h, 32, IB_rect);
+    ima = IMB_allocImBuf(w, h, 32, IB_byte_data);
     memcpy(ima->byte_buffer.data, rect, w * h * sizeof(uint8_t) * 4);
   }
 
@@ -460,6 +462,11 @@ void BKE_previewimg_finish(PreviewImage *prv, const int size)
 bool BKE_previewimg_is_finished(const PreviewImage *prv, const int size)
 {
   return (prv->flag[size] & PRV_RENDERING) == 0;
+}
+
+bool BKE_previewimg_is_invalid(const PreviewImage *prv)
+{
+  return (prv->runtime->tag & PRV_TAG_DEFFERED_INVALID) != 0;
 }
 
 void BKE_previewimg_blend_write(BlendWriter *writer, const PreviewImage *prv)

@@ -74,10 +74,10 @@ struct GeometryExtractParams {
 /* Function that tags in BMesh the faces that should be deleted in the extracted object. */
 using GeometryExtractTagMeshFunc = void(BMesh *, GeometryExtractParams *);
 
-static int geometry_extract_apply(bContext *C,
-                                  wmOperator *op,
-                                  GeometryExtractTagMeshFunc *tag_fn,
-                                  GeometryExtractParams *params)
+static wmOperatorStatus geometry_extract_apply(bContext *C,
+                                               wmOperator *op,
+                                               GeometryExtractTagMeshFunc *tag_fn,
+                                               GeometryExtractParams *params)
 {
   Main *bmain = CTX_data_main(C);
   Object *ob = CTX_data_active_object(C);
@@ -86,8 +86,6 @@ static int geometry_extract_apply(bContext *C,
   Depsgraph &depsgraph = *CTX_data_depsgraph_on_load(C);
 
   blender::ed::sculpt_paint::object_sculpt_mode_exit(C, depsgraph);
-
-  BKE_sculpt_mask_layers_ensure(&depsgraph, bmain, ob, nullptr);
 
   /* Ensures that deformation from sculpt mode is taken into account before duplicating the mesh to
    * extract the geometry. */
@@ -277,8 +275,14 @@ static void geometry_extract_tag_face_set(BMesh *bm, GeometryExtractParams *para
   }
 }
 
-static int paint_mask_extract_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus paint_mask_extract_exec(bContext *C, wmOperator *op)
 {
+  Object *ob = CTX_data_active_object(C);
+  Mesh *mesh = static_cast<Mesh *>(ob->data);
+  if (!mesh->attributes().contains(".sculpt_mask")) {
+    return OPERATOR_CANCELLED;
+  }
+
   GeometryExtractParams params;
   params.mask_threshold = RNA_float_get(op->ptr, "mask_threshold");
   params.num_smooth_iterations = RNA_int_get(op->ptr, "smooth_iterations");
@@ -298,7 +302,7 @@ static int paint_mask_extract_exec(bContext *C, wmOperator *op)
   return geometry_extract_apply(C, op, geometry_extract_tag_masked_faces, &params);
 }
 
-static int paint_mask_extract_invoke(bContext *C, wmOperator *op, const wmEvent *e)
+static wmOperatorStatus paint_mask_extract_invoke(bContext *C, wmOperator *op, const wmEvent *e)
 {
   return WM_operator_props_popup_confirm_ex(
       C, op, e, IFACE_("Create Mesh From Paint Mask"), IFACE_("Extract"));
@@ -333,11 +337,11 @@ static void geometry_extract_props(StructRNA *srna)
                   "Extract the mask as a solid object with a solidify modifier");
 }
 
-void MESH_OT_paint_mask_extract(wmOperatorType *ot)
+void SCULPT_OT_paint_mask_extract(wmOperatorType *ot)
 {
   ot->name = "Mask Extract";
   ot->description = "Create a new mesh object from the current paint mask";
-  ot->idname = "MESH_OT_paint_mask_extract";
+  ot->idname = "SCULPT_OT_paint_mask_extract";
 
   ot->poll = geometry_extract_poll;
   ot->invoke = paint_mask_extract_invoke;
@@ -359,7 +363,7 @@ void MESH_OT_paint_mask_extract(wmOperatorType *ot)
   geometry_extract_props(ot->srna);
 }
 
-static int face_set_extract_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus face_set_extract_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   using namespace blender::ed;
   if (!CTX_wm_region_view3d(C)) {
@@ -385,11 +389,11 @@ static int face_set_extract_invoke(bContext *C, wmOperator *op, const wmEvent *e
   return geometry_extract_apply(C, op, geometry_extract_tag_face_set, &params);
 }
 
-void MESH_OT_face_set_extract(wmOperatorType *ot)
+void SCULPT_OT_face_set_extract(wmOperatorType *ot)
 {
   ot->name = "Face Set Extract";
   ot->description = "Create a new mesh object from the selected Face Set";
-  ot->idname = "MESH_OT_face_set_extract";
+  ot->idname = "SCULPT_OT_face_set_extract";
 
   ot->poll = geometry_extract_poll;
   ot->invoke = face_set_extract_invoke;
@@ -454,7 +458,7 @@ static void slice_paint_mask(BMesh *bm, bool invert, bool fill_holes, float mask
   }
 }
 
-static int paint_mask_slice_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus paint_mask_slice_exec(bContext *C, wmOperator *op)
 {
   using namespace blender;
   using namespace blender::ed;
@@ -462,14 +466,16 @@ static int paint_mask_slice_exec(bContext *C, wmOperator *op)
   Main &bmain = *CTX_data_main(C);
   Object &ob = *CTX_data_active_object(C);
   View3D *v3d = CTX_wm_view3d(C);
+  Mesh *mesh = static_cast<Mesh *>(ob.data);
 
-  BKE_sculpt_mask_layers_ensure(nullptr, nullptr, &ob, nullptr);
+  if (!mesh->attributes().contains(".sculpt_mask")) {
+    return OPERATOR_CANCELLED;
+  }
 
   bool create_new_object = RNA_boolean_get(op->ptr, "new_object");
   bool fill_holes = RNA_boolean_get(op->ptr, "fill_holes");
   float mask_threshold = RNA_float_get(op->ptr, "mask_threshold");
 
-  Mesh *mesh = static_cast<Mesh *>(ob.data);
   Mesh *new_mesh = (Mesh *)BKE_id_copy(&bmain, &mesh->id);
 
   /* Undo crashes when new object is created in the middle of a sculpt, see #87243. */
@@ -546,13 +552,13 @@ static int paint_mask_slice_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-void MESH_OT_paint_mask_slice(wmOperatorType *ot)
+void SCULPT_OT_paint_mask_slice(wmOperatorType *ot)
 {
   PropertyRNA *prop;
 
   ot->name = "Mask Slice";
   ot->description = "Slices the paint mask from the mesh";
-  ot->idname = "MESH_OT_paint_mask_slice";
+  ot->idname = "SCULPT_OT_paint_mask_slice";
 
   ot->poll = geometry_extract_poll;
   ot->exec = paint_mask_slice_exec;

@@ -19,6 +19,8 @@ by returning ``{'RUNNING_MODAL'}``, initializing the modal loop.
 Notice ``__init__()`` and ``__del__()`` are declared.
 For other operator types they are not useful but for modal operators they will
 be called before the :class:`Operator.invoke` and after the operator finishes.
+Also see the
+:ref:`class construction and destruction section <info_overview_class_construction_destruction>`.
 """
 import bpy
 
@@ -28,25 +30,25 @@ class ModalOperator(bpy.types.Operator):
     bl_label = "Simple Modal Operator"
     bl_options = {'REGISTER', 'UNDO'}
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         print("Start")
 
     def __del__(self):
-        super().__del__()
         print("End")
+        super().__del__()
 
     def execute(self, context):
         context.object.location.x = self.value / 100.0
         return {'FINISHED'}
 
     def modal(self, context, event):
-        if event.type == 'MOUSEMOVE':  # Apply
+        if event.type == 'MOUSEMOVE':  # Apply.
             self.value = event.mouse_x
             self.execute(context)
-        elif event.type == 'LEFTMOUSE':  # Confirm
+        elif event.type == 'LEFTMOUSE':  # Confirm.
             return {'FINISHED'}
-        elif event.type in {'RIGHTMOUSE', 'ESC'}:  # Cancel
+        elif event.type in {'RIGHTMOUSE', 'ESC'}:  # Cancel.
             # Revert all changes that have been made
             context.object.location.x = self.init_loc_x
             return {'CANCELLED'}
@@ -71,5 +73,5 @@ def menu_func(self, context):
 bpy.utils.register_class(ModalOperator)
 bpy.types.VIEW3D_MT_object.append(menu_func)
 
-# test call
+# Test call.
 bpy.ops.object.modal_operator('INVOKE_DEFAULT')

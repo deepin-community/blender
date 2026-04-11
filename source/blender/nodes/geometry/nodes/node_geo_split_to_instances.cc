@@ -13,7 +13,7 @@
 
 #include "NOD_rna_define.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "RNA_enum_types.hh"
@@ -28,7 +28,8 @@ static void node_declare(NodeDeclarationBuilder &b)
       .supported_type({GeometryComponent::Type::Mesh,
                        GeometryComponent::Type::PointCloud,
                        GeometryComponent::Type::Curve,
-                       GeometryComponent::Type::Instance});
+                       GeometryComponent::Type::Instance})
+      .description("Geometry to split into instances");
   b.add_input<decl::Bool>("Selection").default_value(true).field_on_all().hide_value();
   b.add_input<decl::Int>("Group ID").field_on_all().hide_value();
   b.add_output<decl::Geometry>("Instances")
@@ -41,9 +42,9 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiLayoutSetPropSep(layout, true);
-  uiLayoutSetPropDecorate(layout, false);
-  uiItemR(layout, ptr, "domain", UI_ITEM_NONE, "", ICON_NONE);
+  layout->use_property_split_set(true);
+  layout->use_property_decorate_set(false);
+  layout->prop(ptr, "domain", UI_ITEM_NONE, "", ICON_NONE);
 }
 
 static void ensure_group_geometries(Map<int, std::unique_ptr<GeometrySet>> &geometry_by_group_id,
@@ -120,7 +121,7 @@ static void split_mesh_groups(const MeshComponent &component,
     /* Need task isolation because of the thread local variable. */
     threading::isolate_task([&]() {
       MutableSpan<bool> group_selection = group_selection_per_thread.local();
-      const VArray<bool> group_selection_varray = VArray<bool>::ForSpan(group_selection);
+      const VArray<bool> group_selection_varray = VArray<bool>::from_span(group_selection);
       for (const int group_index : range) {
         const IndexMask &mask = split_groups.group_masks[group_index];
         index_mask::masked_fill(group_selection, true, mask);
@@ -354,12 +355,15 @@ static void node_rna(StructRNA *srna)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-  geo_node_type_base(
-      &ntype, GEO_NODE_SPLIT_TO_INSTANCES, "Split to Instances", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeSplitToInstances", GEO_NODE_SPLIT_TO_INSTANCES);
+  ntype.ui_name = "Split to Instances";
+  ntype.ui_description = "Create separate geometries containing the elements from the same group";
+  ntype.enum_name_legacy = "Split to Instances";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
   ntype.draw_buttons = node_layout;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

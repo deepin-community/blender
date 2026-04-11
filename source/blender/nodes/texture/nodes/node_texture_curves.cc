@@ -54,15 +54,18 @@ void register_node_type_tex_curve_time()
 {
   static blender::bke::bNodeType ntype;
 
-  tex_node_type_base(&ntype, TEX_NODE_CURVE_TIME, "Time", NODE_CLASS_INPUT);
+  tex_node_type_base(&ntype, "TextureNodeCurveTime", TEX_NODE_CURVE_TIME);
+  ntype.ui_name = "Time";
+  ntype.enum_name_legacy = "CURVE_TIME";
+  ntype.nclass = NODE_CLASS_INPUT;
   blender::bke::node_type_socket_templates(&ntype, nullptr, time_outputs);
-  blender::bke::node_type_size_preset(&ntype, blender::bke::eNodeSizePreset::Large);
+  blender::bke::node_type_size_preset(ntype, blender::bke::eNodeSizePreset::Large);
   ntype.initfunc = time_init;
-  blender::bke::node_type_storage(&ntype, "CurveMapping", node_free_curves, node_copy_curves);
+  blender::bke::node_type_storage(ntype, "CurveMapping", node_free_curves, node_copy_curves);
   ntype.init_exec_fn = node_initexec_curves;
   ntype.exec_fn = time_exec;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 
 /* **************** CURVE RGB  ******************** */
@@ -104,13 +107,16 @@ void register_node_type_tex_curve_rgb()
 {
   static blender::bke::bNodeType ntype;
 
-  tex_node_type_base(&ntype, TEX_NODE_CURVE_RGB, "RGB Curves", NODE_CLASS_OP_COLOR);
+  tex_node_type_base(&ntype, "TextureNodeCurveRGB", TEX_NODE_CURVE_RGB);
+  ntype.ui_name = "RGB Curves";
+  ntype.enum_name_legacy = "CURVE_RGB";
+  ntype.nclass = NODE_CLASS_OP_COLOR;
   blender::bke::node_type_socket_templates(&ntype, rgb_inputs, rgb_outputs);
-  blender::bke::node_type_size_preset(&ntype, blender::bke::eNodeSizePreset::Large);
+  blender::bke::node_type_size_preset(ntype, blender::bke::eNodeSizePreset::Large);
   ntype.initfunc = rgb_init;
-  blender::bke::node_type_storage(&ntype, "CurveMapping", node_free_curves, node_copy_curves);
+  blender::bke::node_type_storage(ntype, "CurveMapping", node_free_curves, node_copy_curves);
   ntype.init_exec_fn = node_initexec_curves;
   ntype.exec_fn = rgb_exec;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

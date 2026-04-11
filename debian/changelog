@@ -1,9 +1,32 @@
-blender (4.3.2+dfsg-2deepin1) unstable; urgency=medium
+blender (5.0.1+dfsg-1) experimental; urgency=medium
 
-  * fix error on python3.12.
-  * fix build in loongarch64
+  * Team upload.
 
- -- lhdjply <lhdjply@126.com>  Tue, 22 Jul 2025 15:14:14 +0800
+  [ Matteo F. Vescovi ]
+  * debian/patches/: patchset updated against v4.5.4
+  * debian/watch: v4 -> v5 switch
+  * debian/control:
+    - RRR removal (obsolete)
+    - S-V bump 4.7.0 -> 4.7.2 (no changes needed)
+    - stricter version for OCIO
+  * debian/copyright: drop useless entries
+
+  [ Antoine Lassagne ]
+  * New upstream version 5.0.1+dfsg
+  * Prevent arch-dependent files to go in /usr/share:
+    - .install:
+      Add /usr/lib/blender in blender.install
+      Remove /usr/share/blender from blender-data
+    - d/p/0004-install_in_usr_lib.patch:
+      Installs arch-dependent files in /usr/lib/blender/ instead
+      of /usr/share/blender/ as per Debian policy for arch-dependent files because
+      https://projects.blender.org/blender/blender/pulls/131080
+      added .so files in these folders.
+  * debian/control:
+    - S-V bump 4.7.2 -> 4.7.3 (no changes needed)
+  * debian/copyright: 2026 update
+
+ -- Antoine Lassagne <antoine.lassagne@canonical.com>  Wed, 04 Mar 2026 13:46:30 +0100
 
 blender (4.3.2+dfsg-2) unstable; urgency=medium
 

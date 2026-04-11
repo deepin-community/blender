@@ -184,9 +184,9 @@ class CurveParameterFieldInput final : public bke::CurvesFieldInput {
   {
     switch (domain) {
       case AttrDomain::Point:
-        return VArray<float>::ForContainer(calculate_point_parameters(curves));
+        return VArray<float>::from_container(calculate_point_parameters(curves));
       case AttrDomain::Curve:
-        return VArray<float>::ForContainer(calculate_curve_parameters(curves));
+        return VArray<float>::from_container(calculate_curve_parameters(curves));
       default:
         BLI_assert_unreachable();
         return {};
@@ -218,10 +218,10 @@ class CurveLengthParameterFieldInput final : public bke::CurvesFieldInput {
   {
     switch (domain) {
       case AttrDomain::Point:
-        return VArray<float>::ForContainer(calculate_point_lengths(
+        return VArray<float>::from_container(calculate_point_lengths(
             curves, [](MutableSpan<float> /*lengths*/, const float /*total*/) {}));
       case AttrDomain::Curve:
-        return VArray<float>::ForContainer(accumulated_lengths_curve_domain(curves));
+        return VArray<float>::from_container(accumulated_lengths_curve_domain(curves));
       default:
         BLI_assert_unreachable();
         return {};
@@ -261,7 +261,7 @@ class IndexOnSplineFieldInput final : public bke::CurvesFieldInput {
         array_utils::fill_index_range(indices);
       }
     });
-    return VArray<int>::ForContainer(std::move(result));
+    return VArray<int>::from_container(std::move(result));
   }
 
   uint64_t hash() const final
@@ -293,11 +293,14 @@ static void node_geo_exec(GeoNodeExecParams params)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-  geo_node_type_base(
-      &ntype, GEO_NODE_CURVE_SPLINE_PARAMETER, "Spline Parameter", NODE_CLASS_INPUT);
+  geo_node_type_base(&ntype, "GeometryNodeSplineParameter", GEO_NODE_CURVE_SPLINE_PARAMETER);
+  ntype.ui_name = "Spline Parameter";
+  ntype.ui_description = "Retrieve how far along each spline a control point is";
+  ntype.enum_name_legacy = "SPLINE_PARAMETER";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

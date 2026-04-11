@@ -25,10 +25,14 @@ from bpy.props import (
 
 
 class SelectionEntry(PropertyGroup):
+    __slots__ = ()
+
     name: StringProperty(name="Bone Name", override={'LIBRARY_OVERRIDABLE'})
 
 
 class SelectionSet(PropertyGroup):
+    __slots__ = ()
+
     name: StringProperty(name="Set Name", override={'LIBRARY_OVERRIDABLE'})
     bone_ids: CollectionProperty(
         type=SelectionEntry,
@@ -37,7 +41,8 @@ class SelectionSet(PropertyGroup):
     is_selected: BoolProperty(
         name="Include this selection set when copying to the clipboard. "
         "If none are specified, all sets will be copied.",
-        override={'LIBRARY_OVERRIDABLE'})
+        override={'LIBRARY_OVERRIDABLE'},
+    )
 
 
 # Operators ##############################################################
@@ -46,9 +51,11 @@ class _PoseModeOnlyMixin:
     """Operator only available for objects of type armature in pose mode."""
     @classmethod
     def poll(cls, context):
-        return (context.object and
-                context.object.type == 'ARMATURE' and
-                context.mode == 'POSE')
+        return (
+            context.object and
+            context.object.type == 'ARMATURE' and
+            context.mode == 'POSE'
+        )
 
 
 class _NeedSelSetMixin(_PoseModeOnlyMixin):
@@ -174,12 +181,11 @@ class POSE_OT_selection_set_assign(_PoseModeOnlyMixin, Operator):
     bl_description = "Add selected bones to Selection Set"
     bl_options = {'UNDO', 'REGISTER'}
 
-    def invoke(self, context, event):
+    def invoke(self, context, _event):
         arm = context.object
 
         if not (arm.active_selection_set < len(arm.selection_sets)):
-            bpy.ops.wm.call_menu("INVOKE_DEFAULT",
-                                 name="POSE_MT_selection_set_create")
+            bpy.ops.wm.call_menu("INVOKE_DEFAULT", name="POSE_MT_selection_set_create")
         else:
             bpy.ops.pose.selection_set_assign('EXEC_DEFAULT')
 
@@ -224,9 +230,9 @@ class POSE_OT_selection_set_select(_NeedSelSetMixin, Operator):
     bl_options = {'UNDO', 'REGISTER'}
 
     selection_set_index: IntProperty(
-        name='Selection Set Index',
+        name="Selection Set Index",
         default=-1,
-        description='Which Selection Set to select; -1 uses the active Selection Set',
+        description="Which Selection Set to select; -1 uses the active Selection Set",
         options={'HIDDEN'},
     )
 
@@ -241,7 +247,7 @@ class POSE_OT_selection_set_select(_NeedSelSetMixin, Operator):
 
         for bone in context.visible_pose_bones:
             if bone.name in sel_set.bone_ids:
-                bone.bone.select = True
+                bone.select = True
 
         return {'FINISHED'}
 
@@ -258,7 +264,7 @@ class POSE_OT_selection_set_deselect(_NeedSelSetMixin, Operator):
 
         for bone in context.selected_pose_bones:
             if bone.name in act_sel_set.bone_ids:
-                bone.bone.select = False
+                bone.select = False
 
         return {'FINISHED'}
 
@@ -283,7 +289,7 @@ class POSE_OT_selection_set_copy(_NeedSelSetMixin, Operator):
 
     def execute(self, context):
         context.window_manager.clipboard = _to_json(context)
-        self.report({'INFO'}, 'Copied Selection Set(s) to clipboard')
+        self.report({'INFO'}, "Copied Selection Set(s) to clipboard")
         return {'FINISHED'}
 
 
@@ -299,7 +305,7 @@ class POSE_OT_selection_set_paste(_PoseModeOnlyMixin, Operator):
         try:
             _from_json(context, context.window_manager.clipboard)
         except (json.JSONDecodeError, KeyError):
-            self.report({'ERROR'}, 'The clipboard does not contain a Selection Set')
+            self.report({'ERROR'}, "The clipboard does not contain a Selection Set")
         else:
             # Select the pasted Selection Set.
             context.object.active_selection_set = len(context.object.selection_sets) - 1

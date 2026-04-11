@@ -12,6 +12,7 @@
 #include "BLI_math_matrix_types.hh"
 #include "BLI_math_rotation_types.hh"
 #include "BLI_math_vector.hh"
+#include "BLI_unroll.hh"
 
 namespace blender::math {
 
@@ -221,6 +222,12 @@ template<typename MatT, typename RotationT, int ScaleDim>
                                       const VecBase<typename MatT::base_type, ScaleDim> &scale);
 
 /**
+ * Create a rotation matrix with the angle that the given direction makes with the x axis. Assumes
+ * the direction vector is normalized.
+ */
+template<typename T> [[nodiscard]] MatBase<T, 2, 2> from_direction(const VecBase<T, 2> &direction);
+
+/**
  * Create a rotation matrix from 2 basis vectors.
  * The matrix determinant is given to be positive and it can be converted to other rotation types.
  * \note `forward` and `up` must be normalized.
@@ -362,6 +369,20 @@ inline void to_loc_rot_scale(const MatBase<T, 4, 4> &mat,
  * \{ */
 
 /**
+ * Transform a 2d point using a 2x2 matrix (rotation & scale).
+ */
+template<typename T>
+[[nodiscard]] VecBase<T, 2> transform_point(const MatBase<T, 2, 2> &mat,
+                                            const VecBase<T, 2> &point);
+
+/**
+ * Transform a 2d point using a 3x3 matrix (location & rotation & scale).
+ */
+template<typename T>
+[[nodiscard]] VecBase<T, 2> transform_point(const MatBase<T, 3, 3> &mat,
+                                            const VecBase<T, 2> &point);
+
+/**
  * Transform a 3d point using a 3x3 matrix (rotation & scale).
  */
 template<typename T>
@@ -470,13 +491,10 @@ template<typename T>
 /**
  * Returns true if matrix has inverted handedness.
  *
- * \note It doesn't use determinant(mat4x4) as only the 3x3 components are needed
- * when the matrix is used as a transformation to represent location/scale/rotation.
+ * \note It doesn't use determinant(mat4x4) as only the 3x3 components are needed assuming
+ * the matrix is used as a transformation to represent 3D location/scale/rotation.
  */
-template<typename T, int Size> [[nodiscard]] bool is_negative(const MatBase<T, Size, Size> &mat)
-{
-  return determinant(mat) < T(0);
-}
+template<typename T> [[nodiscard]] bool is_negative(const MatBase<T, 3, 3> &mat);
 template<typename T> [[nodiscard]] bool is_negative(const MatBase<T, 4, 4> &mat);
 
 /**
@@ -490,6 +508,22 @@ template<typename T, int NumCol, int NumRow>
   for (int i = 0; i < NumCol; i++) {
     for (int j = 0; j < NumRow; j++) {
       if (math::abs(a[i][j] - b[i][j]) > epsilon) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Returns true if the matrix is exactly the identity matrix.
+ */
+template<typename T, int NumCol, int NumRow>
+[[nodiscard]] inline bool is_identity(const MatBase<T, NumCol, NumRow> &mat)
+{
+  for (int i = 0; i < NumCol; i++) {
+    for (int j = 0; j < NumRow; j++) {
+      if (mat[i][j] != (i != j ? 0.0f : 1.0f)) {
         return false;
       }
     }
@@ -918,6 +952,21 @@ template<typename T> QuaternionBase<T> normalized_to_quat_fast(const MatBase<T, 
   }
 
   BLI_assert(!(q.w < 0.0f));
+
+  /* Sometimes normalization is necessary due to round-off errors in the above
+   * calculations. The comparison here uses tighter tolerances than
+   * BLI_ASSERT_UNIT_QUAT(), so it's likely that even after a few more
+   * transformations the quaternion will still be considered unit-ish. */
+  const T q_len_squared = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+  const T threshold = 0.0002f /* #BLI_ASSERT_UNIT_EPSILON */ * 3;
+  if (math::abs(q_len_squared - 1.0f) >= threshold) {
+    const T q_len_inv = 1.0 / math::sqrt(q_len_squared);
+    q.x *= q_len_inv;
+    q.y *= q_len_inv;
+    q.z *= q_len_inv;
+    q.w *= q_len_inv;
+  }
+
   BLI_assert(math::is_unit_scale(VecBase<T, 4>(q)));
   return q;
 }
@@ -928,7 +977,7 @@ template<typename T> QuaternionBase<T> normalized_to_quat_with_checks(const MatB
   if (UNLIKELY(!std::isfinite(det))) {
     return QuaternionBase<T>::identity();
   }
-  else if (UNLIKELY(det < T(0))) {
+  if (UNLIKELY(det < T(0))) {
     return normalized_to_quat_fast(-mat);
   }
   return normalized_to_quat_fast(mat);
@@ -1425,6 +1474,13 @@ template<typename MatT, int ScaleDim>
   return mat;
 }
 
+template<typename T> MatBase<T, 2, 2> from_direction(const VecBase<T, 2> &direction)
+{
+  BLI_assert(is_unit_scale(direction));
+  return MatBase<T, 2, 2>(direction,
+                          VecBase<T, 2>(direction.y, direction.x) * VecBase<T, 2>(-1, 1));
+}
+
 template<typename MatT, typename VectorT>
 [[nodiscard]] MatT from_orthonormal_axes(const VectorT forward, const VectorT up)
 {
@@ -1567,6 +1623,18 @@ template<typename MatT, typename VectorT>
 [[nodiscard]] MatT from_origin_transform(const MatT &transform, const VectorT origin)
 {
   return from_location<MatT>(origin) * transform * from_location<MatT>(-origin);
+}
+
+template<typename T>
+VecBase<T, 2> transform_point(const MatBase<T, 2, 2> &mat, const VecBase<T, 2> &point)
+{
+  return mat * point;
+}
+
+template<typename T>
+VecBase<T, 2> transform_point(const MatBase<T, 3, 3> &mat, const VecBase<T, 2> &point)
+{
+  return mat.template view<2, 2>() * point + mat.location();
 }
 
 template<typename T>
@@ -1737,5 +1805,21 @@ extern template float4x4 perspective(
 }  // namespace projection
 
 /** \} */
+
+/**
+ * Transform normal vectors, maintaining their unit length status, but implementing some
+ * optimizations for identity matrix and uniform scaling.
+ */
+void transform_normals(const float3x3 &transform, MutableSpan<float3> normals);
+void transform_normals(Span<float3> src, const float3x3 &transform, MutableSpan<float3> dst);
+
+/** Transform point vectors with matrix multiplication, optionally using multi-threading. */
+void transform_points(const float4x4 &transform,
+                      MutableSpan<float3> points,
+                      bool use_threading = true);
+void transform_points(Span<float3> src,
+                      const float4x4 &transform,
+                      MutableSpan<float3> dst,
+                      bool use_threading = true);
 
 }  // namespace blender::math

@@ -2,9 +2,11 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+/** \file
+ * \ingroup bli
+ */
 
-#include "BLI_utildefines.h"
+#pragma once
 
 namespace blender {
 

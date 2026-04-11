@@ -2,26 +2,24 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "editors/sculpt_paint/brushes/types.hh"
+#include "editors/sculpt_paint/brushes/brushes.hh"
 
 #include "DNA_brush_types.h"
 #include "DNA_mesh_types.h"
 
-#include "BKE_pbvh.hh"
+#include "BKE_paint_bvh.hh"
 #include "BKE_subdiv_ccg.hh"
 
 #include "BLI_enumerable_thread_specific.hh"
-#include "BLI_math_base.hh"
 #include "BLI_math_geom.h"
-#include "BLI_math_vector.hh"
-#include "BLI_task.h"
-#include "BLI_utildefines.h"
 
 #include "editors/sculpt_paint/mesh_brush_common.hh"
 #include "editors/sculpt_paint/sculpt_automask.hh"
 #include "editors/sculpt_paint/sculpt_intern.hh"
 
-namespace blender::ed::sculpt_paint {
+#include "bmesh.hh"
+
+namespace blender::ed::sculpt_paint::brushes {
 inline namespace clay_cc {
 struct LocalData {
   Vector<float3> positions;
@@ -163,12 +161,12 @@ void do_clay_brush(const Depsgraph &depsgraph,
   calc_brush_plane(depsgraph, brush, object, node_mask, area_no, area_co);
 
   const float initial_radius = fabsf(ss.cache->initial_radius);
-  const float offset = SCULPT_brush_plane_offset_get(sd, ss);
+  const float offset = brush_plane_offset_get(brush, ss);
 
   /* This implementation skips a factor calculation as it currently has
    * no user-facing impact (i.e. is effectively a constant)
    * See: #123518 */
-  float displace = fabsf(initial_radius * (0.25f + offset + 0.15f));
+  float displace = fabsf(initial_radius * offset);
 
   const bool flip = ss.cache->bstrength < 0.0f;
   if (flip) {
@@ -186,7 +184,7 @@ void do_clay_brush(const Depsgraph &depsgraph,
   switch (pbvh.type()) {
     case bke::pbvh::Type::Mesh: {
       const Mesh &mesh = *static_cast<Mesh *>(object.data);
-      const MeshAttributeData attribute_data(mesh.attributes());
+      const MeshAttributeData attribute_data(mesh);
       const PositionDeformData position_data(depsgraph, object);
       const Span<float3> vert_normals = bke::pbvh::vert_normals_eval(depsgraph, object);
       MutableSpan<bke::pbvh::MeshNode> nodes = pbvh.nodes<bke::pbvh::MeshNode>();
@@ -229,7 +227,7 @@ void do_clay_brush(const Depsgraph &depsgraph,
     }
   }
   pbvh.tag_positions_changed(node_mask);
-  bke::pbvh::flush_bounds_to_parents(pbvh);
+  pbvh.flush_bounds_to_parents();
 }
 
-}  // namespace blender::ed::sculpt_paint
+}  // namespace blender::ed::sculpt_paint::brushes

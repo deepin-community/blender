@@ -6,8 +6,6 @@
  * \ingroup bke
  */
 
-#include <mutex>
-
 #include "DNA_key_types.h"
 #include "DNA_mesh_types.h"
 
@@ -15,7 +13,6 @@
 #include "BLI_math_vector.h"
 #include "BLI_math_vector.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_task.hh"
 
 #include "BKE_attribute_math.hh"
 #include "BKE_customdata.hh"
@@ -23,6 +20,7 @@
 #include "BKE_mesh.hh"
 #include "BKE_mesh_mapping.hh"
 #include "BKE_subdiv.hh"
+#include "BKE_subdiv_deform.hh"
 #include "BKE_subdiv_eval.hh"
 #include "BKE_subdiv_foreach.hh"
 #include "BKE_subdiv_mesh.hh"
@@ -118,9 +116,9 @@ static void subdiv_mesh_ctx_cache_custom_data_layers(SubdivMeshContext *ctx)
   /* UV layers interpolation. */
   subdiv_mesh_ctx_cache_uv_layers(ctx);
   /* Orco interpolation. */
-  ctx->orco = static_cast<float(*)[3]>(
+  ctx->orco = static_cast<float (*)[3]>(
       CustomData_get_layer_for_write(&subdiv_mesh->vert_data, CD_ORCO, subdiv_mesh->verts_num));
-  ctx->cloth_orco = static_cast<float(*)[3]>(CustomData_get_layer_for_write(
+  ctx->cloth_orco = static_cast<float (*)[3]>(CustomData_get_layer_for_write(
       &subdiv_mesh->vert_data, CD_CLOTH_ORCO, subdiv_mesh->verts_num));
 }
 
@@ -129,8 +127,7 @@ static void subdiv_mesh_prepare_accumulator(SubdivMeshContext *ctx, int num_vert
   if (!ctx->have_displacement) {
     return;
   }
-  ctx->accumulated_counters = static_cast<int *>(
-      MEM_calloc_arrayN(num_vertices, sizeof(*ctx->accumulated_counters), __func__));
+  ctx->accumulated_counters = MEM_calloc_arrayN<int>(num_vertices, __func__);
 }
 
 static void subdiv_mesh_context_free(SubdivMeshContext *ctx)
@@ -138,7 +135,7 @@ static void subdiv_mesh_context_free(SubdivMeshContext *ctx)
   MEM_SAFE_FREE(ctx->accumulated_counters);
   MEM_SAFE_FREE(ctx->subdiv_corner_verts);
   MEM_SAFE_FREE(ctx->subdiv_corner_edges);
-  CustomData_free(&ctx->coarse_corner_data_interp, ctx->coarse_mesh->corners_num);
+  CustomData_free(&ctx->coarse_corner_data_interp);
 }
 
 /** \} */
@@ -251,7 +248,6 @@ static void vertex_interpolation_init(const SubdivMeshContext *ctx,
                       &vertex_interpolation->vertex_data_storage,
                       indices.data(),
                       weights.data(),
-                      nullptr,
                       coarse_face.size(),
                       2);
   }
@@ -290,27 +286,17 @@ static void vertex_interpolation_from_corner(const SubdivMeshContext *ctx,
                                      coarse_face.size()]};
     const int last_indices[2] = {ctx->coarse_corner_verts[first_loop_index],
                                  ctx->coarse_corner_verts[last_loop_index]};
-    CustomData_interp(vertex_data,
-                      &vertex_interpolation->vertex_data_storage,
-                      first_indices,
-                      weights,
-                      nullptr,
-                      2,
-                      1);
-    CustomData_interp(vertex_data,
-                      &vertex_interpolation->vertex_data_storage,
-                      last_indices,
-                      weights,
-                      nullptr,
-                      2,
-                      3);
+    CustomData_interp(
+        vertex_data, &vertex_interpolation->vertex_data_storage, first_indices, weights, 2, 1);
+    CustomData_interp(
+        vertex_data, &vertex_interpolation->vertex_data_storage, last_indices, weights, 2, 3);
   }
 }
 
 static void vertex_interpolation_end(VerticesForInterpolation *vertex_interpolation)
 {
   if (vertex_interpolation->vertex_data_storage_allocated) {
-    CustomData_free(&vertex_interpolation->vertex_data_storage, 4);
+    CustomData_free(&vertex_interpolation->vertex_data_storage);
   }
 }
 
@@ -380,7 +366,6 @@ static void loop_interpolation_init(const SubdivMeshContext *ctx,
                       &loop_interpolation->corner_data_storage,
                       indices.data(),
                       weights.data(),
-                      nullptr,
                       coarse_face.size(),
                       2);
   }
@@ -414,27 +399,17 @@ static void loop_interpolation_from_corner(const SubdivMeshContext *ctx,
                                   (first_loop_index - base_loop_index + 1) % coarse_face.size();
     const int first_indices[2] = {first_loop_index, second_loop_index};
     const int last_indices[2] = {loops_of_ptex.last_loop, loops_of_ptex.first_loop};
-    CustomData_interp(corner_data,
-                      &loop_interpolation->corner_data_storage,
-                      first_indices,
-                      weights,
-                      nullptr,
-                      2,
-                      1);
-    CustomData_interp(corner_data,
-                      &loop_interpolation->corner_data_storage,
-                      last_indices,
-                      weights,
-                      nullptr,
-                      2,
-                      3);
+    CustomData_interp(
+        corner_data, &loop_interpolation->corner_data_storage, first_indices, weights, 2, 1);
+    CustomData_interp(
+        corner_data, &loop_interpolation->corner_data_storage, last_indices, weights, 2, 3);
   }
 }
 
 static void loop_interpolation_end(LoopsForInterpolation *loop_interpolation)
 {
   if (loop_interpolation->corner_data_storage_allocated) {
-    CustomData_free(&loop_interpolation->corner_data_storage, 4);
+    CustomData_free(&loop_interpolation->corner_data_storage);
   }
 }
 
@@ -509,7 +484,10 @@ static void subdiv_accumulate_vertex_displacement(SubdivMeshContext *ctx,
 {
   /* Accumulate displacement. */
   Subdiv *subdiv = ctx->subdiv;
-  float dummy_P[3], dPdu[3], dPdv[3], D[3];
+  float3 dummy_P;
+  float3 dPdu;
+  float3 dPdv;
+  float3 D;
   eval_limit_point_and_derivatives(subdiv, ptex_face_index, u, v, dummy_P, dPdu, dPdv);
 
   /* NOTE: The subdivided mesh is allocated in this module, and its vertices are kept at zero
@@ -548,13 +526,13 @@ static bool subdiv_mesh_topology_info(const ForeachContext *foreach_context,
   Mesh &subdiv_mesh = *subdiv_context->subdiv_mesh;
   BKE_mesh_copy_parameters_for_eval(subdiv_context->subdiv_mesh, &coarse_mesh);
 
-  CustomData_free(&subdiv_mesh.vert_data, 0);
+  CustomData_free(&subdiv_mesh.vert_data);
   CustomData_init_layout_from(
       &coarse_mesh.vert_data, &subdiv_mesh.vert_data, mask.vmask, CD_SET_DEFAULT, num_vertices);
-  CustomData_free(&subdiv_mesh.edge_data, 0);
+  CustomData_free(&subdiv_mesh.edge_data);
   CustomData_init_layout_from(
       &coarse_mesh.edge_data, &subdiv_mesh.edge_data, mask.emask, CD_SET_DEFAULT, num_edges);
-  CustomData_free(&subdiv_mesh.face_data, 0);
+  CustomData_free(&subdiv_mesh.face_data);
   CustomData_init_layout_from(
       &coarse_mesh.face_data, &subdiv_mesh.face_data, mask.pmask, CD_SET_DEFAULT, num_faces);
   if (num_faces != 0) {
@@ -566,11 +544,9 @@ static bool subdiv_mesh_topology_info(const ForeachContext *foreach_context,
                        &subdiv_context->coarse_corner_data_interp,
                        mask.lmask,
                        coarse_mesh.corners_num);
-  CustomData_free_layer_named(
-      &subdiv_context->coarse_corner_data_interp, ".corner_vert", coarse_mesh.corners_num);
-  CustomData_free_layer_named(
-      &subdiv_context->coarse_corner_data_interp, ".corner_edge", coarse_mesh.corners_num);
-  CustomData_free(&subdiv_mesh.corner_data, 0);
+  CustomData_free_layer_named(&subdiv_context->coarse_corner_data_interp, ".corner_vert");
+  CustomData_free_layer_named(&subdiv_context->coarse_corner_data_interp, ".corner_edge");
+  CustomData_free(&subdiv_mesh.corner_data);
   CustomData_init_layout_from(&subdiv_context->coarse_corner_data_interp,
                               &subdiv_mesh.corner_data,
                               mask.lmask,
@@ -578,10 +554,8 @@ static bool subdiv_mesh_topology_info(const ForeachContext *foreach_context,
                               num_loops);
 
   /* Allocate corner topology arrays which are added to the result at the end. */
-  subdiv_context->subdiv_corner_verts = static_cast<int *>(
-      MEM_malloc_arrayN(num_loops, sizeof(int), __func__));
-  subdiv_context->subdiv_corner_edges = static_cast<int *>(
-      MEM_malloc_arrayN(num_loops, sizeof(int), __func__));
+  subdiv_context->subdiv_corner_verts = MEM_malloc_arrayN<int>(size_t(num_loops), __func__);
+  subdiv_context->subdiv_corner_edges = MEM_malloc_arrayN<int>(size_t(num_loops), __func__);
 
   subdiv_mesh_ctx_cache_custom_data_layers(subdiv_context);
   subdiv_mesh_prepare_accumulator(subdiv_context, num_vertices);
@@ -622,7 +596,6 @@ static void subdiv_vertex_data_interpolate(const SubdivMeshContext *ctx,
                     &ctx->subdiv_mesh->vert_data,
                     vertex_interpolation->vertex_indices,
                     weights,
-                    nullptr,
                     4,
                     subdiv_vertex_index);
   if (ctx->vert_origindex != nullptr) {
@@ -648,7 +621,7 @@ static void evaluate_vertex_and_apply_displacement_copy(const SubdivMeshContext 
   }
   /* Copy custom data and evaluate position. */
   subdiv_vertex_data_copy(ctx, coarse_vertex_index, subdiv_vertex_index);
-  eval_limit_point(ctx->subdiv, ptex_face_index, u, v, subdiv_position);
+  subdiv_position = eval_limit_point(ctx->subdiv, ptex_face_index, u, v);
   /* Apply displacement. */
   subdiv_position += D;
   /* Evaluate undeformed texture coordinate. */
@@ -676,7 +649,7 @@ static void evaluate_vertex_and_apply_displacement_interpolate(
   }
   /* Interpolate custom data and evaluate position. */
   subdiv_vertex_data_interpolate(ctx, subdiv_vertex_index, vertex_interpolation, u, v);
-  eval_limit_point(ctx->subdiv, ptex_face_index, u, v, subdiv_position);
+  subdiv_position = eval_limit_point(ctx->subdiv, ptex_face_index, u, v);
   /* Apply displacement. */
   add_v3_v3(subdiv_position, D);
   /* Evaluate undeformed texture coordinate. */
@@ -829,10 +802,9 @@ static void subdiv_mesh_vertex_inner(const ForeachContext *foreach_context,
   Subdiv *subdiv = ctx->subdiv;
   const IndexRange coarse_face = ctx->coarse_faces[coarse_face_index];
   Mesh *subdiv_mesh = ctx->subdiv_mesh;
-  float3 &subdiv_position = ctx->subdiv_positions[subdiv_vertex_index];
   subdiv_mesh_ensure_vertex_interpolation(ctx, tls, coarse_face_index, coarse_corner);
   subdiv_vertex_data_interpolate(ctx, subdiv_vertex_index, &tls->vertex_interpolation, u, v);
-  eval_final_point(subdiv, ptex_face_index, u, v, subdiv_position);
+  ctx->subdiv_positions[subdiv_vertex_index] = eval_final_point(subdiv, ptex_face_index, u, v);
   subdiv_mesh_tag_center_vertex(coarse_face, subdiv_vertex_index, u, v, subdiv_mesh);
   subdiv_vertex_orco_evaluate(ctx, ptex_face_index, u, v, subdiv_vertex_index);
 }
@@ -894,7 +866,6 @@ static void subdiv_interpolate_corner_data(const SubdivMeshContext *ctx,
                     &ctx->subdiv_mesh->corner_data,
                     loop_interpolation->loop_indices,
                     weights,
-                    nullptr,
                     4,
                     subdiv_loop_index);
   /* TODO(sergey): Set ORIGINDEX. */
@@ -1089,7 +1060,6 @@ static void subdiv_mesh_vertex_of_loose_edge_interpolate(SubdivMeshContext *ctx,
                     &subdiv_mesh->vert_data,
                     coarse_vertex_indices,
                     interpolation_weights,
-                    nullptr,
                     2,
                     subdiv_vertex_index);
   if (ctx->vert_origindex != nullptr) {
@@ -1131,7 +1101,7 @@ static void subdiv_mesh_vertex_of_loose_edge(const ForeachContext *foreach_conte
 static void setup_foreach_callbacks(const SubdivMeshContext *subdiv_context,
                                     ForeachContext *foreach_context)
 {
-  memset(foreach_context, 0, sizeof(*foreach_context));
+  *foreach_context = {};
   /* General information. */
   foreach_context->topology_info = subdiv_mesh_topology_info;
   /* Every boundary geometry. Used for displacement averaging. */
@@ -1162,11 +1132,10 @@ Mesh *subdiv_to_mesh(Subdiv *subdiv, const ToMeshSettings *settings, const Mesh 
   stats_begin(&subdiv->stats, SUBDIV_STATS_SUBDIV_TO_MESH);
   /* Make sure evaluator is up to date with possible new topology, and that
    * it is refined for the new positions of coarse vertices. */
-  if (!eval_begin_from_mesh(subdiv, coarse_mesh, {}, SUBDIV_EVALUATOR_TYPE_CPU, nullptr)) {
+  if (!eval_begin_from_mesh(subdiv, coarse_mesh, SUBDIV_EVALUATOR_TYPE_CPU)) {
     /* This could happen in two situations:
      * - OpenSubdiv is disabled.
-     * - Something totally bad happened, and OpenSubdiv rejected our
-     *   topology.
+     * - Something totally bad happened, and OpenSubdiv rejected our topology.
      * In either way, we can't safely continue. */
     if (coarse_mesh->faces_num) {
       stats_end(&subdiv->stats, SUBDIV_STATS_SUBDIV_TO_MESH);
@@ -1247,6 +1216,37 @@ Mesh *subdiv_to_mesh(Subdiv *subdiv, const ToMeshSettings *settings, const Mesh 
   stats_end(&subdiv->stats, SUBDIV_STATS_SUBDIV_TO_MESH);
   subdiv_mesh_context_free(&subdiv_context);
   return result;
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Limit surface
+ * \{ */
+
+void calculate_limit_positions(Mesh *mesh, MutableSpan<float3> limit_positions)
+{
+  BLI_assert(mesh->verts_num == limit_positions.size());
+
+  limit_positions.copy_from(mesh->vert_positions());
+
+  Settings settings{};
+  settings.is_simple = false;
+  settings.is_adaptive = true;
+  settings.level = 1;
+  settings.use_creases = true;
+
+  /* Default subdivision surface modifier settings:
+   * - UV Smooth:Keep Corners.
+   * - BoundarySmooth: All. */
+  settings.vtx_boundary_interpolation = SUBDIV_VTX_BOUNDARY_EDGE_ONLY;
+  settings.fvar_linear_interpolation = SUBDIV_FVAR_LINEAR_INTERPOLATION_CORNERS_AND_JUNCTIONS;
+
+  Subdiv *subdiv = update_from_mesh(nullptr, &settings, mesh);
+  if (subdiv) {
+    deform_coarse_vertices(subdiv, mesh, limit_positions);
+    free(subdiv);
+  }
 }
 
 /** \} */

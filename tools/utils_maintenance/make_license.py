@@ -3,6 +3,10 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # pylint: disable=missing-function-docstring, missing-module-docstring, missing-class-docstring
 
+__all__ = (
+    "main",
+)
+
 import datetime
 import itertools
 import json
@@ -13,14 +17,16 @@ import sys
 from pathlib import Path
 
 from typing import (
-    Iterator,
     NamedTuple,
+)
+from collections.abc import (
+    Iterator,
 )
 
 # -----------------------------------------------------------------------------
 # Path Constants
 
-ROOT_DIR = Path(os.path.abspath(Path(os.path.dirname(__file__)) / "../../"))
+ROOT_DIR = Path(__file__).parent.parent.parent
 
 DIRPATH_LICENSES: Path = ROOT_DIR / "release/license/"
 DIRPATH_EXTERN_LIBRARIES: Path = ROOT_DIR / "extern"

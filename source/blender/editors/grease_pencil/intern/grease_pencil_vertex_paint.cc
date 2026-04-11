@@ -6,14 +6,15 @@
  * \ingroup edgreasepencil
  */
 
+#include "BLI_math_color.h"
+
 #include "BKE_brush.hh"
 #include "BKE_context.hh"
 #include "BKE_curves.hh"
 #include "BKE_grease_pencil.hh"
 #include "BKE_paint.hh"
-#include "BKE_report.hh"
 
-#include "DEG_depsgraph_query.hh"
+#include "DEG_depsgraph.hh"
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
@@ -40,14 +41,19 @@ template<typename Fn>
 static bool apply_color_operation_for_mode(const VertexColorMode mode,
                                            Object &object,
                                            MutableDrawingInfo &info,
+                                           const bool use_selection_mask,
                                            Fn &&fn)
 {
   bool changed = false;
   IndexMaskMemory memory;
+  using namespace ed::greasepencil;
   if (ELEM(mode, VertexColorMode::Stroke, VertexColorMode::Both)) {
     if (info.drawing.strokes().attributes().contains("vertex_color")) {
-      const IndexMask points = ed::greasepencil::retrieve_editable_points(
-          object, info.drawing, info.layer_index, memory);
+      const IndexMask points = use_selection_mask ?
+                                   retrieve_editable_and_selected_points(
+                                       object, info.drawing, info.layer_index, memory) :
+                                   retrieve_editable_points(
+                                       object, info.drawing, info.layer_index, memory);
       if (!points.is_empty()) {
         MutableSpan<ColorGeometry4f> vertex_colors = info.drawing.vertex_colors_for_write();
         points.foreach_index(GrainSize(4096), [&](const int64_t point_i) {
@@ -62,8 +68,11 @@ static bool apply_color_operation_for_mode(const VertexColorMode mode,
   }
   if (ELEM(mode, VertexColorMode::Fill, VertexColorMode::Both)) {
     if (info.drawing.strokes().attributes().contains("fill_color")) {
-      const IndexMask strokes = ed::greasepencil::retrieve_editable_strokes(
-          object, info.drawing, info.layer_index, memory);
+      const IndexMask strokes = use_selection_mask ?
+                                    ed::greasepencil::retrieve_editable_and_selected_strokes(
+                                        object, info.drawing, info.layer_index, memory) :
+                                    ed::greasepencil::retrieve_editable_strokes(
+                                        object, info.drawing, info.layer_index, memory);
       if (!strokes.is_empty()) {
         MutableSpan<ColorGeometry4f> fill_colors = info.drawing.fill_colors_for_write();
         strokes.foreach_index(GrainSize(1024), [&](const int64_t curve_i) {
@@ -79,7 +88,8 @@ static bool apply_color_operation_for_mode(const VertexColorMode mode,
   return changed;
 }
 
-static int grease_pencil_vertex_paint_brightness_contrast_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus grease_pencil_vertex_paint_brightness_contrast_exec(bContext *C,
+                                                                            wmOperator *op)
 {
   const Scene &scene = *CTX_data_scene(C);
   Object &object = *CTX_data_active_object(C);
@@ -88,6 +98,8 @@ static int grease_pencil_vertex_paint_brightness_contrast_exec(bContext *C, wmOp
   const float brightness = RNA_float_get(op->ptr, "brightness");
   const float contrast = RNA_float_get(op->ptr, "contrast");
   float delta = contrast / 2.0f;
+  const bool use_selection_mask = ED_grease_pencil_any_vertex_mask_selection(scene.toolsettings);
+
   /*
    * The algorithm is by Werner D. Streidt
    * (http://visca.com/ffactory/archives/5-99/msg00021.html)
@@ -109,11 +121,15 @@ static int grease_pencil_vertex_paint_brightness_contrast_exec(bContext *C, wmOp
   Vector<MutableDrawingInfo> drawings = retrieve_editable_drawings(scene, grease_pencil);
   threading::parallel_for_each(drawings, [&](MutableDrawingInfo info) {
     bke::CurvesGeometry &curves = info.drawing.strokes_for_write();
-    if (curves.curves_num() == 0) {
+    if (curves.is_empty()) {
       return;
     }
     const bool changed = apply_color_operation_for_mode(
-        mode, object, info, [&](const ColorGeometry4f &color) -> ColorGeometry4f {
+        mode,
+        object,
+        info,
+        use_selection_mask,
+        [&](const ColorGeometry4f &color) -> ColorGeometry4f {
           const float3 result = float3(color) * gain + offset;
           return ColorGeometry4f(result[0], result[1], result[2], color.a);
         });
@@ -134,7 +150,7 @@ static void GREASE_PENCIL_OT_vertex_color_brightness_contrast(wmOperatorType *ot
   ot->idname = "GREASE_PENCIL_OT_vertex_color_brightness_contrast";
   ot->description = "Adjust vertex color brightness/contrast";
 
-  /* api callbacks */
+  /* API callbacks. */
   ot->exec = grease_pencil_vertex_paint_brightness_contrast_exec;
   ot->poll = grease_pencil_vertex_painting_poll;
 
@@ -149,7 +165,7 @@ static void GREASE_PENCIL_OT_vertex_color_brightness_contrast(wmOperatorType *ot
   RNA_def_float(ot->srna, "contrast", 0.0f, -1.0f, 1.0f, "Contrast", "", -1.0f, 1.0f);
 }
 
-static int grease_pencil_vertex_paint_hsv_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus grease_pencil_vertex_paint_hsv_exec(bContext *C, wmOperator *op)
 {
   const Scene &scene = *CTX_data_scene(C);
   Object &object = *CTX_data_active_object(C);
@@ -158,16 +174,21 @@ static int grease_pencil_vertex_paint_hsv_exec(bContext *C, wmOperator *op)
   const float hue = RNA_float_get(op->ptr, "h");
   const float sat = RNA_float_get(op->ptr, "s");
   const float val = RNA_float_get(op->ptr, "v");
+  const bool use_selection_mask = ED_grease_pencil_any_vertex_mask_selection(scene.toolsettings);
 
   std::atomic<bool> any_changed;
   Vector<MutableDrawingInfo> drawings = retrieve_editable_drawings(scene, grease_pencil);
   threading::parallel_for_each(drawings, [&](MutableDrawingInfo info) {
     bke::CurvesGeometry &curves = info.drawing.strokes_for_write();
-    if (curves.curves_num() == 0) {
+    if (curves.is_empty()) {
       return;
     }
     const bool changed = apply_color_operation_for_mode(
-        mode, object, info, [&](const ColorGeometry4f &color) -> ColorGeometry4f {
+        mode,
+        object,
+        info,
+        use_selection_mask,
+        [&](const ColorGeometry4f &color) -> ColorGeometry4f {
           float3 hsv;
           rgb_to_hsv_v(float3(color), hsv);
 
@@ -202,7 +223,7 @@ static void GREASE_PENCIL_OT_vertex_color_hsv(wmOperatorType *ot)
   ot->idname = "GREASE_PENCIL_OT_vertex_color_hsv";
   ot->description = "Adjust vertex color HSV values";
 
-  /* api callbacks */
+  /* API callbacks. */
   ot->exec = grease_pencil_vertex_paint_hsv_exec;
   ot->poll = grease_pencil_vertex_painting_poll;
 
@@ -217,22 +238,27 @@ static void GREASE_PENCIL_OT_vertex_color_hsv(wmOperatorType *ot)
   RNA_def_float(ot->srna, "v", 1.0f, 0.0f, 2.0f, "Value", "", 0.0f, 2.0f);
 }
 
-static int grease_pencil_vertex_paint_invert_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus grease_pencil_vertex_paint_invert_exec(bContext *C, wmOperator *op)
 {
   const Scene &scene = *CTX_data_scene(C);
   Object &object = *CTX_data_active_object(C);
   GreasePencil &grease_pencil = *static_cast<GreasePencil *>(object.data);
   const VertexColorMode mode = VertexColorMode(RNA_enum_get(op->ptr, "mode"));
+  const bool use_selection_mask = ED_grease_pencil_any_vertex_mask_selection(scene.toolsettings);
 
   std::atomic<bool> any_changed;
   Vector<MutableDrawingInfo> drawings = retrieve_editable_drawings(scene, grease_pencil);
   threading::parallel_for_each(drawings, [&](MutableDrawingInfo info) {
     bke::CurvesGeometry &curves = info.drawing.strokes_for_write();
-    if (curves.curves_num() == 0) {
+    if (curves.is_empty()) {
       return;
     }
     const bool changed = apply_color_operation_for_mode(
-        mode, object, info, [&](const ColorGeometry4f &color) -> ColorGeometry4f {
+        mode,
+        object,
+        info,
+        use_selection_mask,
+        [&](const ColorGeometry4f &color) -> ColorGeometry4f {
           /* Invert the color. */
           return ColorGeometry4f(1.0f - color.r, 1.0f - color.g, 1.0f - color.b, color.a);
         });
@@ -253,7 +279,7 @@ static void GREASE_PENCIL_OT_vertex_color_invert(wmOperatorType *ot)
   ot->idname = "GREASE_PENCIL_OT_vertex_color_invert";
   ot->description = "Invert RGB values";
 
-  /* api callbacks */
+  /* API callbacks. */
   ot->exec = grease_pencil_vertex_paint_invert_exec;
   ot->poll = grease_pencil_vertex_painting_poll;
 
@@ -265,7 +291,7 @@ static void GREASE_PENCIL_OT_vertex_color_invert(wmOperatorType *ot)
       ot->srna, "mode", prop_grease_pencil_vertex_mode, int(VertexColorMode::Both), "Mode", "");
 }
 
-static int grease_pencil_vertex_paint_levels_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus grease_pencil_vertex_paint_levels_exec(bContext *C, wmOperator *op)
 {
   const Scene &scene = *CTX_data_scene(C);
   Object &object = *CTX_data_active_object(C);
@@ -273,16 +299,21 @@ static int grease_pencil_vertex_paint_levels_exec(bContext *C, wmOperator *op)
   const VertexColorMode mode = VertexColorMode(RNA_enum_get(op->ptr, "mode"));
   const float gain = RNA_float_get(op->ptr, "gain");
   const float offset = RNA_float_get(op->ptr, "offset");
+  const bool use_selection_mask = ED_grease_pencil_any_vertex_mask_selection(scene.toolsettings);
 
   std::atomic<bool> any_changed;
   Vector<MutableDrawingInfo> drawings = retrieve_editable_drawings(scene, grease_pencil);
   threading::parallel_for_each(drawings, [&](MutableDrawingInfo info) {
     bke::CurvesGeometry &curves = info.drawing.strokes_for_write();
-    if (curves.curves_num() == 0) {
+    if (curves.is_empty()) {
       return;
     }
     const bool changed = apply_color_operation_for_mode(
-        mode, object, info, [&](const ColorGeometry4f &color) -> ColorGeometry4f {
+        mode,
+        object,
+        info,
+        use_selection_mask,
+        [&](const ColorGeometry4f &color) -> ColorGeometry4f {
           const float3 result = float3(color) * gain + offset;
           return ColorGeometry4f(result[0], result[1], result[2], color.a);
         });
@@ -303,7 +334,7 @@ static void GREASE_PENCIL_OT_vertex_color_levels(wmOperatorType *ot)
   ot->idname = "GREASE_PENCIL_OT_vertex_color_levels";
   ot->description = "Adjust levels of vertex colors";
 
-  /* api callbacks */
+  /* API callbacks. */
   ot->exec = grease_pencil_vertex_paint_levels_exec;
   ot->poll = grease_pencil_vertex_painting_poll;
 
@@ -320,7 +351,7 @@ static void GREASE_PENCIL_OT_vertex_color_levels(wmOperatorType *ot)
       ot->srna, "gain", 1.0f, 0.0f, FLT_MAX, "Gain", "Value to multiply colors by", 0.0f, 10.0f);
 }
 
-static int grease_pencil_vertex_paint_set_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus grease_pencil_vertex_paint_set_exec(bContext *C, wmOperator *op)
 {
   const Scene &scene = *CTX_data_scene(C);
   Object &object = *CTX_data_active_object(C);
@@ -329,16 +360,16 @@ static int grease_pencil_vertex_paint_set_exec(bContext *C, wmOperator *op)
   GreasePencil &grease_pencil = *static_cast<GreasePencil *>(object.data);
   const VertexColorMode mode = VertexColorMode(RNA_enum_get(op->ptr, "mode"));
   const float factor = RNA_float_get(op->ptr, "factor");
+  const bool use_selection_mask = ED_grease_pencil_any_vertex_mask_selection(scene.toolsettings);
 
-  float3 color_linear;
-  srgb_to_linearrgb_v3_v3(color_linear, BKE_brush_color_get(&scene, &paint, &brush));
+  float3 color_linear = BKE_brush_color_get(&paint, &brush);
   const ColorGeometry4f target_color(color_linear[0], color_linear[1], color_linear[2], 1.0f);
 
   std::atomic<bool> any_changed;
   Vector<MutableDrawingInfo> drawings = retrieve_editable_drawings(scene, grease_pencil);
   threading::parallel_for_each(drawings, [&](MutableDrawingInfo info) {
     bke::CurvesGeometry &curves = info.drawing.strokes_for_write();
-    if (curves.curves_num() == 0) {
+    if (curves.is_empty()) {
       return;
     }
     /* Create the color attributes if they don't exist. */
@@ -351,7 +382,11 @@ static int grease_pencil_vertex_paint_set_exec(bContext *C, wmOperator *op)
           "fill_color", bke::AttrDomain::Curve, bke::AttributeInitDefaultValue());
     }
     const bool changed = apply_color_operation_for_mode(
-        mode, object, info, [&](const ColorGeometry4f &color) -> ColorGeometry4f {
+        mode,
+        object,
+        info,
+        use_selection_mask,
+        [&](const ColorGeometry4f &color) -> ColorGeometry4f {
           /* Mix in the target color based on the factor. */
           return math::interpolate(color, target_color, factor);
         });
@@ -372,7 +407,7 @@ static void GREASE_PENCIL_OT_vertex_color_set(wmOperatorType *ot)
   ot->idname = "GREASE_PENCIL_OT_vertex_color_set";
   ot->description = "Set active color to all selected vertex";
 
-  /* api callbacks */
+  /* API callbacks. */
   ot->exec = grease_pencil_vertex_paint_set_exec;
   ot->poll = grease_pencil_vertex_painting_poll;
 
@@ -385,22 +420,37 @@ static void GREASE_PENCIL_OT_vertex_color_set(wmOperatorType *ot)
   RNA_def_float(ot->srna, "factor", 1.0f, 0.0f, 1.0f, "Factor", "Mix Factor", 0.0f, 1.0f);
 }
 
-static int grease_pencil_vertex_paint_reset_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus grease_pencil_vertex_paint_reset_exec(bContext *C, wmOperator *op)
 {
   const Scene &scene = *CTX_data_scene(C);
   Object &object = *CTX_data_active_object(C);
   GreasePencil &grease_pencil = *static_cast<GreasePencil *>(object.data);
   const VertexColorMode mode = VertexColorMode(RNA_enum_get(op->ptr, "mode"));
+  const bool use_selection_mask = ED_grease_pencil_any_vertex_mask_selection(scene.toolsettings);
 
   std::atomic<bool> any_changed;
   Vector<MutableDrawingInfo> drawings = retrieve_editable_drawings(scene, grease_pencil);
   threading::parallel_for_each(drawings, [&](MutableDrawingInfo info) {
     bke::CurvesGeometry &curves = info.drawing.strokes_for_write();
-    if (curves.curves_num() == 0) {
+    if (curves.is_empty()) {
       return;
     }
-    /* Remove the color attributes. */
+
     bool changed = false;
+    if (use_selection_mask) {
+      changed |= apply_color_operation_for_mode(
+          mode,
+          object,
+          info,
+          use_selection_mask,
+          [&](const ColorGeometry4f & /*color*/) -> ColorGeometry4f {
+            return ColorGeometry4f(0.0f, 0.0f, 0.0f, 0.0f);
+          });
+      any_changed.store(any_changed | changed, std::memory_order_relaxed);
+      return;
+    }
+
+    /* Remove the color attributes. */
     if (ELEM(mode, VertexColorMode::Stroke, VertexColorMode::Both)) {
       changed |= curves.attributes_for_write().remove("vertex_color");
     }

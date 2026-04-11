@@ -2,10 +2,12 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "BLI_math_constants.h"
+
 #include "DNA_mesh_types.h"
 
 #include "BKE_lib_id.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_mesh.hh"
 
 #include "GEO_randomize.hh"
@@ -82,7 +84,7 @@ static Mesh *create_ico_sphere_mesh(const int subdivisions,
   /* Make sure the associated boolean layers exists as well. Normally this would be done when
    * adding a UV layer via python or when copying from Mesh, but when we 'manually' create the UV
    * layer we need to make sure the boolean layers exist as well. */
-  BM_uv_map_ensure_select_and_pin_attrs(bm);
+  BM_uv_map_attr_pin_ensure_for_all_layers(bm);
 
   BMO_op_callf(bm,
                BMO_FLAG_DEFAULTS,
@@ -94,7 +96,7 @@ static Mesh *create_ico_sphere_mesh(const int subdivisions,
 
   BMeshToMeshParams params{};
   params.calc_object_remap = false;
-  Mesh *mesh = reinterpret_cast<Mesh *>(BKE_id_new_nomain(ID_ME, nullptr));
+  Mesh *mesh = BKE_id_new_nomain<Mesh>(nullptr);
   BKE_id_material_eval_ensure_default_slot(&mesh->id);
   BM_mesh_bm_to_me(nullptr, bm, mesh, &params);
   BM_mesh_free(bm);
@@ -134,11 +136,14 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(
-      &ntype, GEO_NODE_MESH_PRIMITIVE_ICO_SPHERE, "Ico Sphere", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeMeshIcoSphere", GEO_NODE_MESH_PRIMITIVE_ICO_SPHERE);
+  ntype.ui_name = "Ico Sphere";
+  ntype.ui_description = "Generate a spherical mesh that consists of equally sized triangles";
+  ntype.enum_name_legacy = "MESH_PRIMITIVE_ICO_SPHERE";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

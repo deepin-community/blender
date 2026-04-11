@@ -12,8 +12,6 @@
  * \note This is a slight misuse of gizmo's, since clicking performs no action.
  */
 
-#include "MEM_guardedalloc.h"
-
 #include "DNA_mesh_types.h"
 #include "DNA_view3d_types.h"
 
@@ -188,7 +186,7 @@ static int gizmo_preselect_elem_test_select(bContext *C, wmGizmo *gz, const int 
       /* Re-topology should always prioritize edge pre-selection.
        * Only pre-select a vertex when the cursor is really close to it. */
       if (eve_test) {
-        BMVert *vert = (BMVert *)eve_test;
+        BMVert *vert = eve_test;
         float vert_p_co[2], vert_co[3];
         const float mval_f[2] = {float(vc.mval[0]), float(vc.mval[1])};
         mul_v3_m4v3(
@@ -243,7 +241,7 @@ static int gizmo_preselect_elem_test_select(bContext *C, wmGizmo *gz, const int 
     {
       Object *ob = gz_ele->bases[gz_ele->base_index]->object;
       const Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
-      const Object *ob_eval = DEG_get_evaluated_object(depsgraph, ob);
+      const Object *ob_eval = DEG_get_evaluated(depsgraph, ob);
       const Mesh *mesh_eval = BKE_object_get_editmesh_eval_cage(ob_eval);
       if (BKE_mesh_wrapper_vert_len(mesh_eval) == bm->totvert) {
         vert_positions = BKE_mesh_wrapper_vert_coords(mesh_eval);
@@ -292,9 +290,9 @@ static void gizmo_preselect_elem_free(wmGizmo *gz)
   gz_ele->bases.~Vector();
 }
 
-static int gizmo_preselect_elem_invoke(bContext * /*C*/,
-                                       wmGizmo * /*gz*/,
-                                       const wmEvent * /*event*/)
+static wmOperatorStatus gizmo_preselect_elem_invoke(bContext * /*C*/,
+                                                    wmGizmo * /*gz*/,
+                                                    const wmEvent * /*event*/)
 {
   return OPERATOR_PASS_THROUGH;
 }
@@ -304,7 +302,7 @@ static void GIZMO_GT_mesh_preselect_elem_3d(wmGizmoType *gzt)
   /* identifiers */
   gzt->idname = "GIZMO_GT_mesh_preselect_elem_3d";
 
-  /* api callbacks */
+  /* API callbacks. */
   gzt->invoke = gizmo_preselect_elem_invoke;
   gzt->draw = gizmo_preselect_elem_draw;
   gzt->test_select = gizmo_preselect_elem_test_select;
@@ -407,8 +405,8 @@ static int gizmo_preselect_edgering_test_select(bContext *C, wmGizmo *gz, const 
   else {
     if (best.eed) {
       Object *ob = gz_ring->bases[gz_ring->base_index]->object;
-      Scene *scene_eval = (Scene *)DEG_get_evaluated_id(vc.depsgraph, &vc.scene->id);
-      Object *ob_eval = DEG_get_evaluated_object(vc.depsgraph, ob);
+      Scene *scene_eval = DEG_get_evaluated(vc.depsgraph, vc.scene);
+      Object *ob_eval = DEG_get_evaluated(vc.depsgraph, ob);
       BMEditMesh *em_eval = BKE_editmesh_from_object(ob_eval);
       /* Re-allocate coords each update isn't ideal, however we can't be sure
        * the mesh hasn't been edited since last update. */
@@ -453,9 +451,9 @@ static void gizmo_preselect_edgering_free(wmGizmo *gz)
   gz_ring->bases.~Vector();
 }
 
-static int gizmo_preselect_edgering_invoke(bContext * /*C*/,
-                                           wmGizmo * /*gz*/,
-                                           const wmEvent * /*event*/)
+static wmOperatorStatus gizmo_preselect_edgering_invoke(bContext * /*C*/,
+                                                        wmGizmo * /*gz*/,
+                                                        const wmEvent * /*event*/)
 {
   return OPERATOR_PASS_THROUGH;
 }
@@ -465,7 +463,7 @@ static void GIZMO_GT_mesh_preselect_edgering_3d(wmGizmoType *gzt)
   /* identifiers */
   gzt->idname = "GIZMO_GT_mesh_preselect_edgering_3d";
 
-  /* api callbacks */
+  /* API callbacks. */
   gzt->invoke = gizmo_preselect_edgering_invoke;
   gzt->draw = gizmo_preselect_edgering_draw;
   gzt->test_select = gizmo_preselect_edgering_test_select;

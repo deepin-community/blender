@@ -16,8 +16,11 @@
  */
 
 #include "BKE_object.hh"
+#include "DNA_scene_types.h"
 #include "DRW_render.hh"
 #include "GPU_compute.hh"
+
+#include "draw_cache.hh"
 
 #include "workbench_private.hh"
 
@@ -97,10 +100,8 @@ void ShadowPass::ShadowView::setup(View &view, float3 light_direction, bool forc
       {3, 7},
   };
 
-  BoundBox frustum_corners;
-  DRW_culling_frustum_corners_get(nullptr, &frustum_corners);
-  float4 frustum_planes[6];
-  DRW_culling_frustum_planes_get(nullptr, (float(*)[4])frustum_planes);
+  std::array<float3, 8> frustum_corners = this->frustum_corners_get();
+  std::array<float4, 6> frustum_planes = this->frustum_planes_get();
 
   Vector<float4> faces_result;
   Vector<float3> corners_result;
@@ -126,8 +127,8 @@ void ShadowPass::ShadowView::setup(View &view, float3 light_direction, bool forc
     bool b_lit = face_lit[f[1]];
     if (a_lit != b_lit) {
       /* Extrude Face */
-      float3 corner_a = frustum_corners.vec[edge_corners[i][0]];
-      float3 corner_b = frustum_corners.vec[edge_corners[i][1]];
+      float3 corner_a = frustum_corners[edge_corners[i][0]];
+      float3 corner_b = frustum_corners[edge_corners[i][1]];
       float3 edge_direction = math::normalize(corner_b - corner_a);
       float3 normal = math::normalize(math::cross(light_direction_, edge_direction));
 
@@ -135,7 +136,7 @@ void ShadowPass::ShadowView::setup(View &view, float3 light_direction, bool forc
 
       /* Ensure the plane faces outwards */
       bool flipped = false;
-      for (float3 corner : frustum_corners.vec) {
+      for (float3 corner : frustum_corners) {
         if (math::dot(float3(extruded_face), corner) > (extruded_face.w + 0.1)) {
           BLI_assert(!flipped);
           UNUSED_VARS_NDEBUG(flipped);
@@ -155,11 +156,11 @@ void ShadowPass::ShadowView::setup(View &view, float3 light_direction, bool forc
     }
     if (lit_faces < 3) {
       /* Add original corner */
-      corners_result.append(frustum_corners.vec[i_corner]);
+      corners_result.append(frustum_corners[i_corner]);
 
       if (lit_faces > 0) {
         /* Add extruded corner */
-        corners_result.append(float3(frustum_corners.vec[i_corner]) - (light_direction_ * 1e4f));
+        corners_result.append(float3(frustum_corners[i_corner]) - (light_direction_ * 1e4f));
       }
     }
   }
@@ -181,12 +182,11 @@ bool ShadowPass::ShadowView::debug_object_culling(Object *ob)
 {
   printf("Test %s\n", ob->id.name);
   const Bounds<float3> bounds = *BKE_object_boundbox_get(ob);
-  BoundBox bb;
-  BKE_boundbox_init_from_minmax(&bb, bounds.min, bounds.max);
+  const std::array<float3, 8> corners = bounds::corners(bounds);
   for (int p : IndexRange(extruded_frustum_.planes_count)) {
     float4 plane = extruded_frustum_.planes[p];
     bool separating_axis = true;
-    for (float3 corner : bb.vec) {
+    for (float3 corner : corners) {
       corner = math::transform_point(ob->object_to_world(), corner);
       float signed_distance = math::dot(corner, float3(plane)) - plane.w;
       if (signed_distance <= 0) {
@@ -195,7 +195,7 @@ bool ShadowPass::ShadowView::debug_object_culling(Object *ob)
       }
     }
     if (separating_axis) {
-      printf("Sepatating Axis >>> x: %f, y: %f, z: %f, w: %f \n", UNPACK4(plane));
+      printf("Separating Axis >>> x: %f, y: %f, z: %f, w: %f \n", UNPACK4(plane));
       return true;
     }
   }
@@ -205,6 +205,8 @@ bool ShadowPass::ShadowView::debug_object_culling(Object *ob)
 void ShadowPass::ShadowView::set_mode(ShadowPass::PassType type)
 {
   current_pass_type_ = type;
+  /* Ensure compute_visibility runs again after updating the mode. */
+  manager_fingerprint_ = 0;
 }
 
 void ShadowPass::ShadowView::compute_visibility(ObjectBoundsBuf &bounds,
@@ -242,9 +244,9 @@ void ShadowPass::ShadowView::compute_visibility(ObjectBoundsBuf &bounds,
 
   if (do_visibility_) {
     /* TODO(@pragma37): Use regular culling for the caps pass. */
-    GPUShader *shader = current_pass_type_ == ShadowPass::FORCED_FAIL ?
-                            ShaderCache::get().shadow_visibility_static.get() :
-                            ShaderCache::get().shadow_visibility_dynamic.get();
+    gpu::Shader *shader = current_pass_type_ == ShadowPass::FORCED_FAIL ?
+                              ShaderCache::get().shadow_visibility_static.get() :
+                              ShaderCache::get().shadow_visibility_dynamic.get();
     GPU_shader_bind(shader);
     GPU_shader_uniform_1i(shader, "resource_len", resource_len);
     GPU_shader_uniform_1i(shader, "view_len", view_len_);
@@ -305,16 +307,14 @@ void ShadowPass::init(const SceneState &scene_state, SceneResources &resources)
   std::swap(direction_ws.y, direction_ws.z);
   direction_ws *= float3(-1, 1, -1);
 
-  float planes[6][4];
-  DRW_culling_frustum_planes_get(nullptr, planes);
+  std::array<float4, 6> planes = View::default_get().frustum_planes_get();
 
   pass_data_.light_direction_ws = direction_ws;
   pass_data_.far_plane = planes[2] * float4(-1, -1, -1, 1);
   pass_data_.push_update();
 
   /* Shadow direction. */
-  float4x4 view_matrix;
-  DRW_view_viewmat_get(nullptr, view_matrix.ptr(), false);
+  float4x4 view_matrix = blender::draw::View::default_get().viewmat();
   resources.world_buf.shadow_direction_vs = float4(
       math::transform_direction(view_matrix, direction_ws), 0.0f);
 
@@ -379,7 +379,7 @@ void ShadowPass::sync()
 
 void ShadowPass::object_sync(SceneState &scene_state,
                              ObjectRef &ob_ref,
-                             ResourceHandle handle,
+                             ResourceHandleRange handle,
                              const bool has_transp_mat)
 {
   if (!enabled_) {
@@ -428,7 +428,7 @@ void ShadowPass::object_sync(SceneState &scene_state,
 void ShadowPass::draw(Manager &manager,
                       View &view,
                       SceneResources &resources,
-                      GPUTexture &depth_stencil_tx,
+                      gpu::Texture &depth_stencil_tx,
                       bool force_fail_method)
 {
   if (!enabled_) {

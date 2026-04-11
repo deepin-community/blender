@@ -11,7 +11,6 @@
 #include "BKE_object.hh"
 
 #include "DNA_anim_types.h"
-#include "DNA_object_types.h"
 
 #include "BLI_listbase.h"
 
@@ -49,12 +48,12 @@ class ActionLegacyTest : public testing::Test {
 
   bAction *create_empty_action()
   {
-    return static_cast<bAction *>(BKE_id_new(bmain, ID_AC, "ACAction"));
+    return BKE_id_new<bAction>(bmain, "ACAction");
   }
 
   FCurve *fcurve_add_legacy(bAction *action, const StringRefNull rna_path, const int array_index)
   {
-    FCurve *fcurve = static_cast<FCurve *>(MEM_callocN(sizeof(FCurve), __func__));
+    FCurve *fcurve = MEM_callocN<FCurve>(__func__);
     BKE_fcurve_rnapath_set(*fcurve, rna_path);
     fcurve->array_index = array_index;
     BLI_addtail(&action->curves, fcurve);
@@ -78,7 +77,7 @@ TEST_F(ActionLegacyTest, fcurves_all)
   { /* Legacy Action. */
     bAction *action = create_empty_action();
 
-    FCurve *fcurve = static_cast<FCurve *>(MEM_callocN(sizeof(FCurve), __func__));
+    FCurve *fcurve = MEM_callocN<FCurve>(__func__);
     BLI_addtail(&action->curves, fcurve);
 
     Vector<FCurve *> fcurves_expect = {fcurve};
@@ -86,7 +85,6 @@ TEST_F(ActionLegacyTest, fcurves_all)
   }
 }
 
-#ifdef WITH_ANIM_BAKLAVA
 TEST_F(ActionLegacyTest, fcurves_all_layered)
 {
   Action &action = create_empty_action()->wrap();
@@ -103,7 +101,6 @@ TEST_F(ActionLegacyTest, fcurves_all_layered)
   Vector<FCurve *> fcurves_expect = {&fcurve1, &fcurve2};
   EXPECT_EQ(fcurves_expect, legacy::fcurves_all(&action));
 }
-#endif /* WITH_ANIM_BAKLAVA */
 
 TEST_F(ActionLegacyTest, fcurves_for_action_slot)
 {
@@ -122,7 +119,7 @@ TEST_F(ActionLegacyTest, fcurves_for_action_slot)
   { /* Legacy Action. */
     bAction *action = create_empty_action();
 
-    FCurve *fcurve = static_cast<FCurve *>(MEM_callocN(sizeof(FCurve), __func__));
+    FCurve *fcurve = MEM_callocN<FCurve>(__func__);
     BLI_addtail(&action->curves, fcurve);
 
     Vector<FCurve *> fcurves_expect = {fcurve};
@@ -130,7 +127,6 @@ TEST_F(ActionLegacyTest, fcurves_for_action_slot)
   }
 }
 
-#ifdef WITH_ANIM_BAKLAVA
 TEST_F(ActionLegacyTest, fcurves_for_action_slot_layered)
 {
   Action &action = create_empty_action()->wrap();
@@ -149,7 +145,6 @@ TEST_F(ActionLegacyTest, fcurves_for_action_slot_layered)
   EXPECT_EQ(fcurve1_expect, legacy::fcurves_for_action_slot(&action, slot1.handle));
   EXPECT_EQ(fcurve2_expect, legacy::fcurves_for_action_slot(&action, slot2.handle));
 }
-#endif /* WITH_ANIM_BAKLAVA */
 
 TEST_F(ActionLegacyTest, action_fcurves_remove_legacy)
 {
@@ -171,7 +166,6 @@ TEST_F(ActionLegacyTest, action_fcurves_remove_legacy)
   }
 }
 
-#ifdef WITH_ANIM_BAKLAVA
 TEST_F(ActionLegacyTest, action_fcurves_remove_layered)
 {
   /* Create an Action with two slots, to check that the 2nd slot is not affected
@@ -182,8 +176,8 @@ TEST_F(ActionLegacyTest, action_fcurves_remove_layered)
 
   action.layer_keystrip_ensure();
   StripKeyframeData *strip_data = action.strip_keyframe_data()[0];
-  ChannelBag &bag_1 = strip_data->channelbag_for_slot_ensure(slot_1);
-  ChannelBag &bag_2 = strip_data->channelbag_for_slot_ensure(slot_2);
+  Channelbag &bag_1 = strip_data->channelbag_for_slot_ensure(slot_1);
+  Channelbag &bag_2 = strip_data->channelbag_for_slot_ensure(slot_2);
 
   /* Add some F-Curves to each channelbag. */
   FCurve &fcurve_loc_x = bag_1.fcurve_ensure(nullptr, {"location", 0});
@@ -205,7 +199,5 @@ TEST_F(ActionLegacyTest, action_fcurves_remove_layered)
   EXPECT_EQ(4, bag_2.fcurves().size())
       << "Expected all F-Curves for slot 2 to be there after manipulating slot 1";
 }
-
-#endif /* WITH_ANIM_BAKLAVA */
 
 }  // namespace blender::animrig::tests

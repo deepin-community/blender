@@ -74,10 +74,6 @@ Files: release/freedesktop/org.blender.Blender.metainfo.xml
 Copyright: 2019, Blender Foundation
 License: CC0-1.0
 
-Files: build_files/cmake/clang_array_check.py
-Copyright: 2012-2013, Campbell Burton
-License: Apache-2.0
-
 Files: build_files/cmake/Modules/*
 Copyright: 2011-2012, Blender Foundation
 License: BSD-Modified
@@ -99,6 +95,7 @@ Copyright: 1999, Stephen Crowley <crow@debian.org>
            2007-2010, Cyril Brulebois <kibi@debian.org>
            2010-2012, Kevin Roy <kiniou@gmail.com>
            2012-2022, Matteo F. Vescovi <mfv@debian.org>
+           2026, Canonical Ltd
 License: GPL-2+
 
 Files: extern/glog/src/*
@@ -249,11 +246,6 @@ Copyright: 2007, Ruben Smits
            2005-2006, Erwin Aertbelien
            2007,  Francois Cauwe
 License: LGPL-2.1+
-
-Files: intern/opencolorio/ocio_impl_glsl.cc
-Copyright: 2003-2010, Sony Pictures Imageworks Inc.
-           2013, Blender Foundation
-License: BSD-New-Sony
 
 Files: release/datafiles/*
 Copyright: 2003, Bitstream, Inc.

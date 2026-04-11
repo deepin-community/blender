@@ -60,7 +60,7 @@ class HandlePositionFieldInput final : public bke::GeometryFieldInput {
           output[i] = handles[i] - positions[i];
         }
         return attributes.adapt_domain<float3>(
-            VArray<float3>::ForContainer(std::move(output)), AttrDomain::Point, domain);
+            VArray<float3>::from_container(std::move(output)), AttrDomain::Point, domain);
       }
       return attributes.adapt_domain<float3>(handles, AttrDomain::Point, domain);
     }
@@ -75,7 +75,7 @@ class HandlePositionFieldInput final : public bke::GeometryFieldInput {
       }
     }
     return attributes.adapt_domain<float3>(
-        VArray<float3>::ForContainer(std::move(output)), AttrDomain::Point, domain);
+        VArray<float3>::from_container(std::move(output)), AttrDomain::Point, domain);
   }
 
   void for_each_field_input_recursive(FunctionRef<void(const FieldInput &)> fn) const final
@@ -119,11 +119,15 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
   geo_node_type_base(
-      &ntype, GEO_NODE_INPUT_CURVE_HANDLES, "Curve Handle Positions", NODE_CLASS_INPUT);
-  blender::bke::node_type_size_preset(&ntype, blender::bke::eNodeSizePreset::Middle);
+      &ntype, "GeometryNodeInputCurveHandlePositions", GEO_NODE_INPUT_CURVE_HANDLES);
+  ntype.ui_name = "Curve Handle Positions";
+  ntype.ui_description = "Retrieve the position of each Bézier control point's handles";
+  ntype.enum_name_legacy = "INPUT_CURVE_HANDLES";
+  ntype.nclass = NODE_CLASS_INPUT;
+  blender::bke::node_type_size_preset(ntype, blender::bke::eNodeSizePreset::Middle);
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

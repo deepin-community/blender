@@ -19,7 +19,7 @@ endfunction()
 #
 # \param envvars_list: A list of extra environment variables to define for that test.
 #                      Note that this does no check for (re-)definition of a same variable.
-function(blender_test_set_envvars testname envvars_list)
+function(blender_test_set_envvars testname envvar_list)
   if(PLATFORM_ENV_INSTALL)
     list(APPEND envvar_list "${PLATFORM_ENV_INSTALL}")
   endif()
@@ -39,7 +39,9 @@ function(blender_test_set_envvars testname envvars_list)
       list(APPEND envvar_list "${_lsan_options}" "${_asan_options}")
     endif()
   endif()
-
+  if(WITH_COMPILER_CODE_COVERAGE AND CMAKE_C_COMPILER_ID MATCHES "Clang")
+    list(APPEND envvar_list "LLVM_PROFILE_FILE=${COMPILER_CODE_COVERAGE_DATA_DIR}/raw/blender_%p.profraw")
+  endif()
   # Can only be called once per test to define its custom environment variables.
   set_tests_properties(${testname} PROPERTIES ENVIRONMENT "${envvar_list}")
 endfunction()
@@ -104,9 +106,6 @@ macro(blender_src_gtest_ex)
     if(DEFINED PTHREADS_LIBRARIES) # Needed for GLOG.
       target_link_libraries(${TARGET_NAME} PRIVATE ${PTHREADS_LIBRARIES})
     endif()
-    if(WITH_OPENMP AND WITH_OPENMP_STATIC)
-      target_link_libraries(${TARGET_NAME} PRIVATE ${OpenMP_LIBRARIES})
-    endif()
     if(UNIX AND NOT APPLE)
       target_link_libraries(${TARGET_NAME} PRIVATE bf_intern_libc_compat)
     endif()
@@ -128,7 +127,6 @@ macro(blender_src_gtest_ex)
       if(WITH_WINDOWS_EXTERNAL_MANIFEST)
         add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
           COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/tests.exe.manifest ${TESTS_OUTPUT_DIR}/${TARGET_NAME}.exe.manifest
-          DEPENDS ${CMAKE_BINARY_DIR}/tests.exe.manifest
         )
       endif()
     endif()
@@ -142,6 +140,9 @@ endmacro()
 function(blender_add_ctests)
   if(ARGC LESS 1)
     message(FATAL_ERROR "No arguments supplied to blender_add_ctests()")
+  endif()
+  if(NOT EXISTS "${CMAKE_SOURCE_DIR}/tests/files/render")
+    return()
   endif()
 
   # Parse the arguments
@@ -170,14 +171,14 @@ function(blender_add_ctests)
       TEST_PREFIX ${ARGS_SUITE_NAME}
       WORKING_DIRECTORY "${TEST_INSTALL_DIR}"
       EXTRA_ARGS
-        --test-assets-dir "${CMAKE_SOURCE_DIR}/tests/data"
+        --test-assets-dir "${CMAKE_SOURCE_DIR}/tests/files"
         --test-release-dir "${_test_release_dir}"
     )
   else()
     add_test(
       NAME ${ARGS_SUITE_NAME}
       COMMAND ${ARGS_TARGET}
-        --test-assets-dir "${CMAKE_SOURCE_DIR}/tests/data"
+        --test-assets-dir "${CMAKE_SOURCE_DIR}/tests/files"
         --test-release-dir "${_test_release_dir}"
       WORKING_DIRECTORY ${TEST_INSTALL_DIR}
     )
@@ -196,7 +197,7 @@ endfunction()
 # blender_add_test_suite_executable.
 #
 # The function accepts an optional argument which denotes list of sources which
-# is to be compiled-in with the suite sources for each fo the suites when the
+# is to be compiled-in with the suite sources for each of the suites when the
 # WITH_TESTS_SINGLE_BINARY configuration is set to OFF.
 function(blender_add_test_suite_lib
   name
@@ -229,7 +230,7 @@ function(blender_add_test_suite_lib
     )
 
     blender_add_lib__impl(${name}_tests
-        "${sources};${common_sources}" "${includes}" "${includes_sys}" "${library_deps}")
+      "${sources};${common_sources}" "${includes}" "${includes_sys}" "${library_deps}")
 
     target_compile_definitions(${name}_tests PRIVATE ${GFLAGS_DEFINES})
     target_compile_definitions(${name}_tests PRIVATE ${GLOG_DEFINES})
@@ -291,6 +292,7 @@ function(blender_add_test_executable_impl
 
   blender_target_include_dirs(${name}_test ${includes})
   blender_target_include_dirs_sys(${name}_test ${includes_sys})
+  blender_source_group("${name}_test" "${sources}")
 endfunction()
 
 # Add tests for a Blender library, to be called in tandem with blender_add_lib().
@@ -307,7 +309,7 @@ endfunction()
 # very large executable, blender_add_test_suite_lib() should be used instead.
 #
 # The function accepts an optional argument which denotes list of sources which
-# is to be compiled-in with the suit sources for each fo the suites when the
+# is to be compiled-in with the suit sources for each of the suites when the
 # WITH_TESTS_SINGLE_BINARY configuration is set to OFF.
 function(blender_add_test_suite_executable
   name
@@ -330,7 +332,7 @@ function(blender_add_test_suite_executable
       "${library_deps}"
       ADD_CTESTS TRUE
       DISCOVER_TESTS TRUE
-     )
+    )
   else()
     foreach(source ${sources})
       get_filename_component(_source_ext ${source} LAST_EXT)
@@ -351,7 +353,7 @@ function(blender_add_test_suite_executable
           "${library_deps}"
           ADD_CTESTS TRUE
           DISCOVER_TESTS FALSE
-         )
+        )
 
         # Work-around run-time dynamic loader error
         #   symbol not found in flat namespace '_PyBaseObject_Type'

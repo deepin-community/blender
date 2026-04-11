@@ -16,7 +16,6 @@
 
 #include "WM_api.hh"
 
-#include "BLI_enumerable_thread_specific.hh"
 #include "BLI_task.hh"
 
 #include "curves_sculpt_intern.hh"
@@ -50,7 +49,7 @@ struct SmoothOperationExecutor {
   IndexMaskMemory selected_curve_memory_;
   IndexMask curve_selection_;
 
-  const CurvesSculpt *curves_sculpt_ = nullptr;
+  CurvesSculpt *curves_sculpt_ = nullptr;
   const Brush *brush_ = nullptr;
   float brush_radius_base_re_;
   float brush_radius_factor_;
@@ -69,15 +68,15 @@ struct SmoothOperationExecutor {
     object_ = CTX_data_active_object(&C);
     curves_id_ = static_cast<Curves *>(object_->data);
     curves_ = &curves_id_->geometry.wrap();
-    if (curves_->curves_num() == 0) {
+    if (curves_->is_empty()) {
       return;
     }
 
     curves_sculpt_ = ctx_.scene->toolsettings->curves_sculpt;
     brush_ = BKE_paint_brush_for_read(&curves_sculpt_->paint);
-    brush_radius_base_re_ = BKE_brush_size_get(ctx_.scene, brush_);
+    brush_radius_base_re_ = BKE_brush_radius_get(&curves_sculpt_->paint, brush_);
     brush_radius_factor_ = brush_radius_factor(*brush_, stroke_extension);
-    brush_strength_ = brush_strength_get(*ctx_.scene, *brush_, stroke_extension);
+    brush_strength_ = brush_strength_get(curves_sculpt_->paint, *brush_, stroke_extension);
     brush_pos_re_ = stroke_extension.mouse_position;
 
     point_factors_ = *curves_->attributes().lookup_or_default<float>(
@@ -87,7 +86,7 @@ struct SmoothOperationExecutor {
 
     const eBrushFalloffShape falloff_shape = eBrushFalloffShape(brush_->falloff_shape);
     if (stroke_extension.is_first) {
-      if (falloff_shape == PAINT_FALLOFF_SHAPE_SPHERE) {
+      if (falloff_shape == PAINT_FALLOFF_SHAPE_SPHERE || (U.uiflag & USER_ORBIT_SELECTION)) {
         self.brush_3d_ = *sample_curves_3d_brush(*ctx_.depsgraph,
                                                  *ctx_.region,
                                                  *ctx_.v3d,
@@ -95,6 +94,9 @@ struct SmoothOperationExecutor {
                                                  *object_,
                                                  brush_pos_re_,
                                                  brush_radius_base_re_);
+        remember_stroke_position(
+            *curves_sculpt_,
+            math::transform_point(transforms_.curves_to_world, self_->brush_3d_.position_cu));
       }
     }
 

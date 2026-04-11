@@ -10,6 +10,7 @@
 #include "BLI_math_euler.hh"
 #include "BLI_math_quaternion.hh"
 #include "BLI_math_vector.hh"
+#include "IMB_colormanagement.hh"
 
 namespace blender::bke {
 
@@ -49,9 +50,17 @@ static float3 float_to_float3(const float &a)
 {
   return float3(a);
 }
+static float4 float_to_float4(const float &a)
+{
+  return float4(a);
+}
 static int32_t float_to_int(const float &a)
 {
   return int32_t(a);
+}
+static short2 float_to_short2(const float &a)
+{
+  return short2(a);
 }
 static int2 float_to_int2(const float &a)
 {
@@ -72,7 +81,7 @@ static ColorGeometry4f float_to_color(const float &a)
 }
 static ColorGeometry4b float_to_byte_color(const float &a)
 {
-  return float_to_color(a).encode();
+  return color::encode(float_to_color(a));
 }
 static math::Quaternion float_to_quaternion(const float &a)
 {
@@ -83,6 +92,10 @@ static float3 float2_to_float3(const float2 &a)
 {
   return float3(a.x, a.y, 0.0f);
 }
+static float4 float2_to_float4(const float2 &a)
+{
+  return float4(a.x, a.y, 0.0f, 0.0f);
+}
 static float float2_to_float(const float2 &a)
 {
   return (a.x + a.y) / 2.0f;
@@ -90,6 +103,10 @@ static float float2_to_float(const float2 &a)
 static int float2_to_int(const float2 &a)
 {
   return int32_t((a.x + a.y) / 2.0f);
+}
+static short2 float2_to_short2(const float2 &a)
+{
+  return short2(a.x, a.y);
 }
 static int2 float2_to_int2(const float2 &a)
 {
@@ -109,7 +126,7 @@ static ColorGeometry4f float2_to_color(const float2 &a)
 }
 static ColorGeometry4b float2_to_byte_color(const float2 &a)
 {
-  return float2_to_color(a).encode();
+  return color::encode(float2_to_color(a));
 }
 
 static bool float3_to_bool(const float3 &a)
@@ -128,6 +145,10 @@ static int float3_to_int(const float3 &a)
 {
   return int((a.x + a.y + a.z) / 3.0f);
 }
+static short2 float3_to_short2(const float3 &a)
+{
+  return short2(a.x, a.y);
+}
 static int2 float3_to_int2(const float3 &a)
 {
   return int2(a.x, a.y);
@@ -136,13 +157,66 @@ static float2 float3_to_float2(const float3 &a)
 {
   return float2(a);
 }
+static float4 float3_to_float4(const float3 &a)
+{
+  return float4(a, 0.0f);
+}
 static ColorGeometry4f float3_to_color(const float3 &a)
 {
   return ColorGeometry4f(a.x, a.y, a.z, 1.0f);
 }
 static ColorGeometry4b float3_to_byte_color(const float3 &a)
 {
-  return float3_to_color(a).encode();
+  return color::encode(float3_to_color(a));
+}
+static math::Quaternion float3_to_quaternion(const float3 &a)
+{
+  return math::to_quaternion(math::EulerXYZ(a));
+}
+
+static bool float4_to_bool(const float4 &a)
+{
+  return !math::is_zero(a);
+}
+static int8_t float4_to_int8(const float4 &a)
+{
+  return float_to_int8((a.x + a.y + a.z + a.w) / 4.0f);
+}
+static float float4_to_float(const float4 &a)
+{
+  return (a.x + a.y + a.z + a.w) / 4.0f;
+}
+static int float4_to_int(const float4 &a)
+{
+  return int((a.x + a.y + a.z + a.w) / 4.0f);
+}
+static short2 float4_to_short2(const float4 &a)
+{
+  return short2(a.x, a.y);
+}
+static int2 float4_to_int2(const float4 &a)
+{
+  return int2(a.x, a.y);
+}
+static float2 float4_to_float2(const float4 &a)
+{
+  return a.xy();
+}
+static float3 float4_to_float3(const float4 &a)
+{
+  return a.xyz();
+}
+static ColorGeometry4f float4_to_color(const float4 &a)
+{
+  return ColorGeometry4f(a);
+}
+static ColorGeometry4b float4_to_byte_color(const float4 &a)
+{
+  return color::encode(float4_to_color(a));
+}
+static math::Quaternion float4_to_quaternion(const float4 &a)
+{
+  return math::Quaternion(a);
 }
 
 static bool int_to_bool(const int32_t &a)
@@ -153,6 +227,10 @@ static int8_t int_to_int8(const int32_t &a)
 {
   return std::clamp(
       a, int(std::numeric_limits<int8_t>::min()), int(std::numeric_limits<int8_t>::max()));
+}
+static short2 int_to_short2(const int32_t &a)
+{
+  return short2(a);
 }
 static int2 int_to_int2(const int32_t &a)
 {
@@ -170,13 +248,58 @@ static float3 int_to_float3(const int32_t &a)
 {
   return float3(float(a));
 }
+static float4 int_to_float4(const int32_t &a)
+{
+  return float4(float(a));
+}
 static ColorGeometry4f int_to_color(const int32_t &a)
 {
   return ColorGeometry4f(float(a), float(a), float(a), 1.0f);
 }
 static ColorGeometry4b int_to_byte_color(const int32_t &a)
 {
-  return int_to_color(a).encode();
+  return color::encode(int_to_color(a));
+}
+
+static bool short2_to_bool(const short2 &a)
+{
+  return !math::is_zero(a);
+}
+static float2 short2_to_float2(const short2 &a)
+{
+  return float2(a);
+}
+static int short2_to_int(const short2 &a)
+{
+  return math::midpoint(a.x, a.y);
+}
+static int2 short2_to_int2(const short2 &a)
+{
+  return int2(a.x, a.y);
+}
+static int8_t short2_to_int8(const short2 &a)
+{
+  return int_to_int8(short2_to_int(a));
+}
+static float short2_to_float(const short2 &a)
+{
+  return float2_to_float(float2(a));
+}
+static float3 short2_to_float3(const short2 &a)
+{
+  return float3(float(a.x), float(a.y), 0.0f);
+}
+static float4 short2_to_float4(const short2 &a)
+{
+  return float4(float(a.x), float(a.y), 0.0f, 0.0f);
+}
+static ColorGeometry4f short2_to_color(const short2 &a)
+{
+  return ColorGeometry4f(float(a.x), float(a.y), 0.0f, 1.0f);
+}
+static ColorGeometry4b short2_to_byte_color(const short2 &a)
+{
+  return color::encode(short2_to_color(a));
 }
 
 static bool int2_to_bool(const int2 &a)
@@ -191,6 +314,10 @@ static int int2_to_int(const int2 &a)
 {
   return math::midpoint(a.x, a.y);
 }
+static short2 int2_to_short2(const int2 &a)
+{
+  return short2(a.x, a.y);
+}
 static int8_t int2_to_int8(const int2 &a)
 {
   return int_to_int8(int2_to_int(a));
@@ -203,13 +330,17 @@ static float3 int2_to_float3(const int2 &a)
 {
   return float3(float(a.x), float(a.y), 0.0f);
 }
+static float4 int2_to_float4(const int2 &a)
+{
+  return float4(float(a.x), float(a.y), 0.0f, 0.0f);
+}
 static ColorGeometry4f int2_to_color(const int2 &a)
 {
   return ColorGeometry4f(float(a.x), float(a.y), 0.0f, 1.0f);
 }
 static ColorGeometry4b int2_to_byte_color(const int2 &a)
 {
-  return int2_to_color(a).encode();
+  return color::encode(int2_to_color(a));
 }
 
 static bool int8_to_bool(const int8_t &a)
@@ -219,6 +350,10 @@ static bool int8_to_bool(const int8_t &a)
 static int int8_to_int(const int8_t &a)
 {
   return int(a);
+}
+static short2 int8_to_short2(const int8_t &a)
+{
+  return short2(a);
 }
 static int2 int8_to_int2(const int8_t &a)
 {
@@ -236,18 +371,17 @@ static float3 int8_to_float3(const int8_t &a)
 {
   return float3(float(a));
 }
-static math::Quaternion float3_to_quaternion(const float3 &a)
+static float4 int8_to_float4(const int8_t &a)
 {
-  return math::to_quaternion(math::EulerXYZ(a));
+  return float4(float(a));
 }
-
 static ColorGeometry4f int8_to_color(const int8_t &a)
 {
   return ColorGeometry4f(float(a), float(a), float(a), 1.0f);
 }
 static ColorGeometry4b int8_to_byte_color(const int8_t &a)
 {
-  return int8_to_color(a).encode();
+  return color::encode(int8_to_color(a));
 }
 
 static float bool_to_float(const bool &a)
@@ -262,6 +396,10 @@ static int32_t bool_to_int(const bool &a)
 {
   return int32_t(a);
 }
+static short2 bool_to_short2(const bool &a)
+{
+  return short2(a);
+}
 static int2 bool_to_int2(const bool &a)
 {
   return int2(a);
@@ -274,26 +412,34 @@ static float3 bool_to_float3(const bool &a)
 {
   return (a) ? float3(1.0f) : float3(0.0f);
 }
+static float4 bool_to_float4(const bool &a)
+{
+  return (a) ? float4(1.0f) : float4(0.0f);
+}
 static ColorGeometry4f bool_to_color(const bool &a)
 {
   return (a) ? ColorGeometry4f(1.0f, 1.0f, 1.0f, 1.0f) : ColorGeometry4f(0.0f, 0.0f, 0.0f, 1.0f);
 }
 static ColorGeometry4b bool_to_byte_color(const bool &a)
 {
-  return bool_to_color(a).encode();
+  return color::encode(bool_to_color(a));
 }
 
 static bool color_to_bool(const ColorGeometry4f &a)
 {
-  return rgb_to_grayscale(a) > 0.0f;
+  return IMB_colormanagement_get_luminance(a) > 0.0f;
 }
 static float color_to_float(const ColorGeometry4f &a)
 {
-  return rgb_to_grayscale(a);
+  return IMB_colormanagement_get_luminance(a);
 }
 static int32_t color_to_int(const ColorGeometry4f &a)
 {
-  return int(rgb_to_grayscale(a));
+  return int(IMB_colormanagement_get_luminance(a));
+}
+static short2 color_to_short2(const ColorGeometry4f &a)
+{
+  return short2(a.r, a.g);
 }
 static int2 color_to_int2(const ColorGeometry4f &a)
 {
@@ -311,9 +457,13 @@ static float3 color_to_float3(const ColorGeometry4f &a)
 {
   return float3(a.r, a.g, a.b);
 }
+static float4 color_to_float4(const ColorGeometry4f &a)
+{
+  return float4(a);
+}
 static ColorGeometry4b color_to_byte_color(const ColorGeometry4f &a)
 {
-  return a.encode();
+  return color::encode(a);
 }
 
 static bool byte_color_to_bool(const ColorGeometry4b &a)
@@ -322,11 +472,15 @@ static bool byte_color_to_bool(const ColorGeometry4b &a)
 }
 static float byte_color_to_float(const ColorGeometry4b &a)
 {
-  return color_to_float(a.decode());
+  return color_to_float(color::decode(a));
 }
 static int32_t byte_color_to_int(const ColorGeometry4b &a)
 {
-  return color_to_int(a.decode());
+  return color_to_int(color::decode(a));
+}
+static short2 byte_color_to_short2(const ColorGeometry4b &a)
+{
+  return short2(a.r, a.g);
 }
 static int2 byte_color_to_int2(const ColorGeometry4b &a)
 {
@@ -334,19 +488,23 @@ static int2 byte_color_to_int2(const ColorGeometry4b &a)
 }
 static int8_t byte_color_to_int8(const ColorGeometry4b &a)
 {
-  return color_to_int8(a.decode());
+  return color_to_int8(color::decode(a));
 }
 static float2 byte_color_to_float2(const ColorGeometry4b &a)
 {
-  return color_to_float2(a.decode());
+  return color_to_float2(color::decode(a));
 }
 static float3 byte_color_to_float3(const ColorGeometry4b &a)
 {
-  return color_to_float3(a.decode());
+  return color_to_float3(color::decode(a));
+}
+static float4 byte_color_to_float4(const ColorGeometry4b &a)
+{
+  return color_to_float4(color::decode(a));
 }
 static ColorGeometry4f byte_color_to_color(const ColorGeometry4b &a)
 {
-  return a.decode();
+  return color::decode(a);
 }
 
 static math::Quaternion float4x4_to_quaternion(const float4x4 &a)
@@ -358,7 +516,10 @@ static float3 quaternion_to_float3(const math::Quaternion &a)
 {
   return float3(math::to_euler(a).xyz());
 }
-
+static float4 quaternion_to_float4(const math::Quaternion &a)
+{
+  return float4(a);
+}
 static float4x4 quaternion_to_float4x4(const math::Quaternion &a)
 {
   return math::from_rotation<float4x4>(a);
@@ -370,7 +531,9 @@ static DataTypeConversions create_implicit_conversions()
 
   add_implicit_conversion<float, float2, float_to_float2>(conversions);
   add_implicit_conversion<float, float3, float_to_float3>(conversions);
+  add_implicit_conversion<float, float4, float_to_float4>(conversions);
   add_implicit_conversion<float, int32_t, float_to_int>(conversions);
+  add_implicit_conversion<float, short2, float_to_short2>(conversions);
   add_implicit_conversion<float, int2, float_to_int2>(conversions);
   add_implicit_conversion<float, bool, float_to_bool>(conversions);
   add_implicit_conversion<float, int8_t, float_to_int8>(conversions);
@@ -379,8 +542,10 @@ static DataTypeConversions create_implicit_conversions()
   add_implicit_conversion<float, math::Quaternion, float_to_quaternion>(conversions);
 
   add_implicit_conversion<float2, float3, float2_to_float3>(conversions);
+  add_implicit_conversion<float2, float4, float2_to_float4>(conversions);
   add_implicit_conversion<float2, float, float2_to_float>(conversions);
   add_implicit_conversion<float2, int32_t, float2_to_int>(conversions);
+  add_implicit_conversion<float2, short2, float2_to_short2>(conversions);
   add_implicit_conversion<float2, int2, float2_to_int2>(conversions);
   add_implicit_conversion<float2, bool, float2_to_bool>(conversions);
   add_implicit_conversion<float2, int8_t, float2_to_int8>(conversions);
@@ -391,45 +556,78 @@ static DataTypeConversions create_implicit_conversions()
   add_implicit_conversion<float3, int8_t, float3_to_int8>(conversions);
   add_implicit_conversion<float3, float, float3_to_float>(conversions);
   add_implicit_conversion<float3, int32_t, float3_to_int>(conversions);
+  add_implicit_conversion<float3, short2, float3_to_short2>(conversions);
   add_implicit_conversion<float3, int2, float3_to_int2>(conversions);
   add_implicit_conversion<float3, float2, float3_to_float2>(conversions);
+  add_implicit_conversion<float3, float4, float3_to_float4>(conversions);
   add_implicit_conversion<float3, ColorGeometry4f, float3_to_color>(conversions);
   add_implicit_conversion<float3, ColorGeometry4b, float3_to_byte_color>(conversions);
   add_implicit_conversion<float3, math::Quaternion, float3_to_quaternion>(conversions);
 
+  add_implicit_conversion<float4, bool, float4_to_bool>(conversions);
+  add_implicit_conversion<float4, int8_t, float4_to_int8>(conversions);
+  add_implicit_conversion<float4, float, float4_to_float>(conversions);
+  add_implicit_conversion<float4, int32_t, float4_to_int>(conversions);
+  add_implicit_conversion<float4, short2, float4_to_short2>(conversions);
+  add_implicit_conversion<float4, int2, float4_to_int2>(conversions);
+  add_implicit_conversion<float4, float2, float4_to_float2>(conversions);
+  add_implicit_conversion<float4, float3, float4_to_float3>(conversions);
+  add_implicit_conversion<float4, ColorGeometry4f, float4_to_color>(conversions);
+  add_implicit_conversion<float4, ColorGeometry4b, float4_to_byte_color>(conversions);
+  add_implicit_conversion<float4, math::Quaternion, float4_to_quaternion>(conversions);
+
   add_implicit_conversion<int32_t, bool, int_to_bool>(conversions);
   add_implicit_conversion<int32_t, int8_t, int_to_int8>(conversions);
+  add_implicit_conversion<int32_t, short2, int_to_short2>(conversions);
   add_implicit_conversion<int32_t, int2, int_to_int2>(conversions);
   add_implicit_conversion<int32_t, float, int_to_float>(conversions);
   add_implicit_conversion<int32_t, float2, int_to_float2>(conversions);
   add_implicit_conversion<int32_t, float3, int_to_float3>(conversions);
+  add_implicit_conversion<int32_t, float4, int_to_float4>(conversions);
   add_implicit_conversion<int32_t, ColorGeometry4f, int_to_color>(conversions);
   add_implicit_conversion<int32_t, ColorGeometry4b, int_to_byte_color>(conversions);
+
+  add_implicit_conversion<short2, bool, short2_to_bool>(conversions);
+  add_implicit_conversion<short2, int8_t, short2_to_int8>(conversions);
+  add_implicit_conversion<short2, int, short2_to_int>(conversions);
+  add_implicit_conversion<short2, int2, short2_to_int2>(conversions);
+  add_implicit_conversion<short2, float, short2_to_float>(conversions);
+  add_implicit_conversion<short2, float2, short2_to_float2>(conversions);
+  add_implicit_conversion<short2, float3, short2_to_float3>(conversions);
+  add_implicit_conversion<short2, float4, short2_to_float4>(conversions);
+  add_implicit_conversion<short2, ColorGeometry4f, short2_to_color>(conversions);
+  add_implicit_conversion<short2, ColorGeometry4b, short2_to_byte_color>(conversions);
 
   add_implicit_conversion<int2, bool, int2_to_bool>(conversions);
   add_implicit_conversion<int2, int8_t, int2_to_int8>(conversions);
   add_implicit_conversion<int2, int, int2_to_int>(conversions);
+  add_implicit_conversion<int2, short2, int2_to_short2>(conversions);
   add_implicit_conversion<int2, float, int2_to_float>(conversions);
   add_implicit_conversion<int2, float2, int2_to_float2>(conversions);
   add_implicit_conversion<int2, float3, int2_to_float3>(conversions);
+  add_implicit_conversion<int2, float4, int2_to_float4>(conversions);
   add_implicit_conversion<int2, ColorGeometry4f, int2_to_color>(conversions);
   add_implicit_conversion<int2, ColorGeometry4b, int2_to_byte_color>(conversions);
 
   add_implicit_conversion<int8_t, bool, int8_to_bool>(conversions);
   add_implicit_conversion<int8_t, int32_t, int8_to_int>(conversions);
+  add_implicit_conversion<int8_t, short2, int8_to_short2>(conversions);
   add_implicit_conversion<int8_t, int2, int8_to_int2>(conversions);
   add_implicit_conversion<int8_t, float, int8_to_float>(conversions);
   add_implicit_conversion<int8_t, float2, int8_to_float2>(conversions);
   add_implicit_conversion<int8_t, float3, int8_to_float3>(conversions);
+  add_implicit_conversion<int8_t, float4, int8_to_float4>(conversions);
   add_implicit_conversion<int8_t, ColorGeometry4f, int8_to_color>(conversions);
   add_implicit_conversion<int8_t, ColorGeometry4b, int8_to_byte_color>(conversions);
 
   add_implicit_conversion<bool, float, bool_to_float>(conversions);
   add_implicit_conversion<bool, int8_t, bool_to_int8>(conversions);
   add_implicit_conversion<bool, int32_t, bool_to_int>(conversions);
+  add_implicit_conversion<bool, short2, bool_to_short2>(conversions);
   add_implicit_conversion<bool, int2, bool_to_int2>(conversions);
   add_implicit_conversion<bool, float2, bool_to_float2>(conversions);
   add_implicit_conversion<bool, float3, bool_to_float3>(conversions);
+  add_implicit_conversion<bool, float4, bool_to_float4>(conversions);
   add_implicit_conversion<bool, ColorGeometry4f, bool_to_color>(conversions);
   add_implicit_conversion<bool, ColorGeometry4b, bool_to_byte_color>(conversions);
 
@@ -437,23 +635,28 @@ static DataTypeConversions create_implicit_conversions()
   add_implicit_conversion<ColorGeometry4f, int8_t, color_to_int8>(conversions);
   add_implicit_conversion<ColorGeometry4f, float, color_to_float>(conversions);
   add_implicit_conversion<ColorGeometry4f, int32_t, color_to_int>(conversions);
+  add_implicit_conversion<ColorGeometry4f, short2, color_to_short2>(conversions);
   add_implicit_conversion<ColorGeometry4f, int2, color_to_int2>(conversions);
   add_implicit_conversion<ColorGeometry4f, float2, color_to_float2>(conversions);
   add_implicit_conversion<ColorGeometry4f, float3, color_to_float3>(conversions);
+  add_implicit_conversion<ColorGeometry4f, float4, color_to_float4>(conversions);
   add_implicit_conversion<ColorGeometry4f, ColorGeometry4b, color_to_byte_color>(conversions);
 
   add_implicit_conversion<ColorGeometry4b, bool, byte_color_to_bool>(conversions);
   add_implicit_conversion<ColorGeometry4b, int8_t, byte_color_to_int8>(conversions);
   add_implicit_conversion<ColorGeometry4b, float, byte_color_to_float>(conversions);
   add_implicit_conversion<ColorGeometry4b, int32_t, byte_color_to_int>(conversions);
+  add_implicit_conversion<ColorGeometry4b, short2, byte_color_to_short2>(conversions);
   add_implicit_conversion<ColorGeometry4b, int2, byte_color_to_int2>(conversions);
   add_implicit_conversion<ColorGeometry4b, float2, byte_color_to_float2>(conversions);
   add_implicit_conversion<ColorGeometry4b, float3, byte_color_to_float3>(conversions);
+  add_implicit_conversion<ColorGeometry4b, float4, byte_color_to_float4>(conversions);
   add_implicit_conversion<ColorGeometry4b, ColorGeometry4f, byte_color_to_color>(conversions);
 
   add_implicit_conversion<float4x4, math::Quaternion, float4x4_to_quaternion>(conversions);
 
   add_implicit_conversion<math::Quaternion, float3, quaternion_to_float3>(conversions);
+  add_implicit_conversion<math::Quaternion, float4, quaternion_to_float4>(conversions);
   add_implicit_conversion<math::Quaternion, float4x4, quaternion_to_float4x4>(conversions);
 
   return conversions;
@@ -513,7 +716,7 @@ void DataTypeConversions::convert_to_initialized_n(GSpan from_span, GMutableSpan
                                                                     DataType::ForSingle(to_type));
 
   to_type.destruct_n(to_span.data(), to_span.size());
-  call_convert_to_uninitialized_fn(GVArray::ForSpan(from_span), *fn, to_span);
+  call_convert_to_uninitialized_fn(GVArray::from_span(from_span), *fn, to_span);
 }
 
 class GVArray_For_ConvertedGVArray : public GVArrayImpl {
@@ -548,14 +751,13 @@ class GVArray_For_ConvertedGVArray : public GVArrayImpl {
     from_type_.destruct(buffer);
   }
 
-  void materialize(const IndexMask &mask, void *dst) const override
+  void materialize(const IndexMask &mask,
+                   void *dst,
+                   const bool dst_is_uninitialized) const override
   {
-    type_->destruct_n(dst, mask.min_array_size());
-    this->materialize_to_uninitialized(mask, dst);
-  }
-
-  void materialize_to_uninitialized(const IndexMask &mask, void *dst) const override
-  {
+    if (!dst_is_uninitialized) {
+      type_->destruct_n(dst, mask.min_array_size());
+    }
     call_convert_to_uninitialized_fn(varray_,
                                      *old_to_new_conversions_.multi_function,
                                      mask,
@@ -606,14 +808,13 @@ class GVMutableArray_For_ConvertedGVMutableArray : public GVMutableArrayImpl {
     varray_.set_by_relocate(index, buffer);
   }
 
-  void materialize(const IndexMask &mask, void *dst) const override
+  void materialize(const IndexMask &mask,
+                   void *dst,
+                   const bool dst_is_uninitialized) const override
   {
-    type_->destruct_n(dst, mask.min_array_size());
-    this->materialize_to_uninitialized(mask, dst);
-  }
-
-  void materialize_to_uninitialized(const IndexMask &mask, void *dst) const override
-  {
+    if (!dst_is_uninitialized) {
+      type_->destruct_n(dst, mask.min_array_size());
+    }
     call_convert_to_uninitialized_fn(varray_,
                                      *old_to_new_conversions_.multi_function,
                                      mask,
@@ -630,7 +831,7 @@ GVArray DataTypeConversions::try_convert(GVArray varray, const CPPType &to_type)
   if (!this->is_convertible(from_type, to_type)) {
     return {};
   }
-  return GVArray::For<GVArray_For_ConvertedGVArray>(std::move(varray), to_type, *this);
+  return GVArray::from<GVArray_For_ConvertedGVArray>(std::move(varray), to_type, *this);
 }
 
 GVMutableArray DataTypeConversions::try_convert(GVMutableArray varray,
@@ -643,7 +844,7 @@ GVMutableArray DataTypeConversions::try_convert(GVMutableArray varray,
   if (!this->is_convertible(from_type, to_type)) {
     return {};
   }
-  return GVMutableArray::For<GVMutableArray_For_ConvertedGVMutableArray>(
+  return GVMutableArray::from<GVMutableArray_For_ConvertedGVMutableArray>(
       std::move(varray), to_type, *this);
 }
 
@@ -658,7 +859,7 @@ fn::GField DataTypeConversions::try_convert(fn::GField field, const CPPType &to_
   }
   const mf::MultiFunction &fn = *this->get_conversion_multi_function(
       mf::DataType::ForSingle(from_type), mf::DataType::ForSingle(to_type));
-  return {fn::FieldOperation::Create(fn, {std::move(field)})};
+  return {fn::FieldOperation::from(fn, {std::move(field)})};
 }
 
 }  // namespace blender::bke

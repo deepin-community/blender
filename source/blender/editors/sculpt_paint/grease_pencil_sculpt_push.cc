@@ -31,42 +31,36 @@ class PushOperation : public GreasePencilStrokeOperationCommon {
 void PushOperation::on_stroke_begin(const bContext &C, const InputSample &start_sample)
 {
   this->init_stroke(C, start_sample);
+  this->init_auto_masking(C, start_sample);
 }
 
 void PushOperation::on_stroke_extended(const bContext &C, const InputSample &extension_sample)
 {
-  const Scene &scene = *CTX_data_scene(&C);
   Paint &paint = *BKE_paint_get_active_from_context(&C);
   const Brush &brush = *BKE_paint_brush(&paint);
 
-  const bool is_masking = GPENCIL_ANY_SCULPT_MASK(
-      eGP_Sculpt_SelectMaskFlag(scene.toolsettings->gpencil_selectmode_sculpt));
-
-  this->foreach_editable_drawing(
-      C, [&](const GreasePencilStrokeParams &params, const DeltaProjectionFunc &projection_fn) {
-        IndexMaskMemory selection_memory;
-        const IndexMask selection = point_selection_mask(params, is_masking, selection_memory);
-        if (selection.is_empty()) {
-          return false;
-        }
-
+  this->foreach_editable_drawing_with_automask(
+      C,
+      [&](const GreasePencilStrokeParams &params,
+          const IndexMask &point_mask,
+          const DeltaProjectionFunc &projection_fn) {
         bke::crazyspace::GeometryDeformation deformation = get_drawing_deformation(params);
-        Array<float2> view_positions = calculate_view_positions(params, selection);
+        const Array<float2> view_positions = view_positions_from_point_mask(params, point_mask);
         bke::CurvesGeometry &curves = params.drawing.strokes_for_write();
         MutableSpan<float3> positions = curves.positions_for_write();
 
         const float2 mouse_delta = this->mouse_delta(extension_sample);
 
-        selection.foreach_index(GrainSize(4096), [&](const int64_t point_i) {
+        point_mask.foreach_index(GrainSize(4096), [&](const int64_t point_i) {
           const float2 &co = view_positions[point_i];
           const float influence = brush_point_influence(
-              scene, brush, co, extension_sample, params.multi_frame_falloff);
+              paint, brush, co, extension_sample, params.multi_frame_falloff);
           if (influence <= 0.0f) {
             return;
           }
 
-          positions[point_i] = projection_fn(deformation.positions[point_i],
-                                             mouse_delta * influence);
+          positions[point_i] += compute_orig_delta(
+              projection_fn, deformation, point_i, mouse_delta * influence);
         });
 
         params.drawing.tag_positions_changed();

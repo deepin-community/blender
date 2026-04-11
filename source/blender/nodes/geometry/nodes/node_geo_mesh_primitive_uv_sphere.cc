@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BKE_material.h"
+#include "BKE_material.hh"
 
 #include "GEO_mesh_primitive_uv_sphere.hh"
 
@@ -57,10 +57,15 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_MESH_PRIMITIVE_UV_SPHERE, "UV Sphere", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeMeshUVSphere", GEO_NODE_MESH_PRIMITIVE_UV_SPHERE);
+  ntype.ui_name = "UV Sphere";
+  ntype.ui_description =
+      "Generate a spherical mesh with quads, except for triangles at the top and bottom";
+  ntype.enum_name_legacy = "MESH_PRIMITIVE_UV_SPHERE";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

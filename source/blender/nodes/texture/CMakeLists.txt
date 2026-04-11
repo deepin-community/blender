@@ -7,13 +7,7 @@ set(INC
   ..
   ../intern
   ../../editors/include
-  ../../blenkernel
-  ../../blentranslation
-  ../../bmesh
-  ../../imbuf
   ../../makesrna
-  ../../render
-  ../../windowmanager
   # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
@@ -27,10 +21,8 @@ set(SRC
   nodes/node_texture_checker.cc
   nodes/node_texture_combine_color.cc
   nodes/node_texture_common.cc
-  nodes/node_texture_compose.cc
   nodes/node_texture_coord.cc
   nodes/node_texture_curves.cc
-  nodes/node_texture_decompose.cc
   nodes/node_texture_distance.cc
   nodes/node_texture_hueSatVal.cc
   nodes/node_texture_image.cc
@@ -57,11 +49,17 @@ set(SRC
 )
 
 set(LIB
+  PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
+  PRIVATE bf::blentranslation
+  PRIVATE bf::bmesh
   PRIVATE bf::depsgraph
   PRIVATE bf::dna
+  PRIVATE bf::imbuf
   PRIVATE bf::intern::guardedalloc
   bf_nodes
+  PRIVATE bf::render
+  PRIVATE bf::windowmanager
 )
 
 blender_add_lib(bf_nodes_texture "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")

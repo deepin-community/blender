@@ -29,9 +29,10 @@
 #include "BKE_geometry_set.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_mesh.hh"
 #include "BKE_object.hh"
+#include "BKE_subdiv.hh"
 
 using Alembic::Abc::FloatArraySamplePtr;
 using Alembic::Abc::Int32ArraySamplePtr;
@@ -182,7 +183,7 @@ static void read_mpolys(CDStreamConfig &config, const AbcMeshData &mesh_data)
 {
   int *face_offsets = config.face_offsets;
   int *corner_verts = config.corner_verts;
-  float2 *mloopuvs = config.mloopuv;
+  float2 *uv_maps = config.uv_map;
 
   const Int32ArraySamplePtr &face_indices = mesh_data.face_indices;
   const Int32ArraySamplePtr &face_counts = mesh_data.face_counts;
@@ -191,7 +192,7 @@ static void read_mpolys(CDStreamConfig &config, const AbcMeshData &mesh_data)
 
   const UInt32ArraySamplePtr &uvs_indices = mesh_data.uvs_indices;
 
-  const bool do_uvs = (mloopuvs && uvs && uvs_indices);
+  const bool do_uvs = (uv_maps && uvs && uvs_indices);
   const bool do_uvs_per_loop = do_uvs && mesh_data.uv_scope == ABC_UV_SCOPE_LOOP;
   BLI_assert(!do_uvs || mesh_data.uv_scope != ABC_UV_SCOPE_NONE);
   uint loop_index = 0;
@@ -230,8 +231,8 @@ static void read_mpolys(CDStreamConfig &config, const AbcMeshData &mesh_data)
           continue;
         }
 
-        mloopuvs[rev_loop_index][0] = (*uvs)[uv_index][0];
-        mloopuvs[rev_loop_index][1] = (*uvs)[uv_index][1];
+        uv_maps[rev_loop_index][0] = (*uvs)[uv_index][0];
+        uv_maps[rev_loop_index][1] = (*uvs)[uv_index][1];
       }
     }
   }
@@ -269,8 +270,7 @@ static void process_loop_normals(CDStreamConfig &config, const N3fArraySamplePtr
     return;
   }
 
-  float(*lnors)[3] = static_cast<float(*)[3]>(
-      MEM_malloc_arrayN(loop_count, sizeof(float[3]), "ABC::FaceNormals"));
+  Array<float3> corner_normals(loop_count);
 
   const OffsetIndices faces = mesh->faces();
   const N3fArraySample &loop_normals = *loop_normals_ptr;
@@ -280,13 +280,11 @@ static void process_loop_normals(CDStreamConfig &config, const N3fArraySamplePtr
     /* As usual, ABC orders the loops in reverse. */
     for (int j = face.size() - 1; j >= 0; j--, abc_index++) {
       int blender_index = face[j];
-      copy_zup_from_yup(lnors[blender_index], loop_normals[abc_index].getValue());
+      copy_zup_from_yup(corner_normals[blender_index], loop_normals[abc_index].getValue());
     }
   }
 
-  BKE_mesh_set_custom_normals(mesh, lnors);
-
-  MEM_freeN(lnors);
+  bke::mesh_set_custom_normals(*mesh, corner_normals);
 }
 
 static void process_vertex_normals(CDStreamConfig &config,
@@ -298,16 +296,14 @@ static void process_vertex_normals(CDStreamConfig &config,
     return;
   }
 
-  float(*vert_normals)[3] = static_cast<float(*)[3]>(
-      MEM_malloc_arrayN(normals_count, sizeof(float[3]), "ABC::VertexNormals"));
+  Array<float3> vert_normals(normals_count);
 
   const N3fArraySample &vertex_normals = *vertex_normals_ptr;
   for (int index = 0; index < normals_count; index++) {
     copy_zup_from_yup(vert_normals[index], vertex_normals[index].getValue());
   }
 
-  BKE_mesh_set_custom_normals_from_verts(config.mesh, vert_normals);
-  MEM_freeN(vert_normals);
+  bke::mesh_set_custom_normals_from_verts(*config.mesh, vert_normals);
 }
 
 static void process_normals(CDStreamConfig &config,
@@ -372,12 +368,12 @@ BLI_INLINE void read_uvs_params(CDStreamConfig &config,
   }
 
   void *cd_ptr = config.add_customdata_cb(config.mesh, name.c_str(), CD_PROP_FLOAT2);
-  config.mloopuv = static_cast<float2 *>(cd_ptr);
+  config.uv_map = static_cast<float2 *>(cd_ptr);
 }
 
 static void *add_customdata_cb(Mesh *mesh, const char *name, int data_type)
 {
-  eCustomDataType cd_data_type = static_cast<eCustomDataType>(data_type);
+  eCustomDataType cd_data_type = eCustomDataType(data_type);
 
   /* unsupported custom data type -- don't do anything. */
   if (!ELEM(cd_data_type, CD_PROP_FLOAT2, CD_PROP_BYTE_COLOR)) {
@@ -566,6 +562,43 @@ template<> bool has_animations(Alembic::AbcGeom::IPolyMeshSchema &schema, Import
 
   IN3fGeomParam normalsParam = schema.getNormalsParam();
   if (normalsParam.valid() && !normalsParam.isConstant()) {
+    return true;
+  }
+
+  ICompoundProperty arbGeomParams = schema.getArbGeomParams();
+  if (has_animated_geom_params(arbGeomParams)) {
+    return true;
+  }
+
+  return false;
+}
+
+template<> bool has_animations(Alembic::AbcGeom::ISubDSchema &schema, ImportSettings *settings)
+{
+  if (settings->is_sequence || !schema.isConstant()) {
+    return true;
+  }
+
+  IV2fGeomParam uvsParam = schema.getUVsParam();
+  if (uvsParam.valid() && !uvsParam.isConstant()) {
+    return true;
+  }
+
+  Alembic::AbcGeom::IInt32ArrayProperty creaseIndices = schema.getCreaseIndicesProperty();
+  if (creaseIndices.valid() && !creaseIndices.isConstant()) {
+    return true;
+  }
+  Alembic::AbcGeom::IFloatArrayProperty creaseSharpnesses = schema.getCreaseSharpnessesProperty();
+  if (creaseSharpnesses.valid() && !creaseSharpnesses.isConstant()) {
+    return true;
+  }
+
+  Alembic::AbcGeom::IInt32ArrayProperty cornerIndices = schema.getCornerIndicesProperty();
+  if (cornerIndices.valid() && !cornerIndices.isConstant()) {
+    return true;
+  }
+  Alembic::AbcGeom::IFloatArrayProperty cornerSharpnesses = schema.getCornerSharpnessesProperty();
+  if (cornerSharpnesses.valid() && !cornerSharpnesses.isConstant()) {
     return true;
   }
 
@@ -918,15 +951,19 @@ static void read_subd_sample(const std::string &iobject_full_name,
 
 static void read_vertex_creases(Mesh *mesh,
                                 const Int32ArraySamplePtr &indices,
-                                const FloatArraySamplePtr &sharpnesses)
+                                const FloatArraySamplePtr &sharpnesses,
+                                const ImportSettings *settings)
 {
   if (!(indices && sharpnesses && indices->size() == sharpnesses->size() && indices->size() != 0))
   {
     return;
   }
 
-  float *vertex_crease_data = (float *)CustomData_add_layer_named(
-      &mesh->vert_data, CD_PROP_FLOAT, CD_SET_DEFAULT, mesh->verts_num, "crease_vert");
+  bke::MutableAttributeAccessor attributes = mesh->attributes_for_write();
+  bke::SpanAttributeWriter creases = attributes.lookup_or_add_for_write_only_span<float>(
+      "crease_vert", bke::AttrDomain::Point);
+  creases.span.fill(0.0f);
+
   const int totvert = mesh->verts_num;
 
   for (int i = 0, v = indices->size(); i < v; ++i) {
@@ -936,28 +973,34 @@ static void read_vertex_creases(Mesh *mesh,
       continue;
     }
 
-    vertex_crease_data[idx] = (*sharpnesses)[i];
+    const float crease = settings->blender_archive_version_prior_44 ?
+                             (*sharpnesses)[i] :
+                             bke::subdiv::sharpness_to_crease((*sharpnesses)[i]);
+    creases.span[idx] = std::clamp(crease, 0.0f, 1.0f);
   }
+
+  creases.finish();
 }
 
 static void read_edge_creases(Mesh *mesh,
                               const Int32ArraySamplePtr &indices,
-                              const FloatArraySamplePtr &sharpnesses)
+                              const FloatArraySamplePtr &sharpnesses,
+                              const ImportSettings *settings)
 {
   if (!(indices && sharpnesses)) {
     return;
   }
 
-  MutableSpan<int2> edges = mesh->edges_for_write();
+  const Span<int2> edges = mesh->edges_for_write();
   Map<OrderedEdge, int> edge_hash;
   edge_hash.reserve(edges.size());
-
-  float *creases = static_cast<float *>(CustomData_add_layer_named(
-      &mesh->edge_data, CD_PROP_FLOAT, CD_SET_DEFAULT, edges.size(), "crease_edge"));
-
   for (const int i : edges.index_range()) {
     edge_hash.add(edges[i], i);
   }
+
+  bke::MutableAttributeAccessor attributes = mesh->attributes_for_write();
+  bke::SpanAttributeWriter<float> creases = attributes.lookup_or_add_for_write_span<float>(
+      "crease_edge", bke::AttrDomain::Edge);
 
   for (int i = 0, s = 0, e = indices->size(); i < e; i += 2, s++) {
     int v1 = (*indices)[i];
@@ -967,8 +1010,13 @@ static void read_edge_creases(Mesh *mesh,
       continue;
     }
 
-    creases[*index] = unit_float_to_uchar_clamp((*sharpnesses)[s]);
+    const float crease = settings->blender_archive_version_prior_44 ?
+                             (*sharpnesses)[s] :
+                             bke::subdiv::sharpness_to_crease((*sharpnesses)[s]);
+    creases.span[*index] = std::clamp(crease, 0.0f, 1.0f);
   }
+
+  creases.finish();
 }
 
 /* ************************************************************************** */
@@ -1020,23 +1068,6 @@ void AbcSubDReader::readObjectData(Main *bmain, const Alembic::Abc::ISampleSelec
   if (read_mesh != mesh) {
     BKE_mesh_nomain_to_mesh(read_mesh, mesh, m_object);
   }
-
-  ISubDSchema::Sample sample;
-  try {
-    sample = m_schema.getValue(sample_sel);
-  }
-  catch (Alembic::Util::Exception &ex) {
-    printf("Alembic: error reading mesh sample for '%s/%s' at time %f: %s\n",
-           m_iobject.getFullName().c_str(),
-           m_schema.getName().c_str(),
-           sample_sel.getRequestedTime(),
-           ex.what());
-    return;
-  }
-
-  read_edge_creases(mesh, sample.getCreaseIndices(), sample.getCreaseSharpnesses());
-
-  read_vertex_creases(mesh, sample.getCornerIndices(), sample.getCornerSharpnesses());
 
   if (m_settings->validate_meshes) {
     BKE_mesh_validate(mesh, false, false);
@@ -1110,6 +1141,12 @@ Mesh *AbcSubDReader::read_mesh(Mesh *existing_mesh,
   config.time = sample_sel.getRequestedTime();
   config.modifier_error_message = r_err_str;
   read_subd_sample(m_iobject.getFullName(), &settings, m_schema, sample_sel, config);
+
+  read_edge_creases(
+      mesh_to_export, sample.getCreaseIndices(), sample.getCreaseSharpnesses(), m_settings);
+
+  read_vertex_creases(
+      mesh_to_export, sample.getCornerIndices(), sample.getCornerSharpnesses(), m_settings);
 
   return mesh_to_export;
 }

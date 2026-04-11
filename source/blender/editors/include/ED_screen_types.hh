@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "BLI_rect.h"
+#include "DNA_vec_types.h"
 
 struct ARegion;
 
@@ -20,6 +20,13 @@ struct ARegion;
 struct ScreenAnimData {
   /** Do not read from this, only for comparing if region exists. */
   ARegion *region;
+
+  /* The Scene and the View Layer that the animation timer is playing. */
+  Scene *scene;
+  ViewLayer *view_layer;
+  /* For sequencer scenes, account for scene syncing during playback. */
+  bool do_scene_syncing;
+
   short redraws;
   /** Flags for playback */
   short flag;

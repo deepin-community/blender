@@ -27,7 +27,6 @@ class MTLShaderInterface;
 
 struct VertexBufferID {
   uint32_t id : 16;
-  uint32_t is_instance : 15;
   uint32_t used : 1;
 };
 
@@ -56,7 +55,7 @@ class MTLBatch : public Batch {
     uint32_t cache_life_index_ = 0;
 
    public:
-    MTLVertexDescriptorCache(MTLBatch *batch) : batch_(batch){};
+    MTLVertexDescriptorCache(MTLBatch *batch) : batch_(batch) {};
     VertexDescriptorShaderInterfacePair *find(const ShaderInterface *interface);
     bool insert(VertexDescriptorShaderInterfacePair &data);
 
@@ -68,7 +67,6 @@ class MTLBatch : public Batch {
 
  private:
   MTLShader *active_shader_ = nullptr;
-  bool shader_in_use_ = false;
   MTLVertexDescriptorCache vao_cache = {this};
 
   /* Topology emulation. */
@@ -78,12 +76,12 @@ class MTLBatch : public Batch {
   uint32_t topology_buffer_output_v_count_ = 0;
 
  public:
-  MTLBatch(){};
-  ~MTLBatch(){};
+  MTLBatch() = default;
+  ~MTLBatch() override = default;
 
   void draw(int v_first, int v_count, int i_first, int i_count) override;
-  void draw_indirect(GPUStorageBuf *indirect_buf, intptr_t offset) override;
-  void multi_draw_indirect(GPUStorageBuf * /*indirect_buf*/,
+  void draw_indirect(StorageBuf *indirect_buf, intptr_t offset) override;
+  void multi_draw_indirect(StorageBuf * /*indirect_buf*/,
                            int /*count*/,
                            intptr_t /*offset*/,
                            intptr_t /*stride*/) override
@@ -93,7 +91,7 @@ class MTLBatch : public Batch {
 
   /* Returns an initialized RenderComandEncoder for drawing if all is good.
    * Otherwise, nil. */
-  id<MTLRenderCommandEncoder> bind(uint v_count);
+  id<MTLRenderCommandEncoder> bind();
   void unbind(id<MTLRenderCommandEncoder> rec);
 
   /* Convenience getters. */
@@ -105,24 +103,18 @@ class MTLBatch : public Batch {
   {
     return static_cast<MTLVertBuf *>(verts[index]);
   }
-  MTLVertBuf *inst_(const int index) const
-  {
-    return static_cast<MTLVertBuf *>(inst[index]);
-  }
   MTLShader *active_shader_get() const
   {
     return active_shader_;
   }
 
  private:
-  void shader_bind();
   void draw_advanced(int v_first, int v_count, int i_first, int i_count);
-  void draw_advanced_indirect(GPUStorageBuf *indirect_buf, intptr_t offset);
+  void draw_advanced_indirect(StorageBuf *indirect_buf, intptr_t offset);
   int prepare_vertex_binding(MTLVertBuf *verts,
                              MTLRenderPipelineStateDescriptor &desc,
                              const MTLShaderInterface *interface,
-                             uint16_t &attr_mask,
-                             bool instanced);
+                             uint16_t &attr_mask);
 
   id<MTLBuffer> get_emulated_toplogy_buffer(GPUPrimType &in_out_prim_type, uint32_t &v_count);
 

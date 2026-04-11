@@ -898,7 +898,7 @@ static void bmw_EdgeLoopWalker_begin(BMWalker *walker, void *data)
    * \endcode
    *
    * In the example above, starting from edges marked `ea/eb/ec`,
-   * the will detect `f_hub` and walk along the edge loop between `va -> vb`.
+   * they will detect `f_hub` and walk along the edge loop between `va -> vb`.
    * The same is true for any of the un-marked sides of the ngon,
    * walking stops for vertices with >= 3 connected faces (in this case they look like corners).
    *
@@ -923,7 +923,7 @@ static void bmw_EdgeLoopWalker_begin(BMWalker *walker, void *data)
    * \endcode
    *
    * In the example above, starting from edges marked `eb/eb/ed/ed/ef`,
-   * the will detect `f_hub` and walk along the edge loop between `vb -> vd`.
+   * they will detect `f_hub` and walk along the edge loop between `vb -> vd`.
    *
    * Notice `vb` and `vd` delimit the loop, since the faces connected to `vb`
    * excluding `f_hub` don't share an edge, which isn't walked over in the case
@@ -965,7 +965,7 @@ static void bmw_EdgeLoopWalker_begin(BMWalker *walker, void *data)
 
   /* Rewind. */
   while ((owalk_pt = static_cast<BMwEdgeLoopWalker *>(BMW_current_state(walker)))) {
-    owalk = *((BMwEdgeLoopWalker *)owalk_pt);
+    owalk = *(owalk_pt);
     BMW_walk(walker);
   }
 
@@ -1222,7 +1222,7 @@ static void bmw_FaceLoopWalker_begin(BMWalker *walker, void *data)
 
   /* Rewind. */
   while ((owalk_pt = static_cast<BMwFaceLoopWalker *>(BMW_current_state(walker)))) {
-    owalk = *((BMwFaceLoopWalker *)owalk_pt);
+    owalk = *(owalk_pt);
     BMW_walk(walker);
   }
 
@@ -1323,7 +1323,7 @@ static void bmw_EdgeringWalker_begin(BMWalker *walker, void *data)
 
   /* Rewind. */
   while ((owalk_pt = static_cast<BMwEdgeringWalker *>(BMW_current_state(walker)))) {
-    owalk = *((BMwEdgeringWalker *)owalk_pt);
+    owalk = *(owalk_pt);
     BMW_walk(walker);
   }
 

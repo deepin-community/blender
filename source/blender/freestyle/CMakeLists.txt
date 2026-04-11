@@ -530,25 +530,25 @@ set(SRC
 )
 
 set(LIB
+  PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
+  PRIVATE bf::blentranslation
   PRIVATE bf::depsgraph
   PRIVATE bf::dna
+  PRIVATE bf::imbuf
   PRIVATE bf::intern::guardedalloc
   bf_python_mathutils
 
   ${PYTHON_LINKFLAGS}
   ${PYTHON_LIBRARIES}
+  PRIVATE bf::render
 )
 
 set(INC
   .
-  ../blenkernel
-  ../blentranslation
-  ../imbuf
   ../makesrna
   ../python
   ../python/intern
-  ../render
   ../render/intern
 
   # RNA_prototypes.hh
@@ -574,6 +574,13 @@ if(WIN32)
   list(APPEND INC_SYS
     ${PTHREADS_INC}
   )
+endif()
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Suppress noisy warnings from GCC.
+  # NOTE(@ideasman42): It seems resolving these could introduce functional changes.
+  # Suppress unless someone is going to address them.
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-deprecated-copy")
 endif()
 
 blender_add_lib(bf_freestyle "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")

@@ -27,10 +27,13 @@ BLI_INLINE std::string &endl()
 class CommandBufferLog : public VKCommandBufferInterface {
   Vector<std::string> &log_;
   bool is_recording_ = false;
-  bool is_cpu_synchronizing_ = false;
 
  public:
-  CommandBufferLog(Vector<std::string> &log) : log_(log) {}
+  CommandBufferLog(Vector<std::string> &log, bool use_dynamic_rendering_local_read_ = true)
+      : log_(log)
+  {
+    use_dynamic_rendering_local_read = use_dynamic_rendering_local_read_;
+  }
   virtual ~CommandBufferLog() {}
 
   void begin_recording() override
@@ -44,19 +47,6 @@ class CommandBufferLog : public VKCommandBufferInterface {
     EXPECT_TRUE(is_recording_);
     is_recording_ = false;
   }
-
-  void submit_with_cpu_synchronization(VkFence /*vk_fence*/) override
-  {
-    EXPECT_FALSE(is_recording_);
-    EXPECT_FALSE(is_cpu_synchronizing_);
-    is_cpu_synchronizing_ = true;
-  };
-  void wait_for_cpu_synchronization(VkFence /*vk_fence*/) override
-  {
-    EXPECT_FALSE(is_recording_);
-    EXPECT_TRUE(is_cpu_synchronizing_);
-    is_cpu_synchronizing_ = false;
-  };
 
   void bind_pipeline(VkPipelineBindPoint pipeline_bind_point, VkPipeline pipeline) override
   {
@@ -446,8 +436,94 @@ class CommandBufferLog : public VKCommandBufferInterface {
                         uint32_t /*query_count*/) override
   {
   }
+
+  void set_viewport(const Vector<VkViewport> viewports) override
+  {
+    EXPECT_TRUE(is_recording_);
+    std::stringstream ss;
+    ss << "set_viewport(num_viewports=" << viewports.size() << ")";
+    log_.append(ss.str());
+  }
+
+  void set_scissor(const Vector<VkRect2D> scissors) override
+  {
+    EXPECT_TRUE(is_recording_);
+    std::stringstream ss;
+    ss << "set_scissor(num_scissors=" << scissors.size() << ")";
+    log_.append(ss.str());
+  }
+
+  void set_line_width(const float line_width) override
+  {
+    EXPECT_TRUE(is_recording_);
+    std::stringstream ss;
+    ss << "set_line_width(line_width=" << line_width << ")";
+    log_.append(ss.str());
+  }
+
   void begin_debug_utils_label(const VkDebugUtilsLabelEXT * /*vk_debug_utils_label*/) override {}
   void end_debug_utils_label() override {}
+
+  /* VK_EXT_descriptor_buffer */
+  void bind_descriptor_buffers(
+      uint32_t /*buffer_count*/,
+      const VkDescriptorBufferBindingInfoEXT * /*p_binding_infos*/) override
+  {
+  }
+  void set_descriptor_buffer_offsets(VkPipelineBindPoint /*pipeline_bind_point*/,
+                                     VkPipelineLayout /*layout*/,
+                                     uint32_t /*first_set*/,
+                                     uint32_t /*set_count*/,
+                                     const uint32_t * /*p_buffer_indices*/,
+                                     const VkDeviceSize * /*p_offsets*/) override
+  {
+  }
+};
+
+class VKRenderGraphTest : public ::testing::Test {
+ public:
+  VKRenderGraphTest()
+  {
+    resources.use_dynamic_rendering_local_read = use_dynamic_rendering_local_read;
+    render_graph = std::make_unique<VKRenderGraph>(resources);
+    command_buffer = std::make_unique<CommandBufferLog>(log, use_dynamic_rendering_local_read);
+  }
+
+ protected:
+  Vector<std::string> log;
+  VKResourceStateTracker resources;
+  std::unique_ptr<VKRenderGraph> render_graph;
+  std::unique_ptr<CommandBufferLog> command_buffer;
+  bool use_dynamic_rendering_local_read = true;
+};
+
+class VKRenderGraphTest_P : public ::testing::TestWithParam<std::tuple<bool>> {
+ public:
+  VKRenderGraphTest_P()
+  {
+    use_dynamic_rendering_local_read = std::get<0>(GetParam());
+    resources.use_dynamic_rendering_local_read = use_dynamic_rendering_local_read;
+    render_graph = std::make_unique<VKRenderGraph>(resources);
+    command_buffer = std::make_unique<CommandBufferLog>(log, use_dynamic_rendering_local_read);
+  }
+
+ protected:
+  VkImageLayout color_attachment_layout() const
+  {
+    return use_dynamic_rendering_local_read ? VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR :
+                                              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  }
+  std::string color_attachment_layout_str() const
+  {
+    return use_dynamic_rendering_local_read ? "VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR" :
+                                              "VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL";
+  }
+
+  Vector<std::string> log;
+  VKResourceStateTracker resources;
+  std::unique_ptr<VKRenderGraph> render_graph;
+  std::unique_ptr<CommandBufferLog> command_buffer;
+  bool use_dynamic_rendering_local_read = true;
 };
 
 /**
@@ -468,4 +544,18 @@ template<typename VKObjectType> union VkHandle {
   }
 };
 
+static inline void submit(std::unique_ptr<VKRenderGraph> &render_graph,
+                          std::unique_ptr<CommandBufferLog> &command_buffer)
+{
+  VKScheduler scheduler;
+  VKCommandBuilder command_builder;
+  Span<render_graph::NodeHandle> node_handles = scheduler.select_nodes(*render_graph);
+  command_builder.build_nodes(*render_graph, *command_buffer, node_handles);
+
+  command_buffer->begin_recording();
+  command_builder.record_commands(*render_graph, *command_buffer, node_handles);
+  command_buffer->end_recording();
+
+  render_graph->reset();
+}
 }  // namespace blender::gpu::render_graph

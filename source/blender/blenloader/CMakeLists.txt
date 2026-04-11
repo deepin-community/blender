@@ -3,19 +3,9 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 set(INC
-  .
-  ../blenkernel
-  ../blentranslation
-  ../draw
+  PUBLIC .
   ../editors/include
-  ../bmesh
-  ../gpu
-  ../imbuf
   ../makesrna
-  ../nodes
-  ../render
-  ../sequencer
-  ../windowmanager
 
   # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
@@ -39,6 +29,12 @@ set(SRC
   intern/versioning_290.cc
   intern/versioning_300.cc
   intern/versioning_400.cc
+  intern/versioning_410.cc
+  intern/versioning_420.cc
+  intern/versioning_430.cc
+  intern/versioning_440.cc
+  intern/versioning_450.cc
+  intern/versioning_500.cc
   intern/versioning_common.cc
   intern/versioning_defaults.cc
   intern/versioning_dna.cc
@@ -46,7 +42,6 @@ set(SRC
   intern/versioning_userdef.cc
   intern/writefile.cc
 
-  BLO_blend_defs.hh
   BLO_blend_validate.hh
   BLO_read_write.hh
   BLO_readfile.hh
@@ -54,19 +49,32 @@ set(SRC
   BLO_userdef_default.h
   BLO_writefile.hh
   intern/readfile.hh
-  intern/versioning_common.hh
+  versioning_common.hh
 )
 
 set(LIB
   PRIVATE bf::animrig
-  bf_blenkernel
+  PRIVATE bf::asset_system
+  PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
+  PUBLIC bf::blenloader_core
+  PRIVATE bf::blentranslation
+  PRIVATE bf::bmesh
   PRIVATE bf::depsgraph
   PRIVATE bf::dna
+  PRIVATE bf::draw
+  PRIVATE bf::gpu
+  PRIVATE bf::imbuf
+  PRIVATE bf::imbuf::movie
   PRIVATE bf::intern::clog
   PRIVATE bf::intern::guardedalloc
   PRIVATE bf::extern::fmtlib
   PRIVATE bf::intern::memutil
+  PRIVATE bf::nodes
+  PRIVATE bf::render
+  PRIVATE bf::sequencer
+  PRIVATE bf::windowmanager
+  PRIVATE bf::extern::xxhash
 )
 
 if(WITH_BUILDINFO)
@@ -89,6 +97,7 @@ if(WIN32)
 endif()
 
 blender_add_lib(bf_blenloader "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
+add_library(bf::blenloader ALIAS bf_blenloader)
 
 # RNA_prototypes.hh
 add_dependencies(bf_blenloader bf_rna)

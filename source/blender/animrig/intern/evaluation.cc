@@ -4,14 +4,17 @@
 
 #include "ANIM_evaluation.hh"
 
-#include "RNA_access.hh"
-
 #include "BKE_animsys.h"
 #include "BKE_fcurve.hh"
 
 #include "BLI_map.hh"
+#include "BLI_math_base.hh"
+
+#include "CLG_log.h"
 
 #include "evaluation_internal.hh"
+
+static CLG_LogRef LOG = {"anim.evaluation"};
 
 namespace blender::animrig {
 
@@ -88,7 +91,14 @@ void evaluate_and_apply_action(PointerRNA &animated_id_ptr,
 /* Copy of the same-named function in anim_sys.cc, with the check on action groups removed. */
 static bool is_fcurve_evaluatable(const FCurve *fcu)
 {
-  if (fcu->flag & (FCURVE_MUTED | FCURVE_DISABLED)) {
+  if (fcu->rna_path == nullptr) {
+    return false;
+  }
+
+  /* Not checking for FCURVE_DISABLED here, because those FCurves may still be evaluatable for
+   * other users of the same slot. See #135666. This is safe to do since this function isn't called
+   * for drivers. */
+  if (fcu->flag & FCURVE_MUTED) {
     return false;
   }
   if (BKE_fcurve_is_empty(fcu)) {
@@ -136,7 +146,7 @@ static EvaluationResult evaluate_keyframe_data(PointerRNA &animated_id_ptr,
                                                const slot_handle_t slot_handle,
                                                const AnimationEvalContext &offset_eval_context)
 {
-  ChannelBag *channelbag_for_slot = strip_data.channelbag_for_slot(slot_handle);
+  Channelbag *channelbag_for_slot = strip_data.channelbag_for_slot(slot_handle);
   if (!channelbag_for_slot) {
     return {};
   }
@@ -153,10 +163,13 @@ static EvaluationResult evaluate_keyframe_data(PointerRNA &animated_id_ptr,
     if (!BKE_animsys_rna_path_resolve(
             &animated_id_ptr, fcu->rna_path, fcu->array_index, &anim_rna))
     {
-      printf("Cannot resolve RNA path %s[%d] on ID %s\n",
-             fcu->rna_path,
-             fcu->array_index,
-             animated_id_ptr.owner_id->name);
+      /* Log this at quite a high level, because it can get _very_ noisy when playing back
+       * animation. */
+      CLOG_DEBUG(&LOG,
+                 "Cannot resolve RNA path %s[%d] on ID %s\n",
+                 fcu->rna_path,
+                 fcu->array_index,
+                 animated_id_ptr.owner_id->name);
       continue;
     }
 

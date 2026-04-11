@@ -8,16 +8,18 @@
 #pragma once
 
 #include "kernel/svm/math_util.h"
+#include "kernel/svm/util.h"
+
+#include "kernel/util/colorspace.h"
 
 CCL_NAMESPACE_BEGIN
 
 /* Wavelength to RGB */
 
 ccl_device_noinline void svm_node_wavelength(KernelGlobals kg,
-                                             ccl_private ShaderData *sd,
                                              ccl_private float *stack,
-                                             uint wavelength,
-                                             uint color_out)
+                                             const uint wavelength,
+                                             const uint color_out)
 {
   const float lambda_nm = stack_load_float(stack, wavelength);
 

@@ -26,7 +26,7 @@ void MTLVertBuf::acquire_data()
     data_ = nullptr;
   }
   else {
-    data_ = (uchar *)MEM_mallocN(sizeof(uchar) * this->size_alloc_get(), __func__);
+    data_ = MEM_malloc_arrayN<uchar>(this->size_alloc_get(), __func__);
   }
 }
 
@@ -58,64 +58,6 @@ void MTLVertBuf::release_data()
   }
 }
 
-void MTLVertBuf::duplicate_data(VertBuf *dst_)
-{
-  BLI_assert(MTLContext::get() != NULL);
-  MTLVertBuf *src = this;
-  MTLVertBuf *dst = static_cast<MTLVertBuf *>(dst_);
-
-  /* Ensure buffer has been initialized. */
-  src->bind();
-
-  if (src->vbo_) {
-
-    /* Fetch active context. */
-    MTLContext *ctx = MTLContext::get();
-    BLI_assert(ctx);
-
-    /* Ensure destination does not have an active VBO. */
-    BLI_assert(dst->vbo_ == nullptr);
-
-    /* Allocate VBO for destination vertbuf. */
-    uint64_t length = src->vbo_->get_size();
-    dst->vbo_ = MTLContext::get_global_memory_manager()->allocate(
-        length, (dst->get_usage_type() != GPU_USAGE_DEVICE_ONLY));
-    dst->alloc_size_ = length;
-
-    /* Fetch Metal buffer handles. */
-    id<MTLBuffer> src_buffer = src->vbo_->get_metal_buffer();
-    id<MTLBuffer> dest_buffer = dst->vbo_->get_metal_buffer();
-
-    /* Use blit encoder to copy data to duplicate buffer allocation. */
-    id<MTLBlitCommandEncoder> enc = ctx->main_command_buffer.ensure_begin_blit_encoder();
-    if (G.debug & G_DEBUG_GPU) {
-      [enc insertDebugSignpost:@"VertexBufferDuplicate"];
-    }
-    [enc copyFromBuffer:src_buffer
-             sourceOffset:0
-                 toBuffer:dest_buffer
-        destinationOffset:0
-                     size:length];
-
-    /* Flush results back to host buffer, if one exists. */
-    if (dest_buffer.storageMode == MTLStorageModeManaged) {
-      [enc synchronizeResource:dest_buffer];
-    }
-
-    if (G.debug & G_DEBUG_GPU) {
-      [enc insertDebugSignpost:@"VertexBufferDuplicateEnd"];
-    }
-
-    /* Mark as in-use, as contents are updated via GPU command. */
-    src->flag_used();
-  }
-
-  /* Copy raw CPU data. */
-  if (data_ != nullptr) {
-    dst->data_ = (uchar *)MEM_dupallocN(src->data_);
-  }
-}
-
 void MTLVertBuf::upload_data()
 {
   this->bind();
@@ -130,7 +72,7 @@ void MTLVertBuf::bind()
   uint64_t required_size = max_ulul(required_size_raw, 128);
 
   if (required_size_raw == 0) {
-    MTL_LOG_INFO("Vertex buffer required_size = 0");
+    MTL_LOG_DEBUG("Vertex buffer required_size = 0");
   }
 
   /* If the vertex buffer has already been allocated, but new data is ready,
@@ -321,8 +263,7 @@ void MTLVertBuf::bind_as_texture(uint binding)
   /* If vertex buffer updated, release existing texture and re-create. */
   id<MTLBuffer> buf = this->get_metal_buffer();
   if (buffer_texture_ != nullptr) {
-    gpu::MTLTexture *mtl_buffer_tex = static_cast<gpu::MTLTexture *>(
-        unwrap(this->buffer_texture_));
+    gpu::MTLTexture *mtl_buffer_tex = static_cast<gpu::MTLTexture *>(this->buffer_texture_);
     id<MTLBuffer> tex_buf = mtl_buffer_tex->get_vertex_buffer();
     if (tex_buf != buf) {
       GPU_TEXTURE_FREE_SAFE(buffer_texture_);

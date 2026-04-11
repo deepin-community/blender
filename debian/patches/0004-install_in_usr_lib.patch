@@ -1,0 +1,41 @@
+From: "Antoine Lassagne" <antoine.lassagne@canonical.com>
+Date: Mon, 9 Mar 2026 12:06:36 +0200
+Subject: Do not install arch-dependant files in /usr/share
+Bug: https://projects.blender.org/blender/blender/issues/155409
+
+arch-dependant files, like .so libraries, must install in 
+/usr/lib/blender/ instead of /usr/share/blender/. A .so file
+was introduced in /usr/share/blender/scripts in
+https://projects.blender.org/blender/blender/pulls/131080
+
+The version number is still not used in the system path.
+
+Contributions by:
+ Antonio Ospite <ospite@studenti.unina.it>
+---
+ intern/ghost/intern/GHOST_SystemPathsUnix.cc | 3 +++
+ source/creator/CMakeLists.txt                | 2 +-
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+--- a/intern/ghost/intern/GHOST_SystemPathsUnix.cc
++++ b/intern/ghost/intern/GHOST_SystemPathsUnix.cc
+@@ -23,7 +23,7 @@
+ using std::string;
+ 
+ #ifdef PREFIX
+-static const char *static_path = PREFIX "/share";
++static const char *static_path = PREFIX "/lib";
+ #else
+ static const char *static_path = nullptr;
+ #endif
+--- a/source/creator/CMakeLists.txt
++++ b/source/creator/CMakeLists.txt
+@@ -390,7 +390,7 @@
+       set(TARGETDIR_TEXT ".")
+       set(TARGETDIR_LIB "lib")
+     else()
+-      set(TARGETDIR_VER "share/blender")
++      set(TARGETDIR_VER "lib/blender")
+       set(TARGETDIR_TEXT "share/doc/blender")
+     endif()
+   endif()

@@ -8,7 +8,7 @@
 
 #include "node_texture_util.hh"
 
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_node_runtime.hh"
 
 #include "BLI_math_vector.h"
@@ -33,17 +33,9 @@ static void colorfn(float *out, TexParams *p, bNode *node, bNodeStack **in, shor
   Tex *nodetex = (Tex *)node->id;
   static float red[] = {1, 0, 0, 1};
   static float white[] = {1, 1, 1, 1};
-  float co[3], dxt[3], dyt[3];
+  float co[3];
 
   copy_v3_v3(co, p->co);
-  if (p->osatex) {
-    copy_v3_v3(dxt, p->dxt);
-    copy_v3_v3(dyt, p->dyt);
-  }
-  else {
-    zero_v3(dxt);
-    zero_v3(dyt);
-  }
 
   if (node->custom2 || node->runtime->need_exec == 0) {
     /* this node refers to its own texture tree! */
@@ -57,8 +49,7 @@ static void colorfn(float *out, TexParams *p, bNode *node, bNodeStack **in, shor
     tex_input_rgba(col1, in[0], p, thread);
     tex_input_rgba(col2, in[1], p, thread);
 
-    textype = multitex_nodes(
-        nodetex, co, dxt, dyt, p->osatex, &texres, thread, 0, p->mtex, nullptr);
+    textype = multitex_nodes(nodetex, co, &texres, thread, 0, p->mtex, nullptr);
 
     if (textype & TEX_RGB) {
       copy_v4_v4(out, texres.trgba);
@@ -84,10 +75,13 @@ void register_node_type_tex_texture()
 {
   static blender::bke::bNodeType ntype;
 
-  tex_node_type_base(&ntype, TEX_NODE_TEXTURE, "Texture", NODE_CLASS_INPUT);
+  tex_node_type_base(&ntype, "TextureNodeTexture", TEX_NODE_TEXTURE);
+  ntype.ui_name = "Texture";
+  ntype.enum_name_legacy = "TEXTURE";
+  ntype.nclass = NODE_CLASS_INPUT;
   blender::bke::node_type_socket_templates(&ntype, inputs, outputs);
   ntype.exec_fn = exec;
   ntype.flag |= NODE_PREVIEW;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

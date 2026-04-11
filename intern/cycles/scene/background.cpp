@@ -12,10 +12,8 @@
 #include "scene/shader_nodes.h"
 #include "scene/stats.h"
 
-#include "util/foreach.h"
 #include "util/math.h"
 #include "util/time.h"
-#include "util/types.h"
 
 CCL_NAMESPACE_BEGIN
 
@@ -30,8 +28,6 @@ NODE_DEFINE(Background)
   SOCKET_BOOLEAN(transparent_glass, "Transparent Glass", false);
   SOCKET_FLOAT(transparent_roughness_threshold, "Transparent Roughness Threshold", 0.0f);
 
-  SOCKET_FLOAT(volume_step_size, "Volume Step Size", 0.1f);
-
   SOCKET_NODE(shader, "Shader", Shader::get_node_type());
 
   SOCKET_STRING(lightgroup, "Light Group", ustring());
@@ -41,7 +37,7 @@ NODE_DEFINE(Background)
 
 Background::Background() : Node(get_node_type())
 {
-  shader = NULL;
+  shader = nullptr;
 }
 
 Background::~Background()
@@ -55,7 +51,7 @@ void Background::device_update(Device *device, DeviceScene *dscene, Scene *scene
     return;
   }
 
-  scoped_callback_timer timer([scene](double time) {
+  const scoped_callback_timer timer([scene](double time) {
     if (scene->update_stats) {
       scene->update_stats->background.times.add_entry({"device_update", time});
     }
@@ -87,8 +83,6 @@ void Background::device_update(Device *device, DeviceScene *dscene, Scene *scene
   else {
     kbackground->volume_shader = SHADER_NONE;
   }
-
-  kbackground->volume_step_size = volume_step_size * scene->integrator->get_volume_step_rate();
 
   /* No background node, make world shader invisible to all rays, to skip evaluation in kernel. */
   if (bg_shader->graph->nodes.size() <= 1) {

@@ -9,8 +9,8 @@
 #include "BKE_subdiv_eval.hh"
 
 #include "BLI_math_vector.h"
+#include "BLI_math_vector.hh"
 #include "BLI_task.h"
-#include "BLI_utildefines.h"
 
 #include "BKE_customdata.hh"
 #include "BKE_mesh.hh"
@@ -20,7 +20,8 @@
 
 #include "opensubdiv_evaluator_capi.hh"
 #ifdef WITH_OPENSUBDIV
-#  include "opensubdiv_topology_refiner_capi.hh"
+#  include "opensubdiv_evaluator.hh"
+#  include "opensubdiv_topology_refiner.hh"
 #endif
 
 /* --------------------------------------------------------------------
@@ -29,7 +30,9 @@
 
 namespace blender::bke::subdiv {
 
-static eOpenSubdivEvaluator opensubdiv_evalutor_from_subdiv_evaluator_type(
+#ifdef WITH_OPENSUBDIV
+
+static eOpenSubdivEvaluator opensubdiv_evaluator_from_subdiv_evaluator_type(
     eSubdivEvaluatorType evaluator_type)
 {
   switch (evaluator_type) {
@@ -44,6 +47,8 @@ static eOpenSubdivEvaluator opensubdiv_evalutor_from_subdiv_evaluator_type(
   return OPENSUBDIV_EVALUATOR_CPU;
 }
 
+#endif
+
 /* --------------------------------------------------------------------
  * Main subdivision evaluation.
  */
@@ -53,6 +58,7 @@ bool eval_begin(Subdiv *subdiv,
                 OpenSubdiv_EvaluatorCache *evaluator_cache,
                 const OpenSubdiv_EvaluatorSettings *settings)
 {
+#ifdef WITH_OPENSUBDIV
   stats_reset(&subdiv->stats, SUBDIV_STATS_EVALUATOR_CREATE);
   if (subdiv->topology_refiner == nullptr) {
     /* Happens on input mesh with just loose geometry,
@@ -61,7 +67,7 @@ bool eval_begin(Subdiv *subdiv,
   }
   if (subdiv->evaluator == nullptr) {
     eOpenSubdivEvaluator opensubdiv_evaluator_type =
-        opensubdiv_evalutor_from_subdiv_evaluator_type(evaluator_type);
+        opensubdiv_evaluator_from_subdiv_evaluator_type(evaluator_type);
     stats_begin(&subdiv->stats, SUBDIV_STATS_EVALUATOR_CREATE);
     subdiv->evaluator = openSubdiv_createEvaluatorFromTopologyRefiner(
         subdiv->topology_refiner, opensubdiv_evaluator_type, evaluator_cache);
@@ -73,9 +79,13 @@ bool eval_begin(Subdiv *subdiv,
   else {
     /* TODO(sergey): Check for topology change. */
   }
-  subdiv->evaluator->setSettings(subdiv->evaluator, settings);
+  subdiv->evaluator->eval_output->setSettings(settings);
   eval_init_displacement(subdiv);
   return true;
+#else
+  UNUSED_VARS(subdiv, evaluator_type, evaluator_cache, settings);
+  return false;
+#endif
 }
 
 #ifdef WITH_OPENSUBDIV
@@ -86,8 +96,8 @@ static void set_coarse_positions(Subdiv *subdiv,
 {
   OpenSubdiv_Evaluator *evaluator = subdiv->evaluator;
   if (verts_no_face.count == 0) {
-    evaluator->setCoarsePositions(
-        evaluator, reinterpret_cast<const float *>(positions.data()), 0, positions.size());
+    evaluator->eval_output->setCoarsePositions(
+        reinterpret_cast<const float *>(positions.data()), 0, positions.size());
     return;
   }
   Array<float3> used_vert_positions(positions.size() - verts_no_face.count);
@@ -100,10 +110,8 @@ static void set_coarse_positions(Subdiv *subdiv,
     used_vert_positions[used_vert_count] = positions[vert];
     used_vert_count++;
   }
-  evaluator->setCoarsePositions(evaluator,
-                                reinterpret_cast<const float *>(used_vert_positions.data()),
-                                0,
-                                used_vert_positions.size());
+  evaluator->eval_output->setCoarsePositions(
+      reinterpret_cast<const float *>(used_vert_positions.data()), 0, used_vert_positions.size());
 }
 
 /* Context which is used to fill face varying data in parallel. */
@@ -111,7 +119,7 @@ struct FaceVaryingDataFromUVContext {
   opensubdiv::TopologyRefinerImpl *topology_refiner;
   const Mesh *mesh;
   OffsetIndices<int> faces;
-  const float (*mloopuv)[2];
+  const float (*uv_map)[2];
   float (*buffer)[2];
   int layer_index;
 };
@@ -123,7 +131,7 @@ static void set_face_varying_data_from_uv_task(void *__restrict userdata,
   FaceVaryingDataFromUVContext *ctx = static_cast<FaceVaryingDataFromUVContext *>(userdata);
   opensubdiv::TopologyRefinerImpl *topology_refiner = ctx->topology_refiner;
   const int layer_index = ctx->layer_index;
-  const float(*mluv)[2] = &ctx->mloopuv[ctx->faces[face_index].start()];
+  const float (*mluv)[2] = &ctx->uv_map[ctx->faces[face_index].start()];
 
   /* TODO(sergey): OpenSubdiv's C-API converter can change winding of
    * loops of a face, need to watch for that, to prevent wrong UVs assigned.
@@ -137,23 +145,22 @@ static void set_face_varying_data_from_uv_task(void *__restrict userdata,
 
 static void set_face_varying_data_from_uv(Subdiv *subdiv,
                                           const Mesh *mesh,
-                                          const float (*mloopuv)[2],
+                                          const float (*uv_map)[2],
                                           const int layer_index)
 {
   opensubdiv::TopologyRefinerImpl *topology_refiner = subdiv->topology_refiner;
   OpenSubdiv_Evaluator *evaluator = subdiv->evaluator;
   const int num_faces = topology_refiner->base_level().GetNumFaces();
-  const float(*mluv)[2] = mloopuv;
+  const float (*mluv)[2] = uv_map;
 
   const int num_fvar_values = topology_refiner->base_level().GetNumFVarValues(layer_index);
   /* Use a temporary buffer so we do not upload UVs one at a time to the GPU. */
-  float(*buffer)[2] = static_cast<float(*)[2]>(
-      MEM_mallocN(sizeof(float[2]) * num_fvar_values, __func__));
+  float (*buffer)[2] = MEM_malloc_arrayN<float[2]>(size_t(num_fvar_values), __func__);
 
   FaceVaryingDataFromUVContext ctx;
   ctx.topology_refiner = topology_refiner;
   ctx.layer_index = layer_index;
-  ctx.mloopuv = mluv;
+  ctx.uv_map = mluv;
   ctx.mesh = mesh;
   ctx.faces = mesh->faces();
   ctx.buffer = buffer;
@@ -165,16 +172,16 @@ static void set_face_varying_data_from_uv(Subdiv *subdiv,
   BLI_task_parallel_range(
       0, num_faces, &ctx, set_face_varying_data_from_uv_task, &parallel_range_settings);
 
-  evaluator->setFaceVaryingData(evaluator, layer_index, &buffer[0][0], 0, num_fvar_values);
+  evaluator->eval_output->setFaceVaryingData(layer_index, &buffer[0][0], 0, num_fvar_values);
 
   MEM_freeN(buffer);
 }
 
 static void set_vertex_data_from_orco(Subdiv *subdiv, const Mesh *mesh)
 {
-  const float(*orco)[3] = static_cast<const float(*)[3]>(
+  const float (*orco)[3] = static_cast<const float (*)[3]>(
       CustomData_get_layer(&mesh->vert_data, CD_ORCO));
-  const float(*cloth_orco)[3] = static_cast<const float(*)[3]>(
+  const float (*cloth_orco)[3] = static_cast<const float (*)[3]>(
       CustomData_get_layer(&mesh->vert_data, CD_CLOTH_ORCO));
 
   if (orco || cloth_orco) {
@@ -188,16 +195,16 @@ static void set_vertex_data_from_orco(Subdiv *subdiv, const Mesh *mesh)
         float data[6];
         copy_v3_v3(data, orco[i]);
         copy_v3_v3(data + 3, cloth_orco[i]);
-        evaluator->setVertexData(evaluator, data, i, 1);
+        evaluator->eval_output->setVertexData(data, i, 1);
       }
     }
     else {
       /* Faster single call if we have either. */
       if (orco) {
-        evaluator->setVertexData(evaluator, orco[0], 0, num_verts);
+        evaluator->eval_output->setVertexData(orco[0], 0, num_verts);
       }
       else if (cloth_orco) {
-        evaluator->setVertexData(evaluator, cloth_orco[0], 0, num_verts);
+        evaluator->eval_output->setVertexData(cloth_orco[0], 0, num_verts);
       }
     }
   }
@@ -213,8 +220,8 @@ static void get_mesh_evaluator_settings(OpenSubdiv_EvaluatorSettings *settings, 
 
 bool eval_begin_from_mesh(Subdiv *subdiv,
                           const Mesh *mesh,
-                          const Span<float3> coarse_vert_positions,
                           eSubdivEvaluatorType evaluator_type,
+                          const Span<float3> coarse_vert_positions,
                           OpenSubdiv_EvaluatorCache *evaluator_cache)
 {
 #ifdef WITH_OPENSUBDIV
@@ -249,15 +256,15 @@ bool eval_refine_from_mesh(Subdiv *subdiv,
   /* Set face-varying data to UV maps. */
   const int num_uv_layers = CustomData_number_of_layers(&mesh->corner_data, CD_PROP_FLOAT2);
   for (int layer_index = 0; layer_index < num_uv_layers; layer_index++) {
-    const float(*mloopuv)[2] = static_cast<const float(*)[2]>(
+    const float (*uv_map)[2] = static_cast<const float (*)[2]>(
         CustomData_get_layer_n(&mesh->corner_data, CD_PROP_FLOAT2, layer_index));
-    set_face_varying_data_from_uv(subdiv, mesh, mloopuv, layer_index);
+    set_face_varying_data_from_uv(subdiv, mesh, uv_map, layer_index);
   }
   /* Set vertex data to orco. */
   set_vertex_data_from_orco(subdiv, mesh);
   /* Update evaluator to the new coarse geometry. */
   stats_begin(&subdiv->stats, SUBDIV_STATS_EVALUATOR_REFINE);
-  subdiv->evaluator->refine(subdiv->evaluator);
+  subdiv->evaluator->eval_output->refine();
   stats_end(&subdiv->stats, SUBDIV_STATS_EVALUATOR_REFINE);
   return true;
 #else
@@ -281,21 +288,28 @@ void eval_init_displacement(Subdiv *subdiv)
  * Single point queries.
  */
 
-void eval_limit_point(
-    Subdiv *subdiv, const int ptex_face_index, const float u, const float v, float r_P[3])
+float3 eval_limit_point(Subdiv *subdiv, const int ptex_face_index, const float u, const float v)
 {
-  eval_limit_point_and_derivatives(subdiv, ptex_face_index, u, v, r_P, nullptr, nullptr);
+#ifdef WITH_OPENSUBDIV
+  float3 r_P;
+  subdiv->evaluator->eval_output->evaluateLimit(ptex_face_index, u, v, r_P, nullptr, nullptr);
+  return r_P;
+#else
+  UNUSED_VARS(subdiv, ptex_face_index, u, v);
+  return {0.0f, 0.0f, 0.0f};
+#endif
 }
 
 void eval_limit_point_and_derivatives(Subdiv *subdiv,
                                       const int ptex_face_index,
                                       const float u,
                                       const float v,
-                                      float r_P[3],
-                                      float r_dPdu[3],
-                                      float r_dPdv[3])
+                                      float3 &r_P,
+                                      float3 &r_dPdu,
+                                      float3 &r_dPdv)
 {
-  subdiv->evaluator->evaluateLimit(subdiv->evaluator, ptex_face_index, u, v, r_P, r_dPdu, r_dPdv);
+#ifdef WITH_OPENSUBDIV
+  subdiv->evaluator->eval_output->evaluateLimit(ptex_face_index, u, v, r_P, r_dPdu, r_dPdv);
 
   /* NOTE: In a very rare occasions derivatives are evaluated to zeros or are exactly equal.
    * This happens, for example, in single vertex on Suzannne's nose (where two quads have 2 common
@@ -308,36 +322,36 @@ void eval_limit_point_and_derivatives(Subdiv *subdiv,
    * which there must be proper derivatives. This might break continuity of normals, but is better
    * that giving totally unusable derivatives. */
 
-  if (r_dPdu != nullptr && r_dPdv != nullptr) {
-    if ((is_zero_v3(r_dPdu) || is_zero_v3(r_dPdv)) || equals_v3v3(r_dPdu, r_dPdv)) {
-      subdiv->evaluator->evaluateLimit(subdiv->evaluator,
-                                       ptex_face_index,
-                                       u * 0.999f + 0.0005f,
-                                       v * 0.999f + 0.0005f,
-                                       r_P,
-                                       r_dPdu,
-                                       r_dPdv);
-    }
+  if ((math::is_zero(r_dPdu) || math::is_zero(r_dPdv)) || math::is_equal(r_dPdu, r_dPdv)) {
+    subdiv->evaluator->eval_output->evaluateLimit(
+        ptex_face_index, u * 0.999f + 0.0005f, v * 0.999f + 0.0005f, r_P, r_dPdu, r_dPdv);
   }
+#else
+  UNUSED_VARS(subdiv, ptex_face_index, u, v, r_P, r_dPdu, r_dPdv);
+#endif
 }
 
 void eval_limit_point_and_normal(Subdiv *subdiv,
                                  const int ptex_face_index,
                                  const float u,
                                  const float v,
-                                 float r_P[3],
-                                 float r_N[3])
+                                 float3 &r_P,
+                                 float3 &r_N)
 {
-  float dPdu[3], dPdv[3];
+  float3 dPdu;
+  float3 dPdv;
   eval_limit_point_and_derivatives(subdiv, ptex_face_index, u, v, r_P, dPdu, dPdv);
-  cross_v3_v3v3(r_N, dPdu, dPdv);
-  normalize_v3(r_N);
+  r_N = math::normalize(math::cross(dPdu, dPdv));
 }
 
 void eval_vertex_data(
     Subdiv *subdiv, const int ptex_face_index, const float u, const float v, float r_vertex_data[])
 {
-  subdiv->evaluator->evaluateVertexData(subdiv->evaluator, ptex_face_index, u, v, r_vertex_data);
+#ifdef WITH_OPENSUBDIV
+  subdiv->evaluator->eval_output->evaluateVertexData(ptex_face_index, u, v, r_vertex_data);
+#else
+  UNUSED_VARS(subdiv, ptex_face_index, u, v, r_vertex_data);
+#endif
 }
 
 void eval_face_varying(Subdiv *subdiv,
@@ -345,40 +359,47 @@ void eval_face_varying(Subdiv *subdiv,
                        const int ptex_face_index,
                        const float u,
                        const float v,
-                       float r_face_varying[2])
+                       float2 &r_face_varying)
 {
-  subdiv->evaluator->evaluateFaceVarying(
-      subdiv->evaluator, face_varying_channel, ptex_face_index, u, v, r_face_varying);
+#ifdef WITH_OPENSUBDIV
+  subdiv->evaluator->eval_output->evaluateFaceVarying(
+      face_varying_channel, ptex_face_index, u, v, r_face_varying);
+#else
+  UNUSED_VARS(subdiv, ptex_face_index, face_varying_channel, u, v, r_face_varying);
+#endif
 }
 
 void eval_displacement(Subdiv *subdiv,
                        const int ptex_face_index,
                        const float u,
                        const float v,
-                       const float dPdu[3],
-                       const float dPdv[3],
-                       float r_D[3])
+                       const float3 &dPdu,
+                       const float3 &dPdv,
+                       float3 &r_D)
 {
   if (subdiv->displacement_evaluator == nullptr) {
-    zero_v3(r_D);
+    r_D = float3(0.0f);
     return;
   }
   subdiv->displacement_evaluator->eval_displacement(
       subdiv->displacement_evaluator, ptex_face_index, u, v, dPdu, dPdv, r_D);
 }
 
-void eval_final_point(
-    Subdiv *subdiv, const int ptex_face_index, const float u, const float v, float r_P[3])
+float3 eval_final_point(Subdiv *subdiv, const int ptex_face_index, const float u, const float v)
 {
+  float3 r_P;
   if (subdiv->displacement_evaluator) {
-    float dPdu[3], dPdv[3], D[3];
+    float3 dPdu;
+    float3 dPdv;
+    float3 D;
     eval_limit_point_and_derivatives(subdiv, ptex_face_index, u, v, r_P, dPdu, dPdv);
     eval_displacement(subdiv, ptex_face_index, u, v, dPdu, dPdv, D);
-    add_v3_v3(r_P, D);
+    r_P += D;
   }
   else {
-    eval_limit_point(subdiv, ptex_face_index, u, v, r_P);
+    r_P = eval_limit_point(subdiv, ptex_face_index, u, v);
   }
+  return r_P;
 }
 
 }  // namespace blender::bke::subdiv

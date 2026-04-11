@@ -8,6 +8,8 @@
 #include "BLI_index_mask.hh"
 #include "BLI_offset_indices.hh"
 
+#include "BKE_curves.hh"
+
 namespace blender::geometry {
 
 /**
@@ -58,12 +60,14 @@ void smooth_curve_attribute(const IndexMask &curves_to_smooth,
  */
 void smooth_curve_positions(bke::CurvesGeometry &curves,
                             const IndexMask &curves_to_smooth,
+                            const VArray<bool> &point_selection,
                             int iterations,
                             const VArray<float> &influence_by_point,
                             bool smooth_ends,
                             bool keep_shape);
 void smooth_curve_positions(bke::CurvesGeometry &curves,
                             const IndexMask &curves_to_smooth,
+                            const VArray<bool> &point_selection,
                             int iterations,
                             float influence,
                             bool smooth_ends,

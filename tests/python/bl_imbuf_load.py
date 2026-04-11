@@ -2,6 +2,10 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+__all__ = (
+    "main",
+)
+
 import os
 import pathlib
 import sys
@@ -69,6 +73,7 @@ class ImBufTest(AbstractImBufTest):
     def _save_exr(self, img, out_exr_path):
         scene = bpy.data.scenes[0]
         image_settings = scene.render.image_settings
+        image_settings.media_type = 'IMAGE'
         image_settings.file_format = "OPEN_EXR"
         image_settings.color_mode = "RGBA"
         image_settings.color_depth = "32"

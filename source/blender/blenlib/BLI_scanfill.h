@@ -8,11 +8,11 @@
  * \ingroup bli
  */
 
-struct ScanFillVert;
+#include "DNA_listBase.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <stdbool.h>
+
+struct ScanFillVert;
 
 typedef struct ScanFillContext {
   ListBase fillvertbase;
@@ -116,7 +116,3 @@ void BLI_scanfill_end_arena(ScanFillContext *sf_ctx, struct MemArena *arena);
 bool BLI_scanfill_calc_self_isect(ScanFillContext *sf_ctx,
                                   ListBase *remvertbase,
                                   ListBase *remedgebase);
-
-#ifdef __cplusplus
-}
-#endif

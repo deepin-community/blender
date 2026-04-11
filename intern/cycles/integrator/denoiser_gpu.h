@@ -6,6 +6,8 @@
 
 #include "integrator/denoiser.h"
 
+#include "session/buffers.h"
+
 CCL_NAMESPACE_BEGIN
 
 /* Implementation of Denoiser which uses a device-specific denoising implementation, running on a
@@ -14,12 +16,12 @@ CCL_NAMESPACE_BEGIN
 class DenoiserGPU : public Denoiser {
  public:
   DenoiserGPU(Device *denoiser_device, const DenoiseParams &params);
-  ~DenoiserGPU();
+  ~DenoiserGPU() override;
 
-  virtual bool denoise_buffer(const BufferParams &buffer_params,
-                              RenderBuffers *render_buffers,
-                              const int num_samples,
-                              bool allow_inplace_modification) override;
+  bool denoise_buffer(const BufferParams &buffer_params,
+                      RenderBuffers *render_buffers,
+                      const int num_samples,
+                      bool allow_inplace_modification) override;
 
  protected:
   class DenoisePass;
@@ -65,6 +67,8 @@ class DenoiserGPU : public Denoiser {
    * denoiser result to the render buffer. */
   bool denoise_filter_color_preprocess(const DenoiseContext &context, const DenoisePass &pass);
   bool denoise_filter_color_postprocess(const DenoiseContext &context, const DenoisePass &pass);
+  bool denoise_filter_color_flip_y(const DenoiseContext &context, const DenoisePass &pass);
+  bool denoise_filter_guiding_flip_y(const DenoiseContext &context);
   bool denoise_filter_guiding_set_fake_albedo(const DenoiseContext &context);
 
   /* Read guiding passes from the render buffers, preprocess them in a way which is expected by

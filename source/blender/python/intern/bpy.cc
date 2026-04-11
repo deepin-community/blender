@@ -36,6 +36,8 @@
 #include "bpy_app.hh"
 #include "bpy_cli_command.hh"
 #include "bpy_driver.hh"
+#include "bpy_geometry_set.hh"
+#include "bpy_inline_shader_nodes.hh"
 #include "bpy_library.hh"
 #include "bpy_operator.hh"
 #include "bpy_props.hh"
@@ -47,7 +49,7 @@
 #include "bpy_utils_units.hh"
 
 #include "../generic/py_capi_utils.hh"
-#include "../generic/python_compat.hh"
+#include "../generic/python_compat.hh" /* IWYU pragma: keep. */
 #include "../generic/python_utildefines.hh"
 
 /* external util modules */
@@ -100,7 +102,7 @@ static bool bpy_blend_foreach_path_cb(BPathForeachPathData *bpath_data,
 PyDoc_STRVAR(
     /* Wrap. */
     bpy_blend_paths_doc,
-    ".. function:: blend_paths(absolute=False, packed=False, local=False)\n"
+    ".. function:: blend_paths(*, absolute=False, packed=False, local=False)\n"
     "\n"
     "   Returns a list of paths to external files referenced by the loaded .blend file.\n"
     "\n"
@@ -170,7 +172,7 @@ static PyObject *bpy_blend_paths(PyObject * /*self*/, PyObject *args, PyObject *
 PyDoc_STRVAR(
     /* Wrap. */
     bpy_flip_name_doc,
-    ".. function:: flip_name(name, strip_digits=False)\n"
+    ".. function:: flip_name(name, *, strip_digits=False)\n"
     "\n"
     "   Flip a name between left/right sides, useful for \n"
     "   mirroring bone names.\n"
@@ -216,7 +218,7 @@ static PyObject *bpy_flip_name(PyObject * /*self*/, PyObject *args, PyObject *kw
   return result;
 }
 
-/* `bpy_user_resource_doc`, Now in `bpy/utils.py`. */
+/* `bpy_user_resource_doc`, Now in `bpy/utils/__init__.py`. */
 static PyObject *bpy_user_resource(PyObject * /*self*/, PyObject *args, PyObject *kw)
 {
   const PyC_StringEnumItems type_items[] = {
@@ -262,7 +264,7 @@ static PyObject *bpy_user_resource(PyObject * /*self*/, PyObject *args, PyObject
 PyDoc_STRVAR(
     /* Wrap. */
     bpy_system_resource_doc,
-    ".. function:: system_resource(type, path=\"\")\n"
+    ".. function:: system_resource(type, *, path=\"\")\n"
     "\n"
     "   Return a system resource path.\n"
     "\n"
@@ -313,7 +315,7 @@ static PyObject *bpy_system_resource(PyObject * /*self*/, PyObject *args, PyObje
 PyDoc_STRVAR(
     /* Wrap. */
     bpy_resource_path_doc,
-    ".. function:: resource_path(type, major=bpy.app.version[0], minor=bpy.app.version[1])\n"
+    ".. function:: resource_path(type, *, major=bpy.app.version[0], minor=bpy.app.version[1])\n"
     "\n"
     "   Return the base path for storing system files.\n"
     "\n"
@@ -364,7 +366,7 @@ static PyObject *bpy_resource_path(PyObject * /*self*/, PyObject *args, PyObject
 PyDoc_STRVAR(
     /* Wrap. */
     bpy_driver_secure_code_test_doc,
-    ".. function:: _driver_secure_code_test(code)\n"
+    ".. function:: _driver_secure_code_test(code, *, namespace=None, verbose=False)\n"
     "\n"
     "   Test if the script should be considered trusted.\n"
     "\n"
@@ -570,7 +572,7 @@ static PyObject *bpy_rna_enum_items_static(PyObject * /*self*/)
     const int items_count = RNA_enum_items_count(items);
     PyObject *value = PyTuple_New(items_count);
     for (int item_index = 0; item_index < items_count; item_index++) {
-      PointerRNA ptr = RNA_pointer_create(
+      PointerRNA ptr = RNA_pointer_create_discrete(
           nullptr, &RNA_EnumPropertyItem, (void *)&items[item_index]);
       PyTuple_SET_ITEM(value, item_index, pyrna_struct_CreatePyObject(&ptr));
     }
@@ -609,44 +611,49 @@ PyDoc_STRVAR(
     "   :rtype: dict[str, bool]\n");
 static PyObject *bpy_wm_capabilities(PyObject *self)
 {
-  static _Py_Identifier PyId_capabilities = {"_wm_capabilities_", -1};
-
+  PyObject *py_id_capabilities = PyUnicode_FromString("_wm_capabilities_");
   PyObject *result = nullptr;
-  switch (_PyObject_LookupAttrId(self, &PyId_capabilities, &result)) {
-    case 1:
-      return result;
-    case 0:
+  switch (PyObject_GetOptionalAttr(self, py_id_capabilities, &result)) {
+    case 1: {
+      BLI_assert(result != nullptr);
       break;
-    default:
-      /* Unlikely, but there may be an error, forward it. */
-      return nullptr;
-  }
+    }
+    case 0: {
+      result = PyDict_New();
 
-  result = PyDict_New();
-
-  const eWM_CapabilitiesFlag flag = WM_capabilities_flag();
+      const eWM_CapabilitiesFlag flag = WM_capabilities_flag();
 
 #define SetFlagItem(x) \
   PyDict_SetItemString(result, STRINGIFY(x), PyBool_FromLong((WM_CAPABILITY_##x) & flag));
 
-  SetFlagItem(CURSOR_WARP);
-  SetFlagItem(WINDOW_POSITION);
-  SetFlagItem(PRIMARY_CLIPBOARD);
-  SetFlagItem(GPU_FRONT_BUFFER_READ);
-  SetFlagItem(CLIPBOARD_IMAGES);
-  SetFlagItem(DESKTOP_SAMPLE);
-  SetFlagItem(INPUT_IME);
-  SetFlagItem(TRACKPAD_PHYSICAL_DIRECTION);
+      /* Only exposed flags which are used, by Blender's built-in scripts
+       * since this is a private API. */
+
+      SetFlagItem(TRACKPAD_PHYSICAL_DIRECTION);
+      SetFlagItem(KEYBOARD_HYPER_KEY);
 
 #undef SetFlagItem
+      PyObject_SetAttr(self, py_id_capabilities, result);
+      break;
+    }
+    default:
+      /* Unlikely, but there may be an error, forward it. */
+      BLI_assert(result == nullptr);
+      break;
+  }
 
-  _PyObject_SetAttrId(self, &PyId_capabilities, result);
+  Py_DECREF(py_id_capabilities);
   return result;
 }
 
-#if (defined(__GNUC__) && !defined(__clang__))
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wcast-function-type"
+#ifdef __GNUC__
+#  ifdef __clang__
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wcast-function-type"
+#  else
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wcast-function-type"
+#  endif
 #endif
 
 static PyMethodDef bpy_methods[] = {
@@ -687,22 +694,23 @@ static PyMethodDef bpy_methods[] = {
     {nullptr, nullptr, 0, nullptr},
 };
 
-#if (defined(__GNUC__) && !defined(__clang__))
-#  pragma GCC diagnostic pop
+#ifdef __GNUC__
+#  ifdef __clang__
+#    pragma clang diagnostic pop
+#  else
+#    pragma GCC diagnostic pop
+#  endif
 #endif
 
 static PyObject *bpy_import_test(const char *modname)
 {
   PyObject *mod = PyImport_ImportModuleLevel(modname, nullptr, nullptr, nullptr, 0);
 
-  GPU_bgl_end();
-
   if (mod) {
     Py_DECREF(mod);
   }
   else {
     PyErr_Print();
-    PyErr_Clear();
   }
 
   return mod;
@@ -738,36 +746,45 @@ void BPy_init_modules(bContext *C)
   PyDict_SetItemString(PyImport_GetModuleDict(), "_bpy", mod);
   Py_DECREF(mod);
 
-  /* needs to be first so bpy_types can run */
+  /* Needs to be first so `_bpy_types` can run. */
   PyObject *bpy_types = BPY_rna_types();
+  PyModule_AddObject(bpy_types, "GeometrySet", BPyInit_geometry_set_type());
+  PyModule_AddObject(bpy_types, "InlineShaderNodes", BPyInit_inline_shader_nodes_type());
   PyModule_AddObject(mod, "types", bpy_types);
 
-  /* needs to be first so bpy_types can run */
+  /* Needs to be first so `_bpy_types` can run. */
   BPY_library_load_type_ready();
 
   BPY_rna_data_context_type_ready();
 
   BPY_rna_gizmo_module(mod);
 
-  bpy_import_test("bpy_types");
-  PyModule_AddObject(mod, "data", BPY_rna_module()); /* imports bpy_types by running this */
-  bpy_import_test("bpy_types");
+  /* Important to internalizes `_bpy_types` before creating RNA instances. */
+  {
+    /* Set a dummy module so the `_bpy_types.py` can access `bpy.types.ID`
+     * without a null pointer dereference when instancing types. */
+    PyObject *bpy_types_dict_dummy = PyDict_New();
+    BPY_rna_types_dict_set(bpy_types_dict_dummy);
+    PyObject *bpy_types_module_py = bpy_import_test("_bpy_types");
+    /* Something has gone wrong if this is ever populated. */
+    BLI_assert(PyDict_GET_SIZE(bpy_types_dict_dummy) == 0);
+    Py_DECREF(bpy_types_dict_dummy);
+
+    PyObject *bpy_types_module_py_dict = PyModule_GetDict(bpy_types_module_py);
+    BPY_rna_types_dict_set(bpy_types_module_py_dict);
+  }
+  PyModule_AddObject(mod, "data", BPY_rna_module());
   BPY_rna_types_finalize_external_types(bpy_types);
 
   PyModule_AddObject(mod, "props", BPY_rna_props());
-  /* ops is now a python module that does the conversion from SOME_OT_foo -> some.foo */
   PyModule_AddObject(mod, "ops", BPY_operator_module());
   PyModule_AddObject(mod, "app", BPY_app_struct());
   PyModule_AddObject(mod, "_utils_units", BPY_utils_units());
   PyModule_AddObject(mod, "_utils_previews", BPY_utils_previews_module());
   PyModule_AddObject(mod, "msgbus", BPY_msgbus_module());
 
-  PointerRNA ctx_ptr = RNA_pointer_create(nullptr, &RNA_Context, C);
+  PointerRNA ctx_ptr = RNA_pointer_create_discrete(nullptr, &RNA_Context, C);
   bpy_context_module = (BPy_StructRNA *)pyrna_struct_CreatePyObject(&ctx_ptr);
-  /* odd that this is needed, 1 ref on creation and another for the module
-   * but without we get a crash on exit */
-  Py_INCREF(bpy_context_module);
-
   PyModule_AddObject(mod, "context", (PyObject *)bpy_context_module);
 
   /* Register methods and property get/set for RNA types. */

@@ -11,7 +11,6 @@ from bpy.props import (
     BoolProperty,
     IntProperty,
     StringProperty,
-    FloatVectorProperty,
     CollectionProperty,
 )
 from bpy.app.translations import (
@@ -35,7 +34,7 @@ from .utils.paths import match_files_to_socket_names, split_into_components
 from .utils.nodes import (node_mid_pt, autolink, node_at_pos, get_nodes_links,
                           force_update, nw_check,
                           nw_check_not_empty, nw_check_selected, nw_check_active, nw_check_space_type,
-                          nw_check_node_type, nw_check_visible_outputs, nw_check_viewer_node, NWBase,
+                          nw_check_node_type, nw_check_visible_outputs, get_viewer_image, nw_check_viewer_node, NWBase,
                           get_first_enabled_output, is_visible_socket)
 
 
@@ -54,8 +53,6 @@ class NWLazyMix(Operator, NWBase):
         nodes, links = get_nodes_links(context)
         cont = True
 
-        start_pos = [event.mouse_region_x, event.mouse_region_y]
-
         node1 = None
         if not context.scene.NWBusyDrawing:
             node1 = node_at_pos(nodes, context, event)
@@ -72,7 +69,6 @@ class NWLazyMix(Operator, NWBase):
             self.mouse_path.append((event.mouse_region_x, event.mouse_region_y))
 
         elif event.type == 'RIGHTMOUSE' and event.value == 'RELEASE':
-            end_pos = [event.mouse_region_x, event.mouse_region_y]
             bpy.types.SpaceNodeEditor.draw_handler_remove(self._handle, 'WINDOW')
 
             node2 = None
@@ -121,7 +117,7 @@ class NWLazyMix(Operator, NWBase):
 
 
 class NWLazyConnect(Operator, NWBase):
-    """Connect two nodes without clicking a specific socket (automatically determined"""
+    """Connect two nodes without clicking a specific socket (automatically determined)"""
     bl_idname = "node.nw_lazy_connect"
     bl_label = "Lazy Connect"
     bl_options = {'REGISTER', 'UNDO'}
@@ -135,8 +131,6 @@ class NWLazyConnect(Operator, NWBase):
         context.area.tag_redraw()
         nodes, links = get_nodes_links(context)
         cont = True
-
-        start_pos = [event.mouse_region_x, event.mouse_region_y]
 
         node1 = None
         if not context.scene.NWBusyDrawing:
@@ -154,7 +148,6 @@ class NWLazyConnect(Operator, NWBase):
             self.mouse_path.append((event.mouse_region_x, event.mouse_region_y))
 
         elif event.type == 'RIGHTMOUSE' and event.value == 'RELEASE':
-            end_pos = [event.mouse_region_x, event.mouse_region_y]
             bpy.types.SpaceNodeEditor.draw_handler_remove(self._handle, 'WINDOW')
 
             node2 = None
@@ -248,7 +241,8 @@ class NWDeleteUnused(Operator, NWBase):
     def is_unused_node(self, node):
         end_types = ['OUTPUT_MATERIAL', 'OUTPUT', 'VIEWER', 'COMPOSITE',
                      'SPLITVIEWER', 'OUTPUT_FILE', 'LEVELS', 'OUTPUT_LIGHT',
-                     'OUTPUT_WORLD', 'GROUP_INPUT', 'GROUP_OUTPUT', 'FRAME']
+                     'OUTPUT_WORLD', 'GROUP_INPUT', 'GROUP_OUTPUT', 'FRAME',
+                     'WARNING']
         if node.type in end_types:
             return False
 
@@ -493,58 +487,6 @@ class NWAddAttrNode(Operator, NWBase):
         return {'FINISHED'}
 
 
-class NWFrameSelected(Operator, NWBase):
-    bl_idname = "node.nw_frame_selected"
-    bl_label = "Frame Selected"
-    bl_translation_context = i18n_contexts.id_nodetree
-    bl_description = "Add a frame node and parent the selected nodes to it"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    label_prop: StringProperty(
-        name='Label',
-        description='The visual name of the frame node',
-        default=' '
-    )
-    use_custom_color_prop: BoolProperty(
-        name="Custom Color",
-        description="Use custom color for the frame node",
-        default=False
-    )
-    color_prop: FloatVectorProperty(
-        name="Color",
-        description="The color of the frame node",
-        default=(0.604, 0.604, 0.604),
-        min=0, max=1, step=1, precision=3,
-        subtype='COLOR_GAMMA', size=3
-    )
-
-    def draw(self, context):
-        layout = self.layout
-        layout.prop(self, 'label_prop')
-        layout.prop(self, 'use_custom_color_prop')
-        col = layout.column()
-        col.active = self.use_custom_color_prop
-        col.prop(self, 'color_prop', text="")
-
-    def execute(self, context):
-        nodes, links = get_nodes_links(context)
-        selected = []
-        for node in nodes:
-            if node.select:
-                selected.append(node)
-
-        bpy.ops.node.add_node(type='NodeFrame')
-        frm = nodes.active
-        frm.label = self.label_prop
-        frm.use_custom_color = self.use_custom_color_prop
-        frm.color = self.color_prop
-
-        for node in selected:
-            node.parent = frm
-
-        return {'FINISHED'}
-
-
 class NWReloadImages(Operator):
     bl_idname = "node.nw_reload_images"
     bl_label = "Reload Images"
@@ -592,6 +534,7 @@ class NWMergeNodes(Operator, NWBase):
 
     mode: EnumProperty(
         name="Mode",
+        translation_context=i18n_contexts.id_nodetree,
         description="All possible blend types, boolean operations and math operations",
         items=blend_types + [op for op in geo_combine_operations if op not in blend_types] + [op for op in operations if op not in blend_types],
     )
@@ -729,9 +672,21 @@ class NWMergeNodes(Operator, NWBase):
         selected_vector = []  # entry = [index, loc]
         selected_z = []  # entry = [index, loc]
         selected_alphaover = []  # entry = [index, loc]
+        selected_boolean = [] # entry = [index, loc]
+        selected_string = [] # entry = [index, loc]
 
         for i, node in enumerate(nodes):
             if node.select and node.outputs:
+                output = get_first_enabled_output(node)
+                output_type = output.type
+                if output_type == 'BOOLEAN':
+                    if merge_type == 'MATH' and mode != 'ADD':
+                        merge_type = 'AUTO'
+                        mode = 'MIX'
+                    if merge_type == 'AUTO' and mode == 'ADD':
+                        mode = 'MIX'
+                if output_type == 'STRING':
+                    merge_type = 'AUTO'
                 if merge_type == 'AUTO':
                     for (type, types_list, dst) in (
                             ('SHADER', ('MIX', 'ADD'), selected_shader),
@@ -739,9 +694,9 @@ class NWMergeNodes(Operator, NWBase):
                             ('RGBA', [t[0] for t in blend_types], selected_mix),
                             ('VALUE', [t[0] for t in operations], selected_math),
                             ('VECTOR', [], selected_vector),
+                            ('BOOLEAN', [], selected_boolean),
+                            ('STRING', [], selected_string),
                     ):
-                        output = get_first_enabled_output(node)
-                        output_type = output.type
                         valid_mode = mode in types_list
                         # When mode is 'MIX' we have to cheat since the mix node is not used in
                         # geometry nodes.
@@ -752,6 +707,8 @@ class NWMergeNodes(Operator, NWBase):
                                 elif output_type == 'VECTOR' and type == 'VECTOR':
                                     valid_mode = True
                                 elif type == 'GEOMETRY':
+                                    valid_mode = True
+                                elif type in ('BOOLEAN', 'STRING'):
                                     valid_mode = True
                         # When mode is 'MIX' use mix node for both 'RGBA' and 'VALUE' output types.
                         # Cheat that output type is 'RGBA',
@@ -771,9 +728,11 @@ class NWMergeNodes(Operator, NWBase):
                             ('MATH', [t[0] for t in operations], selected_math),
                             ('ZCOMBINE', ('MIX', ), selected_z),
                             ('ALPHAOVER', ('MIX', ), selected_alphaover),
+                            ('BOOLEAN', (''), selected_boolean),
                     ):
-                        if merge_type == type and mode in types_list:
-                            dst.append([i, node.location.x, node.location.y, node.dimensions.x, node.hide])
+                        if (merge_type == type and mode in types_list):
+                            dst.append(
+                                [i, node.location.x, node.location.y, node.dimensions.x, node.hide])
         # When nodes with output kinds 'RGBA' and 'VALUE' are selected at the same time
         # use only 'Mix' nodes for merging.
         # For that we add selected_math list to selected_mix list and clear selected_math.
@@ -783,7 +742,7 @@ class NWMergeNodes(Operator, NWBase):
 
         # If no nodes are selected, do nothing and pass through.
         if not (selected_mix + selected_shader + selected_geometry + selected_math
-                + selected_vector + selected_z + selected_alphaover):
+                + selected_vector + selected_z + selected_alphaover + selected_boolean + selected_string):
             return {'PASS_THROUGH'}
 
         for nodes_list in [
@@ -793,7 +752,9 @@ class NWMergeNodes(Operator, NWBase):
                 selected_math,
                 selected_vector,
                 selected_z,
-                selected_alphaover]:
+                selected_alphaover,
+                selected_boolean,
+                selected_string]:
             if not nodes_list:
                 continue
             count_before = len(nodes)
@@ -804,23 +765,21 @@ class NWMergeNodes(Operator, NWBase):
             nodes_list.sort(key=lambda k: k[2], reverse=True)
 
             # Change the node type for math nodes in a geometry node tree.
-            if tree_type == 'GEOMETRY':
-                if nodes_list is selected_math or nodes_list is selected_vector or nodes_list is selected_mix:
-                    node_type = 'ShaderNode'
-                    if mode == 'MIX':
-                        mode = 'ADD'
-                else:
-                    node_type = 'GeometryNode'
-            if merge_position == 'CENTER':
+            if (
+                    tree_type == 'GEOMETRY'
+                    and nodes_list in (selected_math, selected_vector, selected_mix)
+                    and mode == 'MIX'):
+                mode = 'ADD'
+            if merge_position == 'CENTER' and len(nodes_list) >= 2:
                 # average yloc of last two nodes (lowest two)
-                loc_y = ((nodes_list[len(nodes_list) - 1][2]) + (nodes_list[len(nodes_list) - 2][2])) / 2
-                if nodes_list[len(nodes_list) - 1][-1]:  # if last node is hidden, mix should be shifted up a bit
+                loc_y = ((nodes_list[-1][2]) + (nodes_list[-2][2])) / 2
+                if nodes_list[-1][-1]:  # if last node is hidden, mix should be shifted up a bit
                     if do_hide:
                         loc_y += 40
                     else:
                         loc_y += 80
             else:
-                loc_y = nodes_list[len(nodes_list) - 1][2]
+                loc_y = nodes_list[-1][2]
             offset_y = 100
             if not do_hide:
                 offset_y = 200
@@ -832,13 +791,8 @@ class NWMergeNodes(Operator, NWBase):
             was_multi = False
             for i in range(the_range):
                 if nodes_list == selected_mix:
-                    mix_name = 'Mix'
-                    if tree_type == 'COMPOSITING':
-                        mix_name = 'MixRGB'
-                    add_type = node_type + mix_name
-                    add = nodes.new(add_type)
-                    if tree_type != 'COMPOSITING':
-                        add.data_type = 'RGBA'
+                    add = nodes.new('ShaderNodeMix')
+                    add.data_type = 'RGBA'
                     add.blend_type = mode
                     if mode != 'MIX':
                         add.inputs[0].default_value = 1.0
@@ -848,12 +802,8 @@ class NWMergeNodes(Operator, NWBase):
                         loc_y = loc_y - 50
                     first = 6
                     second = 7
-                    if tree_type == 'COMPOSITING':
-                        first = 1
-                        second = 2
                 elif nodes_list == selected_math:
-                    add_type = node_type + 'Math'
-                    add = nodes.new(add_type)
+                    add = nodes.new('ShaderNodeMath')
                     add.operation = mode
                     add.hide = do_hide
                     if do_hide:
@@ -862,16 +812,14 @@ class NWMergeNodes(Operator, NWBase):
                     second = 1
                 elif nodes_list == selected_shader:
                     if mode == 'MIX':
-                        add_type = node_type + 'MixShader'
-                        add = nodes.new(add_type)
+                        add = nodes.new('ShaderNodeMixShader')
                         add.hide = do_hide_shader
                         if do_hide_shader:
                             loc_y = loc_y - 50
                         first = 1
                         second = 2
                     elif mode == 'ADD':
-                        add_type = node_type + 'AddShader'
-                        add = nodes.new(add_type)
+                        add = nodes.new('ShaderNodeAddShader')
                         add.hide = do_hide_shader
                         if do_hide_shader:
                             loc_y = loc_y - 50
@@ -879,11 +827,11 @@ class NWMergeNodes(Operator, NWBase):
                         second = 1
                 elif nodes_list == selected_geometry:
                     if mode in ('JOIN', 'MIX'):
-                        add_type = node_type + 'JoinGeometry'
+                        add_type = 'GeometryNodeJoinGeometry'
                         add = self.merge_with_multi_input(
                             nodes_list, merge_position, do_hide, loc_x, links, nodes, add_type, [0])
                     else:
-                        add_type = node_type + 'MeshBoolean'
+                        add_type = 'GeometryNodeMeshBoolean'
                         indices = [0, 1] if mode == 'DIFFERENCE' else [1]
                         add = self.merge_with_multi_input(
                             nodes_list, merge_position, do_hide, loc_x, links, nodes, add_type, indices)
@@ -891,8 +839,7 @@ class NWMergeNodes(Operator, NWBase):
                     was_multi = True
                     break
                 elif nodes_list == selected_vector:
-                    add_type = node_type + 'VectorMath'
-                    add = nodes.new(add_type)
+                    add = nodes.new('ShaderNodeVectorMath')
                     add.operation = mode
                     add.hide = do_hide
                     if do_hide:
@@ -915,6 +862,20 @@ class NWMergeNodes(Operator, NWBase):
                         loc_y = loc_y - 50
                     first = 1
                     second = 2
+                elif nodes_list == selected_boolean:
+                    add = nodes.new('FunctionNodeBooleanMath')
+                    add.show_preview = False
+                    add.hide = do_hide
+                    if do_hide:
+                        loc_y = loc_y - 50
+                    first = 0
+                    second = 1
+                elif nodes_list == selected_string:
+                    add_type = node_type + 'StringJoin'
+                    add = self.merge_with_multi_input(
+                        nodes_list, merge_position, do_hide, loc_x, links, nodes, add_type, [1])
+                    was_multi = True
+                    break # this line is here in case more types get added in the future
                 add.location = loc_x, loc_y
                 loc_y += offset_y
                 add.select = True
@@ -1000,6 +961,7 @@ class NWBatchChangeNodes(Operator, NWBase):
     )
     operation: EnumProperty(
         name="Operation",
+        translation_context=i18n_contexts.id_nodetree,
         items=operations + navs,
     )
 
@@ -1120,11 +1082,11 @@ class NWCopySettings(Operator, NWBase):
             # Report nodes that are not valid
             valid_node_names = [n.name for n in valid_nodes]
             invalid_names = set(selected_node_names) - set(valid_node_names)
-            self.report(
-                {'INFO'},
-                rpt_("Ignored {} (not of the same type as {})").format(", ".join(sorted(invalid_names)),
-                                                                       node_active.name),
+            message = rpt_("Ignored {} (not of the same type as {})").format(
+                ", ".join(sorted(invalid_names)),
+                node_active.name,
             )
+            self.report({'INFO'}, message)
 
         # Reference original
         orig = node_active
@@ -1467,7 +1429,7 @@ class NWAddPrincipledSetup(Operator, NWBase, ImportHelper):
         match_files_to_socket_names(self.files, socketnames)
         # Remove socketnames without found files
         socketnames = [s for s in socketnames if s[2]
-                       and path.exists(self.directory + s[2])]
+                       and path.exists(bpy.path.abspath(self.directory) + s[2])]
         if not socketnames:
             self.report({'INFO'}, 'No matching images found')
             print('No matching images found')
@@ -1536,7 +1498,7 @@ class NWAddPrincipledSetup(Operator, NWBase, ImportHelper):
 
                     # Add bump node
                     bump_node = nodes.new(type='ShaderNodeBump')
-                    link = connect_sockets(bump_node.inputs[2], bump_node_texture.outputs[0])
+                    link = connect_sockets(bump_node.inputs[3], bump_node_texture.outputs[0])
                     link = connect_sockets(active_node.inputs['Normal'], bump_node.outputs[0])
                 continue
 
@@ -1726,7 +1688,7 @@ class NWAddReroutes(Operator, NWBase):
 
             reroutes_count = 0  # Will be used when aligning reroutes added to hidden nodes.
             for out_i, output in enumerate(node.outputs):
-                if output.is_unavailable:
+                if output.is_unavailable or isinstance(output, bpy.types.NodeSocketVirtual):
                     continue
                 if node.type == 'R_LAYERS' and output.name != 'Alpha':
                     # If 'R_LAYERS' check if output is used in render pass.
@@ -1899,15 +1861,17 @@ class NWAlignNodes(Operator, NWBase):
         current_pos = 0
         for node in selection:
             current_margin = margin
-            current_margin = current_margin * 0.5 if node.hide else current_margin  # use a smaller margin for hidden nodes
+            current_margin = current_margin * 0.5 if node.hide else current_margin  # Use a smaller margin for hidden nodes
 
             if horizontal:
                 node.location.x = current_pos
                 current_pos += current_margin + node.dimensions.x
                 node.location.y = mid_y + (node.dimensions.y / 2)
             else:
-                node.location.y = current_pos
-                current_pos -= (current_margin * 0.3) + node.dimensions.y  # use half-margin for vertical alignment
+                # node.bl_height_min is the min size of a collapsed node, +6 for the outlines and margins
+                hide_offset = (node.dimensions.y - (node.bl_height_min + 6)) / 2 if node.hide else 0
+                node.location.y = current_pos - hide_offset # Hidden nodes center their sockets around the label instead of below
+                current_pos -= (current_margin * 0.3) + node.dimensions.y  # Use half-margin for vertical alignment
                 node.location.x = mid_x - (node.dimensions.x / 2)
 
         # If active node is selected, center nodes around it
@@ -2014,7 +1978,7 @@ class NWLinkToOutputNode(Operator):
                           'LINESTYLE': 'ShaderNodeOutputLineStyle'}
         output_type = {
             'ShaderNodeTree': shader_outputs[context.space_data.shader_type],
-            'CompositorNodeTree': 'CompositorNodeComposite',
+            'CompositorNodeTree': 'NodeGroupOutput',
             'TextureNodeTree': 'TextureNodeOutput',
             'GeometryNodeTree': 'NodeGroupOutput',
         }[tree_type]
@@ -2135,7 +2099,7 @@ class NWAddSequence(Operator, NWBase, ImportHelper):
 
     def execute(self, context):
         nodes, links = get_nodes_links(context)
-        directory = self.directory
+        directory = bpy.path.abspath(self.directory)
         filename = self.filename
         files = self.files
         tree = context.space_data.node_tree
@@ -2226,64 +2190,10 @@ class NWAddSequence(Operator, NWBase, ImportHelper):
         return {'FINISHED'}
 
 
-class NWAddMultipleImages(Operator, NWBase, ImportHelper):
-    """Add multiple images at once"""
-    bl_idname = 'node.nw_add_multiple_images'
-    bl_label = 'Open Selected Images'
-    bl_options = {'REGISTER', 'UNDO'}
-    directory: StringProperty(
-        subtype="DIR_PATH"
-    )
-    files: CollectionProperty(
-        type=bpy.types.OperatorFileListElement,
-        options={'HIDDEN', 'SKIP_SAVE'}
-    )
-
-    @classmethod
-    def poll(cls, context):
-        return (nw_check(cls, context)
-                and nw_check_space_type(cls, context, {'ShaderNodeTree', 'CompositorNodeTree'}))
-
-    def execute(self, context):
-        nodes, links = get_nodes_links(context)
-
-        xloc, yloc = context.region.view2d.region_to_view(context.area.width / 2, context.area.height / 2)
-
-        if context.space_data.node_tree.type == 'SHADER':
-            node_type = "ShaderNodeTexImage"
-        elif context.space_data.node_tree.type == 'COMPOSITING':
-            node_type = "CompositorNodeImage"
-
-        new_nodes = []
-        for f in self.files:
-            fname = f.name
-
-            node = nodes.new(node_type)
-            new_nodes.append(node)
-            node.label = fname
-            node.hide = True
-            node.location.x = xloc
-            node.location.y = yloc
-            yloc -= 40
-
-            img = bpy.data.images.load(self.directory + fname)
-            node.image = img
-
-        # shift new nodes up to center of tree
-        list_size = new_nodes[0].location.y - new_nodes[-1].location.y
-        for node in nodes:
-            if node in new_nodes:
-                node.select = True
-                node.location.y += (list_size / 2)
-            else:
-                node.select = False
-        return {'FINISHED'}
-
-
 class NWSaveViewer(bpy.types.Operator, ExportHelper):
     """Save the current viewer node to an image file"""
     bl_idname = "node.nw_save_viewer"
-    bl_label = "Save This Image"
+    bl_label = "Save Viewer Image"
     filepath: StringProperty(subtype="FILE_PATH")
     filename_ext: EnumProperty(
         name="Format",
@@ -2298,7 +2208,9 @@ class NWSaveViewer(bpy.types.Operator, ExportHelper):
                ('.dpx', 'DPX', ""),
                ('.exr', 'OPEN_EXR', ""),
                ('.hdr', 'HDR', ""),
-               ('.tif', 'TIFF', "")),
+               ('.tif', 'TIFF', ""),
+               ('.webp', 'WEBP', ""),
+              ),
         default='.png',
     )
 
@@ -2310,30 +2222,39 @@ class NWSaveViewer(bpy.types.Operator, ExportHelper):
 
     def execute(self, context):
         fp = self.filepath
-        if fp:
-            formats = {
-                '.bmp': 'BMP',
-                '.rgb': 'IRIS',
-                '.png': 'PNG',
-                '.jpg': 'JPEG',
-                '.jpeg': 'JPEG',
-                '.jp2': 'JPEG2000',
-                '.tga': 'TARGA',
-                '.cin': 'CINEON',
-                '.dpx': 'DPX',
-                '.exr': 'OPEN_EXR',
-                '.hdr': 'HDR',
-                '.tiff': 'TIFF',
-                '.tif': 'TIFF'}
-            basename, ext = path.splitext(fp)
-            old_render_format = context.scene.render.image_settings.file_format
-            context.scene.render.image_settings.file_format = formats[self.filename_ext]
-            context.area.type = "IMAGE_EDITOR"
-            context.area.spaces[0].image = bpy.data.images['Viewer Node']
-            context.area.spaces[0].image.save_render(fp)
-            context.area.type = "NODE_EDITOR"
-            context.scene.render.image_settings.file_format = old_render_format
-            return {'FINISHED'}
+        if not fp:
+            return {'CANCELLED'}
+
+        formats = {
+            '.bmp': 'BMP',
+            '.rgb': 'IRIS',
+            '.png': 'PNG',
+            '.jpg': 'JPEG',
+            '.jpeg': 'JPEG',
+            '.jp2': 'JPEG2000',
+            '.tga': 'TARGA',
+            '.cin': 'CINEON',
+            '.dpx': 'DPX',
+            '.exr': 'OPEN_EXR',
+            '.hdr': 'HDR',
+            '.tiff': 'TIFF',
+            '.tif': 'TIFF',
+            '.webp': 'WEBP',
+        }
+        image_settings = context.scene.render.image_settings
+        old_media_type = image_settings.media_type
+        old_file_format = image_settings.file_format
+        image_settings.media_type = 'IMAGE'
+        image_settings.file_format = formats[self.filename_ext]
+
+        try:
+            get_viewer_image().save_render(fp)
+        except RuntimeError as e:
+            self.report({'ERROR'}, rpt_("Could not write image: {}").format(e))
+
+        image_settings.media_type = old_media_type
+        image_settings.file_format = old_file_format
+        return {'FINISHED'}
 
 
 class NWResetNodes(bpy.types.Operator):
@@ -2348,13 +2269,28 @@ class NWResetNodes(bpy.types.Operator):
                 and nw_check_selected(cls, context)
                 and nw_check_active(cls, context))
 
+    @staticmethod
+    def is_frame_node(node):
+        return node.bl_idname == "NodeFrame"
+
+    group_node_types = {"CompositorNodeGroup", "GeometryNodeGroup", "ShaderNodeGroup"}
+    # TODO All zone nodes are ignored here for now, because replacing one of the input/output pair breaks the zone.
+    # It's possible to handle zones by using the `paired_output` function of an input node
+    # and reconstruct the zone using the `pair_with_output` function.
+    zone_node_types = {"GeometryNodeRepeatInput", "GeometryNodeRepeatOutput", "NodeClosureInput",
+                        "NodeClosureOutput", "GeometryNodeSimulationInput", "GeometryNodeSimulationOutput",
+                        "GeometryNodeForeachGeometryElementInput", "GeometryNodeForeachGeometryElementOutput"}
+    node_ignore = group_node_types | zone_node_types | {"NodeFrame", "NodeReroute"}
+
+    @classmethod
+    def ignore_node(cls, node):
+        return node.bl_idname in cls.node_ignore
+
     def execute(self, context):
         node_active = context.active_node
         node_selected = context.selected_nodes
-        node_ignore = ["FRAME", "REROUTE", "GROUP", "SIMULATION_INPUT", "SIMULATION_OUTPUT"]
-
         active_node_name = node_active.name if node_active.select else None
-        valid_nodes = [n for n in node_selected if n.type not in node_ignore]
+        valid_nodes = [n for n in node_selected if not self.ignore_node(n)]
 
         # Create output lists
         selected_node_names = [n.name for n in node_selected]
@@ -2362,18 +2298,18 @@ class NWResetNodes(bpy.types.Operator):
 
         # Reset all valid children in a frame
         node_active_is_frame = False
-        if len(node_selected) == 1 and node_active.type == "FRAME":
+        if len(node_selected) == 1 and self.is_frame_node(node_active):
             node_tree = node_active.id_data
             children = [n for n in node_tree.nodes if n.parent == node_active]
             if children:
-                valid_nodes = [n for n in children if n.type not in node_ignore]
-                selected_node_names = [n.name for n in children if n.type not in node_ignore]
+                valid_nodes = [n for n in children if not self.ignore_node(n)]
+                selected_node_names = [n.name for n in children if not self.ignore_node(n)]
                 node_active_is_frame = True
 
         # Check if valid nodes in selection
         if not (len(valid_nodes) > 0):
             # Check for frames only
-            frames_selected = [n for n in node_selected if n.type == "FRAME"]
+            frames_selected = [n for n in node_selected if self.is_frame_node(n)]
             if (len(frames_selected) > 1 and len(frames_selected) == len(node_selected)):
                 self.report({'ERROR'}, "Please select only 1 frame to reset")
             else:
@@ -2384,7 +2320,8 @@ class NWResetNodes(bpy.types.Operator):
         if len(valid_nodes) != len(node_selected) and node_active_is_frame is False:
             valid_node_names = [n.name for n in valid_nodes]
             not_valid_names = list(set(selected_node_names) - set(valid_node_names))
-            self.report({'INFO'}, rpt_("Ignored {}").format(", ".join(not_valid_names)))
+            message = rpt_("Ignored {}").format(", ".join(not_valid_names))
+            self.report({'INFO'}, message)
 
         # Deselect all nodes
         for i in node_selected:
@@ -2392,7 +2329,6 @@ class NWResetNodes(bpy.types.Operator):
 
         # Run through all valid nodes
         for node in valid_nodes:
-
             parent = node.parent if node.parent else None
             node_loc = [node.location.x, node.location.y]
 
@@ -2448,7 +2384,6 @@ classes = (
     NWSwapLinks,
     NWResetBG,
     NWAddAttrNode,
-    NWFrameSelected,
     NWReloadImages,
     NWMergeNodes,
     NWBatchChangeNodes,
@@ -2468,7 +2403,6 @@ classes = (
     NWMakeLink,
     NWCallInputsMenu,
     NWAddSequence,
-    NWAddMultipleImages,
     NWSaveViewer,
     NWResetNodes,
 )

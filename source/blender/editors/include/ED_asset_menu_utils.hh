@@ -15,6 +15,7 @@
 #include "RNA_types.hh"
 
 struct uiLayout;
+struct AssetWeakReference;
 
 namespace blender::asset_system {
 class AssetCatalogTreeItem;
@@ -28,8 +29,14 @@ void draw_menu_for_catalog(const asset_system::AssetCatalogTreeItem &item,
                            StringRefNull menu_name,
                            uiLayout &layout);
 
+void draw_node_menu_for_catalog(const asset_system::AssetCatalogTreeItem &item,
+                                StringRefNull operator_id,
+                                StringRefNull menu_name,
+                                uiLayout &layout);
+
 void operator_asset_reference_props_set(const asset_system::AssetRepresentation &asset,
                                         PointerRNA &ptr);
+bool operator_asset_reference_props_is_set(PointerRNA &ptr);
 void operator_asset_reference_props_register(StructRNA &srna);
 
 const asset_system::AssetRepresentation *find_asset_from_weak_ref(

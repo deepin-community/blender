@@ -9,6 +9,8 @@
 
 #include "BKE_fcurve.hh"
 
+#include "BLT_translation.hh"
+
 namespace blender::animrig::legacy {
 
 static Strip *first_keyframe_strip(Action &action)
@@ -24,7 +26,20 @@ static Strip *first_keyframe_strip(Action &action)
   return nullptr;
 }
 
-ChannelBag *channelbag_get(Action &action)
+Slot &slot_ensure(Action &action)
+{
+  assert_baklava_phase_1_invariants(action);
+
+  if (!action.slots().is_empty()) {
+    return *action.slot(0);
+  }
+
+  Slot &slot = action.slot_add();
+  action.slot_display_name_define(slot, DATA_(DEFAULT_LEGACY_SLOT_NAME));
+  return slot;
+}
+
+Channelbag *channelbag_get(Action &action)
 {
   if (action.slots().is_empty()) {
     return nullptr;
@@ -38,25 +53,27 @@ ChannelBag *channelbag_get(Action &action)
   return keystrip->data<StripKeyframeData>(action).channelbag_for_slot(*action.slot(0));
 }
 
-ChannelBag &channelbag_ensure(Action &action)
+Channelbag &channelbag_ensure(Action &action)
 {
   assert_baklava_phase_1_invariants(action);
 
-  /* Ensure a Slot. */
-  Slot *slot;
-  if (action.slots().is_empty()) {
-    slot = &action.slot_add();
+  Slot &slot = slot_ensure(action);
+
+  /* Ensure a Layer + keyframe Strip.
+   *
+   * Normally we would use `Action::layer_keystrip_ensure()` for this, but that
+   * doesn't let us specify the name of the layer if newly created. */
+  if (action.layers().is_empty()) {
+    action.layer_add(DATA_(DEFAULT_LEGACY_LAYER_NAME));
   }
-  else {
-    slot = action.slot(0);
+  if (action.layer(0)->strips().is_empty()) {
+    action.layer(0)->strip_add(action, Strip::Type::Keyframe);
   }
 
-  /* Ensure a Layer + keyframe Strip. */
-  action.layer_keystrip_ensure();
   Strip &keystrip = *action.layer(0)->strip(0);
 
-  /* Ensure a ChannelBag. */
-  return keystrip.data<StripKeyframeData>(action).channelbag_for_slot_ensure(*slot);
+  /* Ensure a Channelbag. */
+  return keystrip.data<StripKeyframeData>(action).channelbag_for_slot_ensure(slot);
 }
 
 /* Lots of template args to support transparent non-const and const versions. */
@@ -65,19 +82,16 @@ template<typename ActionType,
          typename LayerType,
          typename StripType,
          typename StripKeyframeDataType,
-         typename ChannelBagType>
+         typename ChannelbagType>
 static Vector<FCurveType *> fcurves_all_templated(ActionType &action)
 {
-#ifdef WITH_ANIM_BAKLAVA
   /* Legacy Action. */
   if (action.is_action_legacy()) {
-#endif /* WITH_ANIM_BAKLAVA */
     Vector<FCurveType *> legacy_fcurves;
     LISTBASE_FOREACH (FCurveType *, fcurve, &action.curves) {
       legacy_fcurves.append(fcurve);
     }
     return legacy_fcurves;
-#ifdef WITH_ANIM_BAKLAVA
   }
 
   /* Layered Action. */
@@ -89,7 +103,7 @@ static Vector<FCurveType *> fcurves_all_templated(ActionType &action)
       switch (strip->type()) {
         case Strip::Type::Keyframe: {
           StripKeyframeDataType &strip_data = strip->template data<StripKeyframeData>(action);
-          for (ChannelBagType *bag : strip_data.channelbags()) {
+          for (ChannelbagType *bag : strip_data.channelbags()) {
             for (FCurveType *fcurve : bag->fcurves()) {
               all_fcurves.append(fcurve);
             }
@@ -99,7 +113,6 @@ static Vector<FCurveType *> fcurves_all_templated(ActionType &action)
     }
   }
   return all_fcurves;
-#endif /* WITH_ANIM_BAKLAVA */
 }
 
 Vector<FCurve *> fcurves_all(bAction *action)
@@ -107,7 +120,7 @@ Vector<FCurve *> fcurves_all(bAction *action)
   if (!action) {
     return {};
   }
-  return fcurves_all_templated<Action, FCurve, Layer, Strip, StripKeyframeData, ChannelBag>(
+  return fcurves_all_templated<Action, FCurve, Layer, Strip, StripKeyframeData, Channelbag>(
       action->wrap());
 }
 
@@ -121,7 +134,24 @@ Vector<const FCurve *> fcurves_all(const bAction *action)
                                const Layer,
                                const Strip,
                                const StripKeyframeData,
-                               const ChannelBag>(action->wrap());
+                               const Channelbag>(action->wrap());
+}
+
+Vector<FCurve *> fcurves_first_slot(bAction *action)
+{
+  if (!action) {
+    return {};
+  }
+  Action &action_wrap = action->wrap();
+
+  if (action_wrap.is_action_legacy()) {
+    return fcurves_all(action);
+  }
+
+  if (action_wrap.slots().is_empty()) {
+    return {};
+  }
+  return fcurves_for_action_slot(action, action_wrap.slot(0)->handle);
 }
 
 /* Lots of template args to support transparent non-const and const versions. */
@@ -130,26 +160,18 @@ template<typename ActionType,
          typename LayerType,
          typename StripType,
          typename StripKeyframeDataType,
-         typename ChannelBagType>
+         typename ChannelbagType>
 static Vector<FCurveType *> fcurves_for_action_slot_templated(ActionType &action,
                                                               const slot_handle_t slot_handle)
 {
-#ifndef WITH_ANIM_BAKLAVA
-  UNUSED_VARS(slot_handle);
-#endif /* !WITH_ANIM_BAKLAVA */
-
-#ifdef WITH_ANIM_BAKLAVA
   /* Legacy Action. */
   if (action.is_action_legacy()) {
-#endif /* WITH_ANIM_BAKLAVA */
     return listbase_to_vector<FCurveType>(action.curves);
-#ifdef WITH_ANIM_BAKLAVA
   }
 
   /* Layered Action. */
   Vector<FCurveType *> as_vector(animrig::fcurves_for_action_slot(action, slot_handle));
   return as_vector;
-#endif /* WITH_ANIM_BAKLAVA */
 }
 
 Vector<FCurve *> fcurves_for_action_slot(bAction *action, const slot_handle_t slot_handle)
@@ -162,7 +184,7 @@ Vector<FCurve *> fcurves_for_action_slot(bAction *action, const slot_handle_t sl
                                            Layer,
                                            Strip,
                                            StripKeyframeData,
-                                           ChannelBag>(action->wrap(), slot_handle);
+                                           Channelbag>(action->wrap(), slot_handle);
 }
 Vector<const FCurve *> fcurves_for_action_slot(const bAction *action,
                                                const slot_handle_t slot_handle)
@@ -175,7 +197,7 @@ Vector<const FCurve *> fcurves_for_action_slot(const bAction *action,
                                            const Layer,
                                            const Strip,
                                            const StripKeyframeData,
-                                           const ChannelBag>(action->wrap(), slot_handle);
+                                           const Channelbag>(action->wrap(), slot_handle);
 }
 
 Vector<FCurve *> fcurves_for_assigned_action(AnimData *adt)
@@ -217,16 +239,13 @@ Vector<bActionGroup *> channel_groups_all(bAction *action)
 
   Action &action_wrap = action->wrap();
 
-#ifdef WITH_ANIM_BAKLAVA
   /* Legacy Action. */
   if (action_wrap.is_action_legacy()) {
-#endif /* WITH_ANIM_BAKLAVA */
     Vector<bActionGroup *> legacy_groups;
     LISTBASE_FOREACH (bActionGroup *, group, &action_wrap.groups) {
       legacy_groups.append(group);
     }
     return legacy_groups;
-#ifdef WITH_ANIM_BAKLAVA
   }
 
   /* Layered Action. */
@@ -236,7 +255,7 @@ Vector<bActionGroup *> channel_groups_all(bAction *action)
       switch (strip->type()) {
         case Strip::Type::Keyframe: {
           StripKeyframeData &strip_data = strip->template data<StripKeyframeData>(action_wrap);
-          for (ChannelBag *bag : strip_data.channelbags()) {
+          for (Channelbag *bag : strip_data.channelbags()) {
             all_groups.extend(bag->channel_groups());
           }
         }
@@ -244,7 +263,6 @@ Vector<bActionGroup *> channel_groups_all(bAction *action)
     }
   }
   return all_groups;
-#endif /* WITH_ANIM_BAKLAVA */
 }
 
 Vector<bActionGroup *> channel_groups_for_assigned_slot(AnimData *adt)
@@ -261,7 +279,7 @@ Vector<bActionGroup *> channel_groups_for_assigned_slot(AnimData *adt)
   }
 
   /* Layered Action. */
-  ChannelBag *bag = channelbag_for_action_slot(action, adt->slot_handle);
+  Channelbag *bag = channelbag_for_action_slot(action, adt->slot_handle);
   if (!bag) {
     return {};
   }
@@ -272,12 +290,12 @@ Vector<bActionGroup *> channel_groups_for_assigned_slot(AnimData *adt)
 
 bool action_treat_as_legacy(const bAction &action)
 {
-  const Action &action_wrap = action.wrap();
-  if (action_wrap.is_empty()) {
-    const bool may_do_layered = USER_EXPERIMENTAL_TEST(&U, use_animation_baklava);
-    return !may_do_layered;
-  }
-  return action_wrap.is_action_legacy();
+  /* At runtime, legacy Actions should have been versioned to layered/slotted Actions. However,
+   * unit tests can still create legacy Actions, and so this function still has to distinguish
+   * between them.
+   *
+   * Note that empty Actions also count as 'layered'. */
+  return !action.wrap().is_action_layered();
 }
 
 bool action_fcurves_remove(bAction &action,
@@ -310,7 +328,7 @@ bool action_fcurves_remove(bAction &action,
   }
 
   /* Layered Action. */
-  ChannelBag *bag = channelbag_for_action_slot(action.wrap(), slot_handle);
+  Channelbag *bag = channelbag_for_action_slot(action.wrap(), slot_handle);
   if (!bag) {
     return false;
   }

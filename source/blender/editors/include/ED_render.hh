@@ -74,6 +74,12 @@ void ED_preview_ensure_dbase(bool with_gpencil);
 void ED_preview_free_dbase();
 
 /**
+ * For preview icons loaded from disk (deferred loading), use the size of the source image, and
+ * only scale to the display size when drawing. Then we actually know the final display size
+ * (so we don't scale twice), and can scale on the GPU while drawing.
+ */
+bool ED_preview_use_image_size(const PreviewImage *preview, eIconSizes size);
+/**
  * Check if \a id is supported by the automatic preview render.
  */
 bool ED_preview_id_is_supported(const ID *id, const char **r_disabled_hint = nullptr);
@@ -88,9 +94,11 @@ World *ED_preview_prepare_world(Main *pr_main,
                                 const World *world,
                                 ID_Type id_type,
                                 ePreviewRenderMethod pr_method);
+World *ED_preview_prepare_world_simple(Main *bmain);
+void ED_preview_world_simple_set_rgb(World *world, const float color[4]);
 
 void ED_preview_shader_job(const bContext *C,
-                           void *owner,
+                           const void *owner,
                            ID *id,
                            ID *parent,
                            MTex *slot,
@@ -107,6 +115,7 @@ void ED_preview_restart_queue_add(ID *id, enum eIconSizes size);
 void ED_preview_restart_queue_work(const bContext *C);
 
 void ED_preview_kill_jobs(wmWindowManager *wm, Main *bmain);
+void ED_preview_kill_jobs_for_id(wmWindowManager *wm, const ID *id);
 
 void ED_preview_draw(
     const bContext *C, void *idp, void *parentp, void *slotp, uiPreview *ui_preview, rcti *rect);

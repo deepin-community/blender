@@ -8,16 +8,15 @@
 
 #include "paint_intern.hh"
 
-#include "BLI_math_vector.hh"
 #include "BLI_vector.hh"
-#include "BLI_virtual_array.hh"
 
 #include "BKE_attribute.hh"
 #include "BKE_crazyspace.hh"
 #include "BKE_curves.hh"
+#include "DNA_brush_types.h"
+#include "DNA_scene_types.h"
 
 #include "ED_curves.hh"
-#include "ED_curves_sculpt.hh"
 
 struct ARegion;
 struct RegionView3D;
@@ -26,7 +25,11 @@ struct View3D;
 struct Object;
 struct Brush;
 struct Scene;
+
+namespace blender::bke {
 struct BVHTreeFromMesh;
+}
+
 struct ReportList;
 
 namespace blender::ed::sculpt_paint {
@@ -42,12 +45,12 @@ struct StrokeExtension {
 };
 
 float brush_radius_factor(const Brush &brush, const StrokeExtension &stroke_extension);
-float brush_radius_get(const Scene &scene,
+float brush_radius_get(const Paint &paint,
                        const Brush &brush,
                        const StrokeExtension &stroke_extension);
 
 float brush_strength_factor(const Brush &brush, const StrokeExtension &stroke_extension);
-float brush_strength_get(const Scene &scene,
+float brush_strength_get(const Paint &paint,
                          const Brush &brush,
                          const StrokeExtension &stroke_extension);
 
@@ -92,6 +95,12 @@ std::optional<CurvesBrush3D> sample_curves_3d_brush(const Depsgraph &depsgraph,
                                                     const float2 &brush_pos_re,
                                                     const float brush_radius_re);
 
+/**
+ * Updates the position of the stroke so that it can be used by the orbit-around-selection
+ * navigation method.
+ */
+void remember_stroke_position(CurvesSculpt &curves_sculpt, const float3 &brush_position_wo);
+
 Vector<float4x4> get_symmetry_brush_transforms(eCurvesSymmetryType symmetry);
 
 bke::SpanAttributeWriter<float> float_selection_ensure(Curves &curves_id);
@@ -117,7 +126,7 @@ void move_last_point_and_resample(MoveAndResampleBuffers &buffer,
 class CurvesSculptCommonContext {
  public:
   const Depsgraph *depsgraph = nullptr;
-  const Scene *scene = nullptr;
+  Scene *scene = nullptr;
   ARegion *region = nullptr;
   const View3D *v3d = nullptr;
   RegionView3D *rv3d = nullptr;
@@ -130,7 +139,7 @@ std::optional<CurvesBrush3D> sample_curves_surface_3d_brush(
     const ARegion &region,
     const View3D &v3d,
     const CurvesSurfaceTransforms &transforms,
-    const BVHTreeFromMesh &surface_bvh,
+    const bke::BVHTreeFromMesh &surface_bvh,
     const float2 &brush_pos_re,
     const float brush_radius_re);
 
@@ -152,13 +161,15 @@ void report_invalid_uv_map(ReportList *reports);
 struct CurvesConstraintSolver {
  private:
   bool use_surface_collision_;
+  float surface_collision_distance_;
   Array<float3> start_positions_;
   Array<float> segment_lengths_;
 
  public:
   void initialize(const bke::CurvesGeometry &curves,
                   const IndexMask &curve_selection,
-                  const bool use_surface_collision);
+                  const bool use_surface_collision,
+                  const float surface_collision_distance);
 
   void solve_step(bke::CurvesGeometry &curves,
                   const IndexMask &curve_selection,

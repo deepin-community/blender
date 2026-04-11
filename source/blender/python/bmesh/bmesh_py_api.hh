@@ -8,4 +8,6 @@
 
 #pragma once
 
-PyObject *BPyInit_bmesh();
+#include <Python.h>
+
+[[nodiscard]] PyObject *BPyInit_bmesh();

@@ -10,10 +10,12 @@
 
 #include "NOD_rna_define.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "RNA_enum_types.hh"
+
+#include "GEO_foreach_geometry.hh"
 
 #include "node_geometry_util.hh"
 
@@ -23,38 +25,52 @@ NODE_STORAGE_FUNCS(NodeGeometrySetCurveHandlePositions)
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Geometry>("Curve").supported_type(GeometryComponent::Type::Curve);
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
+  b.add_default_layout();
+
+  const bNode *node = b.node_or_null();
+
+  b.add_input<decl::Geometry>("Curve")
+      .supported_type(GeometryComponent::Type::Curve)
+      .description("Curves to change the handles on");
+  b.add_output<decl::Geometry>("Curve").propagate_all().align_with_previous();
   b.add_input<decl::Bool>("Selection").default_value(true).hide_value().field_on_all();
-  b.add_input<decl::Vector>("Position")
-      .implicit_field_on_all([](const bNode &node, void *r_value) {
-        const StringRef side = node_storage(node).mode == GEO_NODE_CURVE_HANDLE_LEFT ?
-                                   "handle_left" :
-                                   "handle_right";
-        new (r_value) SocketValueVariant(bke::AttributeFieldInput::Create<float3>(side));
-      });
-  b.add_input<decl::Vector>("Offset").default_value(float3(0.0f, 0.0f, 0.0f)).field_on_all();
-  b.add_output<decl::Geometry>("Curve").propagate_all();
+  auto &position = b.add_input<decl::Vector>("Position");
+  if (node) {
+    const NodeGeometrySetCurveHandlePositions &storage = node_storage(*node);
+    position.implicit_field_on_all(storage.mode == GEO_NODE_CURVE_HANDLE_LEFT ?
+                                       NODE_DEFAULT_INPUT_HANDLE_LEFT_FIELD :
+                                       NODE_DEFAULT_INPUT_HANDLE_RIGHT_FIELD);
+  }
+  b.add_input<decl::Vector>("Offset")
+      .default_value(float3(0.0f, 0.0f, 0.0f))
+      .subtype(PROP_TRANSLATION)
+      .field_on_all();
 }
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "mode", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  layout->prop(ptr, "mode", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometrySetCurveHandlePositions *data = MEM_cnew<NodeGeometrySetCurveHandlePositions>(
+  NodeGeometrySetCurveHandlePositions *data = MEM_callocN<NodeGeometrySetCurveHandlePositions>(
       __func__);
 
   data->mode = GEO_NODE_CURVE_HANDLE_LEFT;
   node->storage = data;
 }
 
-static void update_handle_types_for_movement(int8_t &type, int8_t &other)
+/**
+ * Return true if the handle changes from "Vector" to "Free" which changes Bezier curve topology.
+ */
+static bool update_handle_types_for_movement(int8_t &type, int8_t &other)
 {
   switch (type) {
     case BEZIER_HANDLE_FREE:
-      break;
+      return false;
     case BEZIER_HANDLE_AUTO:
       /* Converting auto handles to aligned handled instead of free handles is
        * arbitrary, but expected and "standard" based on behavior in edit mode. */
@@ -67,10 +83,10 @@ static void update_handle_types_for_movement(int8_t &type, int8_t &other)
         /* If the other handle isn't automatic, just make the handle free. */
         type = BEZIER_HANDLE_FREE;
       }
-      break;
+      return false;
     case BEZIER_HANDLE_VECTOR:
       type = BEZIER_HANDLE_FREE;
-      break;
+      return true;
     case BEZIER_HANDLE_ALIGN:
       /* The handle can stay aligned if the other handle is also aligned (in which case the other
        * handle should be updated to be consistent). But otherwise the handle must be made free to
@@ -78,8 +94,9 @@ static void update_handle_types_for_movement(int8_t &type, int8_t &other)
       if (other != BEZIER_HANDLE_ALIGN) {
         type = BEZIER_HANDLE_FREE;
       }
-      break;
+      return false;
   }
+  return false;
 }
 
 static void set_position_in_component(Curves &curves_id,
@@ -89,7 +106,7 @@ static void set_position_in_component(Curves &curves_id,
                                       const Field<float3> &offset_field)
 {
   bke::CurvesGeometry &curves = curves_id.geometry.wrap();
-  if (curves.points_num() == 0) {
+  if (curves.is_empty()) {
     return;
   }
 
@@ -116,10 +133,21 @@ static void set_position_in_component(Curves &curves_id,
                                                    curves.handle_positions_right_for_write() :
                                                    curves.handle_positions_left_for_write();
 
+  const bool types_changed = threading::parallel_reduce(
+      selection.index_range(),
+      2048,
+      false,
+      [&](const IndexRange range, bool changed) {
+        selection.slice(range).foreach_index_optimized<int>([&](const int i) {
+          if (update_handle_types_for_movement(handle_types[i], handle_types_other[i])) {
+            changed = true;
+          }
+        });
+        return changed;
+      },
+      std::logical_or<>());
+
   selection.foreach_segment(GrainSize(2048), [&](const IndexMaskSegment segment) {
-    for (const int i : segment) {
-      update_handle_types_for_movement(handle_types[i], handle_types_other[i]);
-    }
     for (const int i : segment) {
       bke::curves::bezier::set_handle_position(positions[i],
                                                HandleType(handle_types[i]),
@@ -130,8 +158,10 @@ static void set_position_in_component(Curves &curves_id,
     }
   });
 
+  if (types_changed) {
+    curves.tag_topology_changed();
+  }
   curves.calculate_bezier_auto_handles();
-
   curves.tag_positions_changed();
 }
 
@@ -148,7 +178,7 @@ static void node_geo_exec(GeoNodeExecParams params)
   std::atomic<bool> has_curves = false;
   std::atomic<bool> has_bezier = false;
 
-  geometry_set.modify_geometry_sets([&](GeometrySet &geometry_set) {
+  geometry::foreach_real_geometry(geometry_set, [&](GeometrySet &geometry_set) {
     if (Curves *curves_id = geometry_set.get_curves_for_write()) {
       bke::CurvesGeometry &curves = curves_id->geometry.wrap();
       has_curves = true;
@@ -184,18 +214,21 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(
-      &ntype, GEO_NODE_SET_CURVE_HANDLES, "Set Handle Positions", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeSetCurveHandlePositions", GEO_NODE_SET_CURVE_HANDLES);
+  ntype.ui_name = "Set Handle Positions";
+  ntype.ui_description = "Set the positions for the handles of Bézier curves";
+  ntype.enum_name_legacy = "SET_CURVE_HANDLES";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
   ntype.minwidth = 100.0f;
   ntype.initfunc = node_init;
-  blender::bke::node_type_storage(&ntype,
+  blender::bke::node_type_storage(ntype,
                                   "NodeGeometrySetCurveHandlePositions",
                                   node_free_standard_storage,
                                   node_copy_standard_storage);
   ntype.draw_buttons = node_layout;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

@@ -12,14 +12,26 @@
 
 namespace blender::nodes {
 
-struct CaptureAttributeItemsAccessor {
+struct CaptureAttributeItemsAccessor : public socket_items::SocketItemsAccessorDefaults {
   using ItemT = NodeGeometryAttributeCaptureItem;
   static StructRNA *item_srna;
   static int node_type;
-  static constexpr const char *node_idname = "GeometryNodeCaptureAttribute";
+  static constexpr StringRefNull node_idname = "GeometryNodeCaptureAttribute";
   static constexpr bool has_type = true;
   static constexpr bool has_name = true;
   static constexpr bool has_single_identifier_str = false;
+  struct operator_idnames {
+    static constexpr StringRefNull add_item = "NODE_OT_capture_attribute_item_add";
+    static constexpr StringRefNull remove_item = "NODE_OT_capture_attribute_item_remove";
+    static constexpr StringRefNull move_item = "NODE_OT_capture_attribute_item_move";
+  };
+  struct ui_idnames {
+    static constexpr StringRefNull list = "NODE_UL_capture_items_list";
+  };
+  struct rna_names {
+    static constexpr StringRefNull items = "capture_items";
+    static constexpr StringRefNull active_index = "active_index";
+  };
 
   static socket_items::SocketItemsRef<NodeGeometryAttributeCaptureItem> get_items_from_node(
       bNode &node)
@@ -40,8 +52,8 @@ struct CaptureAttributeItemsAccessor {
     MEM_SAFE_FREE(item->name);
   }
 
-  static void blend_write(BlendWriter *writer, const bNode &node);
-  static void blend_read_data(BlendDataReader *reader, bNode &node);
+  static void blend_write_item(BlendWriter *writer, const ItemT &item);
+  static void blend_read_data_item(BlendDataReader *reader, ItemT &item);
 
   static eNodeSocketDatatype get_socket_type(const NodeGeometryAttributeCaptureItem &item)
   {
@@ -53,7 +65,7 @@ struct CaptureAttributeItemsAccessor {
     return &item.name;
   }
 
-  static bool supports_socket_type(const eNodeSocketDatatype socket_type)
+  static bool supports_socket_type(const eNodeSocketDatatype socket_type, const int /*ntree_type*/)
   {
     return bke::socket_type_to_custom_data_type(socket_type).has_value() &&
            socket_type != SOCK_STRING;

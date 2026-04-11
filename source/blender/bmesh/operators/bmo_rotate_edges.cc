@@ -8,6 +8,8 @@
  * Rotate edges topology that share two faces.
  */
 
+#include <cfloat>
+
 #include "MEM_guardedalloc.h"
 
 #include "BLI_heap.h"
@@ -55,7 +57,7 @@ static float bm_edge_calc_rotate_cost(const BMEdge *e)
 /**
  * Check if this edge is a boundary: Are more than one of the connected faces edges rotating too?
  */
-static float bm_edge_rotate_is_boundary(const BMEdge *e)
+static bool bm_edge_rotate_is_boundary(const BMEdge *e)
 {
   /* Number of adjacent shared faces. */
   int count = 0;
@@ -202,7 +204,7 @@ static void bm_rotate_edges_shared(
               const int e_iter_index = BM_elem_index_get(e_iter);
               if ((e_iter_index != -1) && (eheap_table[e_iter_index] == nullptr)) {
                 /* Once freed, they cannot be accessed via connected geometry. */
-                BLI_assert((eheap_table[e_iter_index] != edge_free_id));
+                BLI_assert(eheap_table[e_iter_index] != edge_free_id);
                 if (BM_edge_rotate_check(e_iter)) {
                   /* Previously degenerate, now valid. */
                   float cost = bm_edge_calc_rotate_cost(e_iter);

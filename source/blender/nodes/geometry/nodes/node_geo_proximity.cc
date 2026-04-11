@@ -2,7 +2,6 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_math_vector.h"
 #include "BLI_task.hh"
 
 #include "BKE_bvhutils.hh"
@@ -13,7 +12,7 @@
 
 #include "NOD_rna_define.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "node_geometry_util.hh"
@@ -26,7 +25,8 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.add_input<decl::Geometry>("Geometry", "Target")
       .only_realized_data()
-      .supported_type({GeometryComponent::Type::Mesh, GeometryComponent::Type::PointCloud});
+      .supported_type({GeometryComponent::Type::Mesh, GeometryComponent::Type::PointCloud})
+      .description("Geometry to find the closest point on");
   b.add_input<decl::Int>("Group ID")
       .hide_value()
       .field_on_all()
@@ -34,8 +34,11 @@ static void node_declare(NodeDeclarationBuilder &b)
           "Splits the elements of the input geometry into groups which can be sampled "
           "individually");
   b.add_input<decl::Vector>("Sample Position", "Source Position")
-      .implicit_field(implicit_field_inputs::position);
-  b.add_input<decl::Int>("Sample Group ID").hide_value().supports_field();
+      .implicit_field(NODE_DEFAULT_INPUT_POSITION_FIELD);
+  b.add_input<decl::Int>("Sample Group ID")
+      .hide_value()
+      .supports_field()
+      .structure_type(StructureType::Dynamic);
   b.add_output<decl::Vector>("Position").dependent_field({2, 3}).reference_pass_all();
   b.add_output<decl::Float>("Distance").dependent_field({2, 3}).reference_pass_all();
   b.add_output<decl::Bool>("Is Valid")
@@ -46,12 +49,12 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "target_element", UI_ITEM_NONE, "", ICON_NONE);
+  layout->prop(ptr, "target_element", UI_ITEM_NONE, "", ICON_NONE);
 }
 
 static void geo_proximity_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryProximity *node_storage = MEM_cnew<NodeGeometryProximity>(__func__);
+  NodeGeometryProximity *node_storage = MEM_callocN<NodeGeometryProximity>(__func__);
   node_storage->target_element = GEO_NODE_PROX_TARGET_FACES;
   node->storage = node_storage;
 }
@@ -59,8 +62,8 @@ static void geo_proximity_init(bNodeTree * /*tree*/, bNode *node)
 class ProximityFunction : public mf::MultiFunction {
  private:
   struct BVHTrees {
-    BVHTreeFromMesh mesh_bvh = {};
-    BVHTreeFromPointCloud pointcloud_bvh = {};
+    bke::BVHTreeFromMesh mesh_bvh = {};
+    bke::BVHTreeFromPointCloud pointcloud_bvh = {};
   };
 
   GeometrySet target_;
@@ -96,17 +99,7 @@ class ProximityFunction : public mf::MultiFunction {
     }
   }
 
-  ~ProximityFunction()
-  {
-    for (BVHTrees &trees : bvh_trees_) {
-      if (trees.mesh_bvh.tree) {
-        free_bvhtree_from_mesh(&trees.mesh_bvh);
-      }
-      if (trees.pointcloud_bvh.tree) {
-        free_bvhtree_from_pointcloud(&trees.pointcloud_bvh);
-      }
-    }
-  }
+  ~ProximityFunction() override = default;
 
   void init_for_pointcloud(const PointCloud &pointcloud, const Field<int> &group_id_field)
   {
@@ -132,8 +125,8 @@ class ProximityFunction : public mf::MultiFunction {
             if (group_mask.is_empty()) {
               continue;
             }
-            BVHTreeFromPointCloud &bvh = bvh_trees_[group_i].pointcloud_bvh;
-            BKE_bvhtree_from_pointcloud_get(pointcloud, group_mask, bvh);
+            bvh_trees_[group_i].pointcloud_bvh = bke::bvhtree_from_pointcloud_get(pointcloud,
+                                                                                  group_mask);
           }
         },
         threading::individual_task_sizes(
@@ -166,20 +159,16 @@ class ProximityFunction : public mf::MultiFunction {
             if (group_mask.is_empty()) {
               continue;
             }
-            BVHTreeFromMesh &bvh = bvh_trees_[group_i].mesh_bvh;
             switch (type_) {
-              case GEO_NODE_PROX_TARGET_POINTS: {
-                BKE_bvhtree_from_mesh_verts_init(mesh, group_mask, bvh);
+              case GEO_NODE_PROX_TARGET_POINTS:
+                bvh_trees_[group_i].mesh_bvh = bke::bvhtree_from_mesh_verts_init(mesh, group_mask);
                 break;
-              }
-              case GEO_NODE_PROX_TARGET_EDGES: {
-                BKE_bvhtree_from_mesh_edges_init(mesh, group_mask, bvh);
+              case GEO_NODE_PROX_TARGET_EDGES:
+                bvh_trees_[group_i].mesh_bvh = bke::bvhtree_from_mesh_edges_init(mesh, group_mask);
                 break;
-              }
-              case GEO_NODE_PROX_TARGET_FACES: {
-                BKE_bvhtree_from_mesh_tris_init(mesh, group_mask, bvh);
+              case GEO_NODE_PROX_TARGET_FACES:
+                bvh_trees_[group_i].mesh_bvh = bke::bvhtree_from_mesh_tris_init(mesh, group_mask);
                 break;
-              }
             }
           }
         },
@@ -240,14 +229,14 @@ class ProximityFunction : public mf::MultiFunction {
                                  sample_position,
                                  &nearest,
                                  trees.mesh_bvh.nearest_callback,
-                                 const_cast<BVHTreeFromMesh *>(&trees.mesh_bvh));
+                                 const_cast<bke::BVHTreeFromMesh *>(&trees.mesh_bvh));
       }
       if (trees.pointcloud_bvh.tree != nullptr) {
         BLI_bvhtree_find_nearest(trees.pointcloud_bvh.tree,
                                  sample_position,
                                  &nearest,
                                  trees.pointcloud_bvh.nearest_callback,
-                                 const_cast<BVHTreeFromPointCloud *>(&trees.pointcloud_bvh));
+                                 const_cast<bke::BVHTreeFromPointCloud *>(&trees.pointcloud_bvh));
       }
 
       if (!positions.is_empty()) {
@@ -260,6 +249,13 @@ class ProximityFunction : public mf::MultiFunction {
         distances[i] = std::sqrt(nearest.dist_sq);
       }
     });
+  }
+
+  ExecutionHints get_execution_hints() const override
+  {
+    ExecutionHints hints;
+    hints.min_grain_size = 512;
+    return hints;
   }
 };
 
@@ -274,18 +270,32 @@ static void node_geo_exec(GeoNodeExecParams params)
   }
 
   const NodeGeometryProximity &storage = node_storage(params.node());
+  const auto target_type = GeometryNodeProximityTargetType(storage.target_element);
+
   Field<int> group_id_field = params.extract_input<Field<int>>("Group ID");
-  Field<float3> position_field = params.extract_input<Field<float3>>("Source Position");
-  Field<int> sample_id_field = params.extract_input<Field<int>>("Sample Group ID");
+  auto sample_position = params.extract_input<bke::SocketValueVariant>("Source Position");
+  auto sample_group_id = params.extract_input<bke::SocketValueVariant>("Sample Group ID");
 
-  auto proximity_fn = std::make_unique<ProximityFunction>(
-      std::move(target), GeometryNodeProximityTargetType(storage.target_element), group_id_field);
-  auto proximity_op = FieldOperation::Create(
-      std::move(proximity_fn), {std::move(position_field), std::move(sample_id_field)});
+  std::string error_message;
+  bke::SocketValueVariant position;
+  bke::SocketValueVariant distance;
+  bke::SocketValueVariant is_valid;
+  if (!execute_multi_function_on_value_variant(
+          std::make_shared<ProximityFunction>(
+              std::move(target), target_type, std::move(group_id_field)),
+          {&sample_position, &sample_group_id},
+          {&position, &distance, &is_valid},
+          params.user_data(),
+          error_message))
+  {
+    params.set_default_remaining_outputs();
+    params.error_message_add(NodeWarningType::Error, std::move(error_message));
+    return;
+  }
 
-  params.set_output("Position", Field<float3>(proximity_op, 0));
-  params.set_output("Distance", Field<float>(proximity_op, 1));
-  params.set_output("Is Valid", Field<bool>(proximity_op, 2));
+  params.set_output("Position", std::move(position));
+  params.set_output("Distance", std::move(distance));
+  params.set_output("Is Valid", std::move(is_valid));
 }
 
 static void node_rna(StructRNA *srna)
@@ -322,14 +332,18 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_PROXIMITY, "Geometry Proximity", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeProximity", GEO_NODE_PROXIMITY);
+  ntype.ui_name = "Geometry Proximity";
+  ntype.ui_description = "Compute the closest location on the target geometry";
+  ntype.enum_name_legacy = "PROXIMITY";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.initfunc = geo_proximity_init;
   blender::bke::node_type_storage(
-      &ntype, "NodeGeometryProximity", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeGeometryProximity", node_free_standard_storage, node_copy_standard_storage);
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

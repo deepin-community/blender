@@ -7,6 +7,8 @@
 #include "util/log.h"
 #include "util/string.h"
 
+#include <sstream>
+
 #include <epoxy/gl.h>
 
 CCL_NAMESPACE_BEGIN
@@ -48,8 +50,8 @@ static const char *FRAGMENT_SHADER =
 
 static void shader_print_errors(const char *task, const char *log, const char *code)
 {
-  LOG(ERROR) << "Shader: " << task << " error:";
-  LOG(ERROR) << "===== shader string ====";
+  LOG_ERROR << "Shader: " << task << " error:";
+  LOG_ERROR << "===== shader string ====";
 
   std::stringstream stream(code);
   string partial;
@@ -57,17 +59,17 @@ static void shader_print_errors(const char *task, const char *log, const char *c
   int line = 1;
   while (getline(stream, partial, '\n')) {
     if (line < 10) {
-      LOG(ERROR) << " " << line << " " << partial;
+      LOG_ERROR << " " << line << " " << partial;
     }
     else {
-      LOG(ERROR) << line << " " << partial;
+      LOG_ERROR << line << " " << partial;
     }
     line++;
   }
-  LOG(ERROR) << log;
+  LOG_ERROR << log;
 }
 
-static int compile_shader_program(void)
+static int compile_shader_program()
 {
   const struct Shader {
     const char *source;
@@ -79,10 +81,10 @@ static int compile_shader_program(void)
   for (int i = 0; i < 2; i++) {
     const GLuint shader = glCreateShader(shaders[i].type);
 
-    string source_str = shaders[i].source;
+    const string source_str = shaders[i].source;
     const char *c_str = source_str.c_str();
 
-    glShaderSource(shader, 1, &c_str, NULL);
+    glShaderSource(shader, 1, &c_str, nullptr);
     glCompileShader(shader);
 
     GLint compile_status;
@@ -137,7 +139,7 @@ int OpenGLShader::get_tex_coord_attrib_location()
   return tex_coord_attribute_location_;
 }
 
-void OpenGLShader::bind(int width, int height)
+void OpenGLShader::bind(const int width, const int height)
 {
   create_shader_if_needed();
 
@@ -174,14 +176,14 @@ void OpenGLShader::create_shader_if_needed()
 
   image_texture_location_ = glGetUniformLocation(shader_program_, "image_texture");
   if (image_texture_location_ < 0) {
-    LOG(ERROR) << "Shader doesn't contain the 'image_texture' uniform.";
+    LOG_ERROR << "Shader doesn't contain the 'image_texture' uniform.";
     destroy_shader();
     return;
   }
 
   fullscreen_location_ = glGetUniformLocation(shader_program_, "fullscreen");
   if (fullscreen_location_ < 0) {
-    LOG(ERROR) << "Shader doesn't contain the 'fullscreen' uniform.";
+    LOG_ERROR << "Shader doesn't contain the 'fullscreen' uniform.";
     destroy_shader();
     return;
   }

@@ -5,21 +5,15 @@
 set(INC
   .
   ../common
-  ../../blenkernel
-  ../../blenloader
-  ../../bmesh
   ../../editors/include
-  ../../functions
-  ../../geometry
   ../../makesdna
   ../../makesrna
-  ../../windowmanager
   ../../../../intern/guardedalloc
   ../../../../intern/utfconv
-  ../../../../extern/fmtlib/include
 )
 
 set(INC_SYS
+  ../../../../extern/fmtlib/include
 )
 
 set(SRC
@@ -31,13 +25,18 @@ set(SRC
 )
 
 set(LIB
-  bf_blenkernel
+  PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
+  PRIVATE bf::blenloader
+  PRIVATE bf::bmesh
   PRIVATE bf::depsgraph
   PRIVATE bf::dna
   PRIVATE bf::extern::nanosvg
+  PRIVATE bf::functions
+  PRIVATE bf::geometry
   PRIVATE bf::intern::clog
   PRIVATE bf::intern::guardedalloc
+  PRIVATE bf::windowmanager
   PRIVATE extern_fmtlib
   bf_io_common
 )
@@ -63,20 +62,10 @@ if(WITH_HARU)
     ${HARU_INCLUDE_DIRS}
   )
   list(APPEND LIB
-    ${HARU_LIBRARIES}
-
-    # Haru needs `TIFFFaxBlackCodes` & `TIFFFaxWhiteCodes` symbols from TIFF.
-    # Can be removed with Haru 2.4.0. They should be shipping with their own
-    # Fax codes defined by default from that version onward.
-    ${TIFF_LIBRARY}
+    PRIVATE ${HARU_LIBRARIES}
+    PRIVATE ${TIFF_LIBRARY} # needed for TIFFFaxBlackCodes in older (<5.0) lib folders
   )
   add_definitions(-DWITH_HARU)
-endif()
-
-if(WITH_BOOST)
-  list(APPEND LIB
-    ${BOOST_LIBRARIES}
-  )
 endif()
 
 blender_add_lib(bf_io_grease_pencil "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")

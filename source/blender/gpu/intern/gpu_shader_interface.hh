@@ -16,11 +16,13 @@
 #include <cstring> /* required for STREQ later on. */
 
 #include "BLI_hash.h"
-#include "BLI_utildefines.h"
+#include "BLI_sys_types.h"
 
+#include "GPU_format.hh"
 #include "GPU_shader.hh"
 #include "GPU_vertex_format.hh" /* GPU_VERT_ATTR_MAX_LEN */
 #include "gpu_shader_create_info.hh"
+#include "gpu_texture_private.hh"
 
 namespace blender::gpu {
 
@@ -77,73 +79,77 @@ class ShaderInterface {
    */
   uint8_t attr_types_[GPU_VERT_ATTR_MAX_LEN];
 
- public:
+  /* Formats of all image units. */
+  std::array<TextureWriteFormat, GPU_MAX_IMAGE> image_formats_;
+
   ShaderInterface();
   virtual ~ShaderInterface();
 
   void debug_print() const;
 
-  inline const ShaderInput *attr_get(const char *name) const
+  const ShaderInput *attr_get(const StringRefNull name) const
   {
     return input_lookup(inputs_, attr_len_, name);
   }
-  inline const ShaderInput *attr_get(const int binding) const
+  const ShaderInput *attr_get(const int binding) const
   {
     return input_lookup(inputs_, attr_len_, binding);
   }
 
-  inline const ShaderInput *ubo_get(const char *name) const
+  const ShaderInput *ubo_get(const StringRefNull name) const
   {
     return input_lookup(inputs_ + attr_len_, ubo_len_, name);
   }
-  inline const ShaderInput *ubo_get(const int binding) const
+  const ShaderInput *ubo_get(const int binding) const
   {
     return input_lookup(inputs_ + attr_len_, ubo_len_, binding);
   }
 
-  inline const ShaderInput *uniform_get(const char *name) const
+  const ShaderInput *uniform_get(const StringRefNull name) const
   {
     return input_lookup(inputs_ + attr_len_ + ubo_len_, uniform_len_, name);
   }
 
-  inline const ShaderInput *texture_get(const int binding) const
+  const ShaderInput *texture_get(const int binding) const
   {
     return input_lookup(inputs_ + attr_len_ + ubo_len_, uniform_len_, binding);
   }
 
-  inline const ShaderInput *ssbo_get(const char *name) const
+  const ShaderInput *ssbo_get(const StringRefNull name) const
   {
     return input_lookup(inputs_ + attr_len_ + ubo_len_ + uniform_len_, ssbo_len_, name);
   }
-  inline const ShaderInput *ssbo_get(const int binding) const
+  const ShaderInput *ssbo_get(const int binding) const
   {
     return input_lookup(inputs_ + attr_len_ + ubo_len_ + uniform_len_, ssbo_len_, binding);
   }
 
-  inline const ShaderInput *constant_get(const char *name) const
+  const ShaderInput *constant_get(const StringRefNull name) const
   {
     return input_lookup(
         inputs_ + attr_len_ + ubo_len_ + uniform_len_ + ssbo_len_, constant_len_, name);
   }
 
-  inline const char *input_name_get(const ShaderInput *input) const
+  const char *input_name_get(const ShaderInput *input) const
   {
     return name_buffer_ + input->name_offset;
   }
 
   /* Returns uniform location. */
-  inline int32_t uniform_builtin(const GPUUniformBuiltin builtin) const
+  int32_t uniform_builtin(const GPUUniformBuiltin builtin) const
   {
     BLI_assert(builtin >= 0 && builtin < GPU_NUM_UNIFORMS);
     return builtins_[builtin];
   }
 
   /* Returns binding position. */
-  inline int32_t ubo_builtin(const GPUUniformBlockBuiltin builtin) const
+  int32_t ubo_builtin(const GPUUniformBlockBuiltin builtin) const
   {
     BLI_assert(builtin >= 0 && builtin < GPU_NUM_UNIFORM_BLOCKS);
     return builtin_blocks_[builtin];
   }
+
+  inline uint valid_bindings_get(const ShaderInput *const inputs, const uint inputs_len) const;
 
  protected:
   static inline const char *builtin_uniform_name(GPUUniformBuiltin u);
@@ -160,10 +166,12 @@ class ShaderInterface {
    */
   void sort_inputs();
 
+  void set_image_formats_from_info(const shader::ShaderCreateInfo &info);
+
  private:
   inline const ShaderInput *input_lookup(const ShaderInput *const inputs,
                                          uint inputs_len,
-                                         const char *name) const;
+                                         StringRefNull name) const;
 
   inline const ShaderInput *input_lookup(const ShaderInput *const inputs,
                                          uint inputs_len,
@@ -199,8 +207,6 @@ inline const char *ShaderInterface::builtin_uniform_name(GPUUniformBuiltin u)
 
     case GPU_UNIFORM_NORMAL:
       return "NormalMatrix";
-    case GPU_UNIFORM_ORCO:
-      return "OrcoTexCoFactors";
     case GPU_UNIFORM_CLIPPLANES:
       return "WorldClipPlanes";
 
@@ -214,6 +220,8 @@ inline const char *ShaderInterface::builtin_uniform_name(GPUUniformBuiltin u)
       return "drw_ResourceID";
     case GPU_UNIFORM_SRGB_TRANSFORM:
       return "srgbTarget";
+    case GPU_UNIFORM_SCENE_LINEAR_XFORM:
+      return "gpu_scene_linear_to_rec709";
 
     default:
       return nullptr;
@@ -276,16 +284,16 @@ inline void ShaderInterface::copy_input_name(ShaderInput *input,
 
 inline const ShaderInput *ShaderInterface::input_lookup(const ShaderInput *const inputs,
                                                         const uint inputs_len,
-                                                        const char *name) const
+                                                        const StringRefNull name) const
 {
-  const uint name_hash = BLI_hash_string(name);
+  const uint name_hash = BLI_hash_string(name.c_str());
   /* Simple linear search for now. */
   for (int i = inputs_len - 1; i >= 0; i--) {
     if (inputs[i].name_hash == name_hash) {
       if ((i > 0) && UNLIKELY(inputs[i - 1].name_hash == name_hash)) {
         /* Hash collision resolve. */
         for (; i >= 0 && inputs[i].name_hash == name_hash; i--) {
-          if (STREQ(name, name_buffer_ + inputs[i].name_offset)) {
+          if (name == (name_buffer_ + inputs[i].name_offset)) {
             return inputs + i; /* not found */
           }
         }
@@ -295,7 +303,7 @@ inline const ShaderInput *ShaderInterface::input_lookup(const ShaderInput *const
       /* This is a bit dangerous since we could have a hash collision.
        * where the asked uniform that does not exist has the same hash
        * as a real uniform. */
-      BLI_assert(STREQ(name, name_buffer_ + inputs[i].name_offset));
+      BLI_assert(name == (name_buffer_ + inputs[i].name_offset));
       return inputs + i;
     }
   }
@@ -313,6 +321,19 @@ inline const ShaderInput *ShaderInterface::input_lookup(const ShaderInput *const
     }
   }
   return nullptr; /* not found */
+}
+
+inline uint ShaderInterface::valid_bindings_get(const ShaderInput *const inputs,
+                                                const uint inputs_len) const
+{
+  /* Simple linear search for now. */
+  int valid_bindings = 0;
+  for (int i = inputs_len - 1; i >= 0; i--) {
+    if (inputs[i].binding > -1) {
+      valid_bindings++;
+    }
+  }
+  return valid_bindings;
 }
 
 }  // namespace blender::gpu

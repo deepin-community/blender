@@ -23,6 +23,8 @@
  *    of IDs in a given Main data-base.
  */
 
+#include "BLI_map.hh"
+
 #include <optional>
 
 struct BlendFileReadReport;
@@ -39,6 +41,12 @@ struct PropertyRNA;
 struct ReportList;
 struct Scene;
 struct ViewLayer;
+
+namespace blender::bke::liboverride {
+
+bool is_auto_resync_enabled();
+
+}  // namespace blender::bke::liboverride
 
 /**
  * Initialize empty overriding of \a reference_id by \a local_id.
@@ -268,13 +276,18 @@ bool BKE_lib_override_library_resync(Main *bmain,
  * Then it will handle the resync of necessary IDs (through calls to
  * #BKE_lib_override_library_resync).
  *
+ * \param new_to_old_libraries_map: If not null, a mapping between new and old libraries. Only
+ * useful when they are not the same, e.g. when relocating a library or ID.
+ *
  * \param view_layer: the active view layer to search instantiated collections in, can be NULL (in
- *                    which case \a scene's master collection children hierarchy is used instead).
+ * which case \a scene's master collection children hierarchy is used instead).
  */
-void BKE_lib_override_library_main_resync(Main *bmain,
-                                          Scene *scene,
-                                          ViewLayer *view_layer,
-                                          BlendFileReadReport *reports);
+void BKE_lib_override_library_main_resync(
+    Main *bmain,
+    const blender::Map<Library *, Library *> *new_to_old_libraries_map,
+    Scene *scene,
+    ViewLayer *view_layer,
+    BlendFileReadReport *reports);
 
 /**
  * Advanced 'smart' function to delete library overrides (including their existing override
@@ -543,30 +556,3 @@ bool BKE_lib_override_library_id_is_user_deletable(Main *bmain, ID *id);
  * Debugging helper to show content of given liboverride data.
  */
 void BKE_lib_override_debug_print(IDOverrideLibrary *liboverride, const char *intro_txt);
-
-/* Storage (.blend file writing) part. */
-
-/* For now, we just use a temp main list. */
-using OverrideLibraryStorage = Main;
-
-/**
- * Initialize an override storage.
- */
-OverrideLibraryStorage *BKE_lib_override_library_operations_store_init();
-/**
- * Generate suitable 'write' data (this only affects differential override operations).
- *
- * Note that \a local ID is no more modified by this call,
- * all extra data are stored in its temp \a storage_id copy.
- */
-ID *BKE_lib_override_library_operations_store_start(Main *bmain,
-                                                    OverrideLibraryStorage *liboverride_storage,
-                                                    ID *local);
-/**
- * Restore given ID modified by #BKE_lib_override_library_operations_store_start, to its
- * original state.
- */
-void BKE_lib_override_library_operations_store_end(OverrideLibraryStorage *liboverride_storage,
-                                                   ID *local);
-void BKE_lib_override_library_operations_store_finalize(
-    OverrideLibraryStorage *liboverride_storage);

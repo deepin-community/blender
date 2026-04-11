@@ -2,25 +2,46 @@
  *
  * SPDX-License-Identifier: Apache-2.0 */
 
-#ifndef __BLENDER_UTIL_H__
-#define __BLENDER_UTIL_H__
+#pragma once
+
+#include "RNA_access.hh"
+#include "RNA_blender_cpp.hh"
 
 #include "scene/mesh.h"
 #include "scene/scene.h"
 
 #include "util/algorithm.h"
 #include "util/array.h"
-#include "util/map.h"
 #include "util/path.h"
 #include "util/set.h"
 #include "util/transform.h"
 #include "util/types.h"
-#include "util/vector.h"
 
+#include "DNA_mesh_types.h"
+#include "DNA_object_types.h"
+#include "DNA_view3d_types.h"
+
+#include "BKE_global.hh"
 #include "BKE_image.hh"
-#include "BKE_mesh.hh"
+#include "BKE_lib_id.hh"
+#include "BKE_mesh.h"
+#include "BKE_mesh_types.hh"
+#include "BKE_mesh_wrapper.hh"
 
 CCL_NAMESPACE_BEGIN
+
+static inline BL::ID object_get_data(const BL::Object &b_ob, const bool use_adaptive_subdivision)
+{
+  ::Object *object = reinterpret_cast<::Object *>(b_ob.ptr.data);
+
+  if (!use_adaptive_subdivision && object->type == OB_MESH) {
+    ::Mesh *mesh = static_cast<::Mesh *>(object->data);
+    mesh = BKE_mesh_wrapper_ensure_subdivision(mesh);
+    return BL::ID(RNA_id_pointer_create(&mesh->id));
+  }
+
+  return BL::ID(RNA_id_pointer_create(reinterpret_cast<ID *>(object->data)));
+}
 
 struct BObjectInfo {
   /* Object directly provided by the depsgraph iterator. This object is only valid during one
@@ -33,52 +54,44 @@ struct BObjectInfo {
   BL::Object real_object;
 
   /* The object-data referenced by the iter object. This is still valid after the depsgraph
-   * iterator is done. It might have a different type compared to real_object.data(). */
+   * iterator is done. It might have a different type compared to object_get_data(real_object). */
   BL::ID object_data;
+
+  /* Object will use adaptive subdivision. */
+  bool use_adaptive_subdivision;
 
   /* True when the current geometry is the data of the referenced object. False when it is a
    * geometry instance that does not have a 1-to-1 relationship with an object. */
   bool is_real_object_data() const
   {
-    return const_cast<BL::Object &>(real_object).data() == object_data;
+    return object_get_data(const_cast<BL::Object &>(real_object), use_adaptive_subdivision) ==
+           object_data;
   }
 };
 
-typedef BL::ShaderNodeAttribute::attribute_type_enum BlenderAttributeType;
+static inline BL::Mesh object_copy_mesh_data(const BObjectInfo &b_ob_info)
+{
+  ::Object *object = static_cast<::Object *>(b_ob_info.real_object.ptr.data);
+  ::Mesh *mesh = BKE_mesh_new_from_object(
+      nullptr, object, false, false, !b_ob_info.use_adaptive_subdivision);
+  return BL::Mesh(RNA_id_pointer_create(&mesh->id));
+}
+
+using BlenderAttributeType = BL::ShaderNodeAttribute::attribute_type_enum;
 BlenderAttributeType blender_attribute_name_split_type(ustring name, string *r_real_name);
 
 void python_thread_state_save(void **python_thread_state);
 void python_thread_state_restore(void **python_thread_state);
 
-static bool mesh_use_corner_normals(BL::Mesh &mesh, Mesh::SubdivisionType subdivision_type)
+static bool mesh_use_corner_normals(const BObjectInfo &b_ob_info, BL::Mesh &mesh)
 {
-  return mesh && (subdivision_type == Mesh::SUBDIVISION_NONE) &&
+  return mesh && !b_ob_info.use_adaptive_subdivision &&
          (static_cast<const ::Mesh *>(mesh.ptr.data)->normals_domain(true) ==
           blender::bke::MeshNormalDomain::Corner);
 }
 
-static inline BL::Mesh object_to_mesh(BL::BlendData & /*data*/,
-                                      BObjectInfo &b_ob_info,
-                                      BL::Depsgraph & /*depsgraph*/,
-                                      bool /*calc_undeformed*/,
-                                      Mesh::SubdivisionType subdivision_type)
+static inline BL::Mesh object_to_mesh(BObjectInfo &b_ob_info)
 {
-  /* TODO: make this work with copy-on-evaluation, modifiers are already evaluated. */
-#if 0
-  bool subsurf_mod_show_render = false;
-  bool subsurf_mod_show_viewport = false;
-
-  if (subdivision_type != Mesh::SUBDIVISION_NONE) {
-    BL::Modifier subsurf_mod = object.modifiers[object.modifiers.length() - 1];
-
-    subsurf_mod_show_render = subsurf_mod.show_render();
-    subsurf_mod_show_viewport = subsurf_mod.show_viewport();
-
-    subsurf_mod.show_render(false);
-    subsurf_mod.show_viewport(false);
-  }
-#endif
-
   BL::Mesh mesh = (b_ob_info.object_data.is_a(&RNA_Mesh)) ? BL::Mesh(b_ob_info.object_data) :
                                                             BL::Mesh(PointerRNA_NULL);
 
@@ -88,43 +101,31 @@ static inline BL::Mesh object_to_mesh(BL::BlendData & /*data*/,
     if (mesh) {
       if (mesh.is_editmode()) {
         /* Flush edit-mesh to mesh, including all data layers. */
-        BL::Depsgraph depsgraph(PointerRNA_NULL);
-        mesh = b_ob_info.real_object.to_mesh(false, depsgraph);
-        use_corner_normals = mesh_use_corner_normals(mesh, subdivision_type);
+        mesh = object_copy_mesh_data(b_ob_info);
+        use_corner_normals = mesh_use_corner_normals(b_ob_info, mesh);
       }
-      else if (mesh_use_corner_normals(mesh, subdivision_type)) {
+      else if (mesh_use_corner_normals(b_ob_info, mesh)) {
         /* Make a copy to split faces. */
-        BL::Depsgraph depsgraph(PointerRNA_NULL);
-        mesh = b_ob_info.real_object.to_mesh(false, depsgraph);
+        mesh = object_copy_mesh_data(b_ob_info);
         use_corner_normals = true;
       }
     }
     else {
-      BL::Depsgraph depsgraph(PointerRNA_NULL);
-      mesh = b_ob_info.real_object.to_mesh(false, depsgraph);
-      use_corner_normals = mesh_use_corner_normals(mesh, subdivision_type);
+      mesh = object_copy_mesh_data(b_ob_info);
+      use_corner_normals = mesh_use_corner_normals(b_ob_info, mesh);
     }
   }
   else {
     /* TODO: what to do about non-mesh geometry instances? */
-    use_corner_normals = mesh_use_corner_normals(mesh, subdivision_type);
+    use_corner_normals = mesh_use_corner_normals(b_ob_info, mesh);
   }
-
-#if 0
-  if (subdivision_type != Mesh::SUBDIVISION_NONE) {
-    BL::Modifier subsurf_mod = object.modifiers[object.modifiers.length() - 1];
-
-    subsurf_mod.show_render(subsurf_mod_show_render);
-    subsurf_mod.show_viewport(subsurf_mod_show_viewport);
-  }
-#endif
 
   if (mesh) {
     if (use_corner_normals) {
       mesh.split_faces();
     }
 
-    if (subdivision_type == Mesh::SUBDIVISION_NONE) {
+    if (b_ob_info.use_adaptive_subdivision) {
       mesh.calc_loop_triangles();
     }
   }
@@ -132,24 +133,22 @@ static inline BL::Mesh object_to_mesh(BL::BlendData & /*data*/,
   return mesh;
 }
 
-static inline void free_object_to_mesh(BL::BlendData & /*data*/,
-                                       BObjectInfo &b_ob_info,
-                                       BL::Mesh &mesh)
+static inline void free_object_to_mesh(BObjectInfo &b_ob_info, BL::Mesh &mesh)
 {
   if (!b_ob_info.is_real_object_data()) {
     return;
   }
   /* Free mesh if we didn't just use the existing one. */
   BL::Object object = b_ob_info.real_object;
-  if (object.data().ptr.data != mesh.ptr.data) {
-    object.to_mesh_clear();
+  if (object_get_data(object, b_ob_info.use_adaptive_subdivision).ptr.data != mesh.ptr.data) {
+    BKE_id_free(nullptr, static_cast<ID *>(mesh.ptr.data));
   }
 }
 
 static inline void colorramp_to_array(BL::ColorRamp &ramp,
                                       array<float3> &ramp_color,
                                       array<float> &ramp_alpha,
-                                      int size)
+                                      const int size)
 {
   const int full_size = size + 1;
   ramp_color.resize(full_size);
@@ -171,7 +170,7 @@ static inline void curvemap_minmax_curve(/*const*/ BL::CurveMap &curve, float *m
 }
 
 static inline void curvemapping_minmax(/*const*/ BL::CurveMapping &cumap,
-                                       int num_curves,
+                                       const int num_curves,
                                        float *min_x,
                                        float *max_x)
 {
@@ -184,23 +183,26 @@ static inline void curvemapping_minmax(/*const*/ BL::CurveMapping &cumap,
   }
 }
 
-static inline void curvemapping_to_array(BL::CurveMapping &cumap, array<float> &data, int size)
+static inline void curvemapping_to_array(BL::CurveMapping &cumap,
+                                         array<float> &data,
+                                         const int size)
 {
   cumap.update();
   BL::CurveMap curve = cumap.curves[0];
   const int full_size = size + 1;
   data.resize(full_size);
   for (int i = 0; i < full_size; i++) {
-    float t = float(i) / float(size);
+    const float t = float(i) / float(size);
     data[i] = cumap.evaluate(curve, t);
   }
 }
 
 static inline void curvemapping_float_to_array(BL::CurveMapping &cumap,
                                                array<float> &data,
-                                               int size)
+                                               const int size)
 {
-  float min = 0.0f, max = 1.0f;
+  float min = 0.0f;
+  float max = 1.0f;
 
   curvemapping_minmax(cumap, 1, &min, &max);
 
@@ -214,17 +216,18 @@ static inline void curvemapping_float_to_array(BL::CurveMapping &cumap,
   data.resize(full_size);
 
   for (int i = 0; i < full_size; i++) {
-    float t = min + float(i) / float(size) * range;
+    const float t = min + float(i) / float(size) * range;
     data[i] = cumap.evaluate(map, t);
   }
 }
 
 static inline void curvemapping_color_to_array(BL::CurveMapping &cumap,
                                                array<float3> &data,
-                                               int size,
+                                               const int size,
                                                bool rgb_curve)
 {
-  float min_x = 0.0f, max_x = 1.0f;
+  float min_x = 0.0f;
+  float max_x = 1.0f;
 
   /* TODO(sergey): There is no easy way to automatically guess what is
    * the range to be used here for the case when mapping is applied on
@@ -262,7 +265,7 @@ static inline void curvemapping_color_to_array(BL::CurveMapping &cumap,
   }
   else {
     for (int i = 0; i < full_size; i++) {
-      float t = min_x + float(i) / float(size) * range_x;
+      const float t = min_x + float(i) / float(size) * range_x;
       data[i] = make_float3(
           cumap.evaluate(mapR, t), cumap.evaluate(mapG, t), cumap.evaluate(mapB, t));
     }
@@ -299,7 +302,7 @@ static inline int render_resolution_y(BL::RenderSettings &b_render)
 static inline string image_user_file_path(BL::BlendData &data,
                                           BL::ImageUser &iuser,
                                           BL::Image &ima,
-                                          int cfra)
+                                          const int cfra)
 {
   char filepath[1024];
   iuser.tile(0);
@@ -315,21 +318,11 @@ static inline string image_user_file_path(BL::BlendData &data,
   return string(filepath);
 }
 
-static inline int image_user_frame_number(BL::ImageUser &iuser, BL::Image &ima, int cfra)
+static inline int image_user_frame_number(BL::ImageUser &iuser, BL::Image &ima, const int cfra)
 {
   BKE_image_user_frame_calc(
       static_cast<Image *>(ima.ptr.data), static_cast<ImageUser *>(iuser.ptr.data), cfra);
   return iuser.frame_current();
-}
-
-static inline unsigned char *image_get_pixels_for_frame(BL::Image &image, int frame, int tile)
-{
-  return BKE_image_get_pixels_for_frame(static_cast<Image *>(image.ptr.data), frame, tile);
-}
-
-static inline float *image_get_float_pixels_for_frame(BL::Image &image, int frame, int tile)
-{
-  return BKE_image_get_float_pixels_for_frame(static_cast<Image *>(image.ptr.data), frame, tile);
 }
 
 static inline bool image_is_builtin(BL::Image &ima, BL::RenderEngine &engine)
@@ -358,15 +351,22 @@ static inline void render_add_metadata(BL::RenderResult &b_rr, string name, stri
 
 static inline Transform get_transform(const BL::Array<float, 16> &array)
 {
-  ProjectionTransform projection;
+  /* Convert from Blender column major to Cycles row major, assume it's an affine transform that
+   * does not need the last row. */
+  return make_transform(array[0],
+                        array[4],
+                        array[8],
+                        array[12],
 
-  /* We assume both types to be just 16 floats, and transpose because blender
-   * use column major matrix order while we use row major. */
-  memcpy((void *)&projection, &array, sizeof(float) * 16);
-  projection = projection_transpose(projection);
+                        array[1],
+                        array[5],
+                        array[9],
+                        array[13],
 
-  /* Drop last row, matrix is assumed to be affine transform. */
-  return projection_to_transform(projection);
+                        array[2],
+                        array[6],
+                        array[10],
+                        array[14]);
 }
 
 static inline float2 get_float2(const BL::Array<float, 2> &array)
@@ -411,7 +411,7 @@ static inline float3 get_float3(PointerRNA &ptr, const char *name)
   return f;
 }
 
-static inline void set_float3(PointerRNA &ptr, const char *name, float3 value)
+static inline void set_float3(PointerRNA &ptr, const char *name, const float3 value)
 {
   RNA_float_set_array(&ptr, name, &value.x);
 }
@@ -423,7 +423,7 @@ static inline float4 get_float4(PointerRNA &ptr, const char *name)
   return f;
 }
 
-static inline void set_float4(PointerRNA &ptr, const char *name, float4 value)
+static inline void set_float4(PointerRNA &ptr, const char *name, const float4 value)
 {
   RNA_float_set_array(&ptr, name, &value.x);
 }
@@ -443,7 +443,7 @@ static inline float get_float(PointerRNA &ptr, const char *name)
   return RNA_float_get(&ptr, name);
 }
 
-static inline void set_float(PointerRNA &ptr, const char *name, float value)
+static inline void set_float(PointerRNA &ptr, const char *name, const float value)
 {
   RNA_float_set(&ptr, name, value);
 }
@@ -453,7 +453,7 @@ static inline int get_int(PointerRNA &ptr, const char *name)
   return RNA_int_get(&ptr, name);
 }
 
-static inline void set_int(PointerRNA &ptr, const char *name, int value)
+static inline void set_int(PointerRNA &ptr, const char *name, const int value)
 {
   RNA_int_set(&ptr, name, value);
 }
@@ -482,33 +482,26 @@ static inline string get_enum_identifier(PointerRNA &ptr, const char *name)
 {
   PropertyRNA *prop = RNA_struct_find_property(&ptr, name);
   const char *identifier = "";
-  int value = RNA_property_enum_get(&ptr, prop);
+  const int value = RNA_property_enum_get(&ptr, prop);
 
-  RNA_property_enum_identifier(NULL, &ptr, prop, value, &identifier);
+  RNA_property_enum_identifier(nullptr, &ptr, prop, value, &identifier);
 
   return string(identifier);
 }
 
-static inline void set_enum(PointerRNA &ptr, const char *name, int value)
+static inline void set_enum(PointerRNA &ptr, const char *name, const int value)
 {
   RNA_enum_set(&ptr, name, value);
 }
 
 static inline void set_enum(PointerRNA &ptr, const char *name, const string &identifier)
 {
-  RNA_enum_set_identifier(NULL, &ptr, name, identifier.c_str());
+  RNA_enum_set_identifier(nullptr, &ptr, name, identifier.c_str());
 }
 
 static inline string get_string(PointerRNA &ptr, const char *name)
 {
-  char cstrbuf[1024];
-  char *cstr = RNA_string_get_alloc(&ptr, name, cstrbuf, sizeof(cstrbuf), NULL);
-  string str(cstr);
-  if (cstr != cstrbuf) {
-    MEM_freeN(cstr);
-  }
-
-  return str;
+  return RNA_string_get(&ptr, name);
 }
 
 static inline void set_string(PointerRNA &ptr, const char *name, const string &value)
@@ -539,7 +532,7 @@ static inline string blender_absolute_path(BL::BlendData &b_data, BL::ID &b_id, 
 
 static inline string get_text_datablock_content(const PointerRNA &ptr)
 {
-  if (ptr.data == NULL) {
+  if (ptr.data == nullptr) {
     return "";
   }
 
@@ -556,7 +549,8 @@ static inline string get_text_datablock_content(const PointerRNA &ptr)
 
 static inline void mesh_texture_space(const ::Mesh &b_mesh, float3 &loc, float3 &size)
 {
-  float texspace_location[3], texspace_size[3];
+  float texspace_location[3];
+  float texspace_size[3];
   BKE_mesh_texspace_get(const_cast<::Mesh *>(&b_mesh), texspace_location, texspace_size);
 
   loc = make_float3(texspace_location[0], texspace_location[1], texspace_location[2]);
@@ -671,43 +665,108 @@ static inline BL::MeshSequenceCacheModifier object_mesh_cache_find(BL::Object &b
   return BL::MeshSequenceCacheModifier(PointerRNA_NULL);
 }
 
-static inline Mesh::SubdivisionType object_subdivision_type(BL::Object &b_ob,
-                                                            bool preview,
-                                                            bool experimental)
+static BL::SubsurfModifier object_subdivision_modifier(BL::Object &b_ob, const bool preview)
 {
-  PointerRNA cobj = RNA_pointer_get(&b_ob.ptr, "cycles");
-
-  if (cobj.data && !b_ob.modifiers.empty() && experimental) {
+  if (!b_ob.modifiers.empty()) {
     BL::Modifier mod = b_ob.modifiers[b_ob.modifiers.length() - 1];
-    bool enabled = preview ? mod.show_viewport() : mod.show_render();
+    const bool enabled = preview ? mod.show_viewport() : mod.show_render();
 
-    if (enabled && mod.type() == BL::Modifier::type_SUBSURF &&
-        RNA_boolean_get(&cobj, "use_adaptive_subdivision"))
-    {
+    if (enabled && mod.type() == BL::Modifier::type_SUBSURF) {
       BL::SubsurfModifier subsurf(mod);
-
-      if (subsurf.subdivision_type() == BL::SubsurfModifier::subdivision_type_CATMULL_CLARK) {
-        return Mesh::SUBDIVISION_CATMULL_CLARK;
-      }
-      else {
-        return Mesh::SUBDIVISION_LINEAR;
+      if (subsurf.use_adaptive_subdivision()) {
+        return subsurf;
       }
     }
   }
 
+  return PointerRNA_NULL;
+}
+
+static inline Mesh::SubdivisionType object_subdivision_type(BL::Object &b_ob,
+                                                            const bool preview,
+                                                            const bool use_adaptive_subdivision)
+{
+  if (!use_adaptive_subdivision) {
+    return Mesh::SUBDIVISION_NONE;
+  }
+
+  BL::SubsurfModifier subsurf = object_subdivision_modifier(b_ob, preview);
+
+  if (subsurf) {
+    if (subsurf.subdivision_type() == BL::SubsurfModifier::subdivision_type_CATMULL_CLARK) {
+      return Mesh::SUBDIVISION_CATMULL_CLARK;
+    }
+    return Mesh::SUBDIVISION_LINEAR;
+  }
+
   return Mesh::SUBDIVISION_NONE;
+}
+
+static inline void object_subdivision_to_mesh(BL::Object &b_ob,
+                                              Mesh &mesh,
+                                              const bool preview,
+                                              const bool use_adaptive_subdivision)
+{
+  if (!use_adaptive_subdivision) {
+    mesh.set_subdivision_type(Mesh::SUBDIVISION_NONE);
+    return;
+  }
+
+  BL::SubsurfModifier subsurf = object_subdivision_modifier(b_ob, preview);
+
+  if (!subsurf) {
+    mesh.set_subdivision_type(Mesh::SUBDIVISION_NONE);
+    return;
+  }
+
+  if (subsurf.subdivision_type() != BL::SubsurfModifier::subdivision_type_CATMULL_CLARK) {
+    mesh.set_subdivision_type(Mesh::SUBDIVISION_LINEAR);
+    return;
+  }
+
+  mesh.set_subdivision_type(Mesh::SUBDIVISION_CATMULL_CLARK);
+
+  switch (subsurf.boundary_smooth()) {
+    case BL::SubsurfModifier::boundary_smooth_PRESERVE_CORNERS:
+      mesh.set_subdivision_boundary_interpolation(Mesh::SUBDIVISION_BOUNDARY_EDGE_AND_CORNER);
+      break;
+    case BL::SubsurfModifier::boundary_smooth_ALL:
+      mesh.set_subdivision_boundary_interpolation(Mesh::SUBDIVISION_BOUNDARY_EDGE_ONLY);
+      break;
+  }
+
+  switch (subsurf.uv_smooth()) {
+    case BL::SubsurfModifier::uv_smooth_NONE:
+      mesh.set_subdivision_fvar_interpolation(Mesh::SUBDIVISION_FVAR_LINEAR_ALL);
+      break;
+    case BL::SubsurfModifier::uv_smooth_PRESERVE_CORNERS:
+      mesh.set_subdivision_fvar_interpolation(Mesh::SUBDIVISION_FVAR_LINEAR_CORNERS_ONLY);
+      break;
+    case BL::SubsurfModifier::uv_smooth_PRESERVE_CORNERS_AND_JUNCTIONS:
+      mesh.set_subdivision_fvar_interpolation(Mesh::SUBDIVISION_FVAR_LINEAR_CORNERS_PLUS1);
+      break;
+    case BL::SubsurfModifier::uv_smooth_PRESERVE_CORNERS_JUNCTIONS_AND_CONCAVE:
+      mesh.set_subdivision_fvar_interpolation(Mesh::SUBDIVISION_FVAR_LINEAR_CORNERS_PLUS2);
+      break;
+    case BL::SubsurfModifier::uv_smooth_PRESERVE_BOUNDARIES:
+      mesh.set_subdivision_fvar_interpolation(Mesh::SUBDIVISION_FVAR_LINEAR_BOUNDARIES);
+      break;
+    case BL::SubsurfModifier::uv_smooth_SMOOTH_ALL:
+      mesh.set_subdivision_fvar_interpolation(Mesh::SUBDIVISION_FVAR_LINEAR_NONE);
+      break;
+  }
 }
 
 static inline uint object_ray_visibility(BL::Object &b_ob)
 {
   uint flag = 0;
 
-  flag |= b_ob.visible_camera() ? PATH_RAY_CAMERA : 0;
-  flag |= b_ob.visible_diffuse() ? PATH_RAY_DIFFUSE : 0;
-  flag |= b_ob.visible_glossy() ? PATH_RAY_GLOSSY : 0;
-  flag |= b_ob.visible_transmission() ? PATH_RAY_TRANSMIT : 0;
-  flag |= b_ob.visible_shadow() ? PATH_RAY_SHADOW : 0;
-  flag |= b_ob.visible_volume_scatter() ? PATH_RAY_VOLUME_SCATTER : 0;
+  flag |= b_ob.visible_camera() ? PATH_RAY_CAMERA : PathRayFlag(0);
+  flag |= b_ob.visible_diffuse() ? PATH_RAY_DIFFUSE : PathRayFlag(0);
+  flag |= b_ob.visible_glossy() ? PATH_RAY_GLOSSY : PathRayFlag(0);
+  flag |= b_ob.visible_transmission() ? PATH_RAY_TRANSMIT : PathRayFlag(0);
+  flag |= b_ob.visible_shadow() ? PATH_RAY_SHADOW : PathRayFlag(0);
+  flag |= b_ob.visible_volume_scatter() ? PATH_RAY_VOLUME_SCATTER : PathRayFlag(0);
 
   return flag;
 }
@@ -746,9 +805,16 @@ static inline bool object_need_motion_attribute(BObjectInfo &b_ob_info, Scene *s
   return true;
 }
 
+static inline bool region_view3d_navigating_or_transforming(const BL::RegionView3D &b_rv3d)
+{
+  ::RegionView3D *rv3d = static_cast<::RegionView3D *>(b_rv3d.ptr.data);
+  return rv3d && ((rv3d->rflag & (RV3D_NAVIGATING | RV3D_PAINTING)) ||
+                  (G.moving & (G_TRANSFORM_OBJ | G_TRANSFORM_EDIT)));
+}
+
 class EdgeMap {
  public:
-  EdgeMap() {}
+  EdgeMap() = default;
 
   void clear()
   {
@@ -779,5 +845,3 @@ class EdgeMap {
 };
 
 CCL_NAMESPACE_END
-
-#endif /* __BLENDER_UTIL_H__ */

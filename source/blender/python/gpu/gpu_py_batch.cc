@@ -17,9 +17,10 @@
 #include "BLI_utildefines.h"
 
 #include "GPU_batch.hh"
+#include "GPU_state.hh"
 
 #include "../generic/py_capi_utils.hh"
-#include "../generic/python_compat.hh"
+#include "../generic/python_compat.hh" /* IWYU pragma: keep. */
 
 #include "gpu_py.hh"
 #include "gpu_py_element.hh"
@@ -185,7 +186,7 @@ static PyObject *pygpu_batch_program_set(BPyGPUBatch *self, BPyGPUShader *py_sha
 {
   static bool deprecation_warning_issued = false;
 
-  /* Deprecation warning raised when calling `gpu.types.GPUBatch.program_set`.  */
+  /* Deprecation warning raised when calling `gpu.types.GPUBatch.program_set`. */
   if (!deprecation_warning_issued) {
     PyErr_WarnEx(PyExc_DeprecationWarning,
                  "Calls to GPUBatch.program_set are deprecated."
@@ -200,7 +201,7 @@ static PyObject *pygpu_batch_program_set(BPyGPUBatch *self, BPyGPUShader *py_sha
     return nullptr;
   }
 
-  GPUShader *shader = py_shader->shader;
+  blender::gpu::Shader *shader = py_shader->shader;
   GPU_batch_set_shader(self->batch, shader);
 
 #ifdef USE_GPU_PY_REFERENCES
@@ -224,33 +225,88 @@ static PyObject *pygpu_batch_program_set(BPyGPUBatch *self, BPyGPUShader *py_sha
   Py_RETURN_NONE;
 }
 
+/**
+ * Verify if the Shader is compatible with the batch and can be used for rendering.
+ * Derived from `polyline_draw_workaround` in `gpu_immediate.cc`.
+ */
+static const char *pygpu_shader_check_compatibility(blender::gpu::Batch *batch)
+{
+  if (!batch->shader) {
+    return nullptr;
+  }
+
+  /* Currently only POLYLINE shaders are checked. */
+  if (!bpygpu_shader_is_polyline(batch->shader)) {
+    return nullptr;
+  }
+
+  /* Check batch compatibility with shader. */
+  for (auto *vert : blender::Span(batch->verts, ARRAY_SIZE(batch->verts))) {
+    if (!vert) {
+      continue;
+    }
+    GPUVertFormat &format = vert->format;
+    if ((format.stride % 4) != 0) {
+      return "For POLYLINE shaders, only 4-byte aligned formats are supported";
+    }
+
+    int pos_attr_id = -1;
+    int col_attr_id = -1;
+    for (uint a_idx = 0; a_idx < format.attr_len; a_idx++) {
+      const GPUVertAttr *a = &format.attrs[a_idx];
+      if ((a->offset % 4) != 0) {
+        return "For POLYLINE shaders, only 4-byte aligned attributes are supported";
+      }
+      const blender::StringRefNull name = GPU_vertformat_attr_name_get(&format, a, 0);
+      if (pos_attr_id == -1 && name == "pos") {
+        if (!ELEM(a->type.comp_type(), GPU_COMP_F32)) {
+          return "For POLYLINE shaders, the 'pos' attribute needs to be 'F32'";
+        }
+        if (!ELEM(a->type.fetch_mode(), GPU_FETCH_FLOAT)) {
+          return "For POLYLINE shaders, the 'pos' attribute must use the 'FLOAT' fetch type";
+        }
+        pos_attr_id = a_idx;
+      }
+      else if (col_attr_id == -1 && name == "color") {
+        if (!ELEM(a->type.comp_type(), GPU_COMP_F32, GPU_COMP_U8)) {
+          return "For POLYLINE shaders, the 'color' attribute needs to be 'F32' or 'U8'";
+        }
+        col_attr_id = a_idx;
+      }
+      if (pos_attr_id != -1 && col_attr_id != -1) {
+        break;
+      }
+    }
+  }
+  return nullptr;
+}
+
 PyDoc_STRVAR(
     /* Wrap. */
     pygpu_batch_draw_doc,
-    ".. method:: draw(program=None)\n"
+    ".. method:: draw(shader=None)\n"
     "\n"
-    "   Run the drawing program with the parameters assigned to the batch.\n"
+    "   Run the drawing shader with the parameters assigned to the batch.\n"
     "\n"
-    "   :arg program: Program that performs the drawing operations.\n"
-    "      If ``None`` is passed, the last program set to this batch will run.\n"
+    "   :arg shader: Shader that performs the drawing operations.\n"
+    "      If ``None`` is passed, the last shader set to this batch will run.\n"
     "   :type program: :class:`gpu.types.GPUShader`\n");
 static PyObject *pygpu_batch_draw(BPyGPUBatch *self, PyObject *args)
 {
   static bool deprecation_warning_issued = false;
 
-  BPyGPUShader *py_program = nullptr;
+  BPyGPUShader *py_shader = nullptr;
 
-  if (!PyArg_ParseTuple(args, "|O!:GPUBatch.draw", &BPyGPUShader_Type, &py_program)) {
+  if (!PyArg_ParseTuple(args, "|O!:GPUBatch.draw", &BPyGPUShader_Type, &py_shader)) {
     return nullptr;
   }
-  if (py_program == nullptr) {
-
+  if (py_shader == nullptr) {
     if (!deprecation_warning_issued) {
       /* Deprecation warning raised when calling gpu.types.GPUBatch.draw without a valid GPUShader.
        */
       PyErr_WarnEx(PyExc_DeprecationWarning,
-                   "Calling GPUBatch.draw without specifying a program is deprecated. "
-                   "Please provide a valid GPUShader as the 'program' parameter.",
+                   "Calling GPUBatch.draw without specifying a shader is deprecated. "
+                   "Please provide a valid GPUShader as the 'shader' parameter.",
                    1);
       deprecation_warning_issued = true;
     }
@@ -259,8 +315,73 @@ static PyObject *pygpu_batch_draw(BPyGPUBatch *self, PyObject *args)
       return nullptr;
     }
   }
-  else if (self->batch->shader != py_program->shader) {
-    GPU_batch_set_shader(self->batch, py_program->shader);
+  else if (self->batch->shader != py_shader->shader) {
+    GPU_batch_set_shader(self->batch, py_shader->shader);
+  }
+
+  /* Emit a warning when trying to draw wide lines as it is too late to automatically switch to a
+   * polyline shader. */
+  if (py_shader && py_shader->is_builtin &&
+      ELEM(self->batch->prim_type, GPU_PRIM_LINES, GPU_PRIM_LINE_STRIP, GPU_PRIM_LINE_LOOP))
+  {
+    blender::gpu::Shader *shader = py_shader->shader;
+    const float line_width = GPU_line_width_get();
+    const bool use_linesmooth = GPU_line_smooth_get();
+    if (line_width > 1.0f || use_linesmooth) {
+      if (shader == GPU_shader_get_builtin_shader(GPU_SHADER_3D_FLAT_COLOR)) {
+        PyErr_WarnEx(PyExc_DeprecationWarning,
+                     "Calling GPUBatch.draw to draw wide or smooth lines with "
+                     "GPU_SHADER_3D_FLAT_COLOR is deprecated. "
+                     "Use GPU_SHADER_3D_POLYLINE_FLAT_COLOR instead.",
+                     1);
+      }
+      else if (shader == GPU_shader_get_builtin_shader(GPU_SHADER_3D_SMOOTH_COLOR)) {
+        PyErr_WarnEx(PyExc_DeprecationWarning,
+                     "Calling GPUBatch.draw to draw wide or smooth lines with "
+                     "GPU_SHADER_3D_SMOOTH_COLOR is deprecated. "
+                     "Use GPU_SHADER_3D_POLYLINE_SMOOTH_COLOR instead.",
+                     1);
+      }
+      else if (shader == GPU_shader_get_builtin_shader(GPU_SHADER_3D_UNIFORM_COLOR)) {
+        PyErr_WarnEx(PyExc_DeprecationWarning,
+                     "Calling GPUBatch.draw to draw wide or smooth lines with "
+                     "GPU_SHADER_3D_UNIFORM_COLOR is deprecated. "
+                     "Use GPU_SHADER_3D_POLYLINE_UNIFORM_COLOR instead.",
+                     1);
+      }
+    }
+  }
+
+  /* Emit a warning when trying to draw points with a regular shader as it is too late to
+   * automatically switch to a point shader. */
+  if (py_shader && py_shader->is_builtin && self->batch->prim_type == GPU_PRIM_POINTS) {
+    blender::gpu::Shader *shader = py_shader->shader;
+    if (shader == GPU_shader_get_builtin_shader(GPU_SHADER_3D_FLAT_COLOR)) {
+      PyErr_WarnEx(PyExc_DeprecationWarning,
+                   "Calling GPUBatch.draw to draw points with "
+                   "GPU_SHADER_3D_FLAT_COLOR is deprecated. "
+                   "Use GPU_SHADER_3D_POINT_FLAT_COLOR instead.",
+                   1);
+    }
+    else if (shader == GPU_shader_get_builtin_shader(GPU_SHADER_3D_SMOOTH_COLOR)) {
+      PyErr_WarnEx(PyExc_DeprecationWarning,
+                   "Calling GPUBatch.draw to draw points with "
+                   "GPU_SHADER_3D_SMOOTH_COLOR is deprecated. "
+                   "Use GPU_SHADER_3D_POINT_FLAT_COLOR instead.",
+                   1);
+    }
+    else if (shader == GPU_shader_get_builtin_shader(GPU_SHADER_3D_UNIFORM_COLOR)) {
+      PyErr_WarnEx(PyExc_DeprecationWarning,
+                   "Calling GPUBatch.draw to draw points with "
+                   "GPU_SHADER_3D_UNIFORM_COLOR is deprecated. "
+                   "Use GPU_SHADER_3D_POINT_SMOOTH_COLOR instead.",
+                   1);
+    }
+  }
+
+  if (const char *error = pygpu_shader_check_compatibility(self->batch)) {
+    PyErr_SetString(PyExc_RuntimeError, error);
+    return nullptr;
   }
 
   GPU_batch_draw(self->batch);
@@ -273,7 +394,7 @@ PyDoc_STRVAR(
     ".. method:: draw_instanced(program, *, instance_start=0, instance_count=0)\n"
     "\n"
     "   Draw multiple instances of the drawing program with the parameters assigned\n"
-    "   to the batch. In the vertex shader, `gl_InstanceID` will contain the instance\n"
+    "   to the batch. In the vertex shader, ``gl_InstanceID`` will contain the instance\n"
     "   number being drawn.\n"
     "\n"
     "   :arg program: Program that performs the drawing operations.\n"
@@ -296,7 +417,7 @@ static PyObject *pygpu_batch_draw_instanced(BPyGPUBatch *self, PyObject *args, P
       "O!" /* `program` */
       "|$" /* Optional keyword only arguments. */
       "i"  /* `instance_start` */
-      "i"  /* `instance_count' */
+      "i"  /* `instance_count` */
       ":GPUBatch.draw_instanced",
       _keywords,
       nullptr,
@@ -340,8 +461,8 @@ static PyObject *pygpu_batch_draw_range(BPyGPUBatch *self, PyObject *args, PyObj
       PY_ARG_PARSER_HEAD_COMPAT()
       "O!" /* `program` */
       "|$" /* Optional keyword only arguments. */
-      "i"  /* `elem_start' */
-      "i"  /* `elem_count' */
+      "i"  /* `elem_start` */
+      "i"  /* `elem_count` */
       ":GPUBatch.draw_range",
       _keywords,
       nullptr,
@@ -375,9 +496,14 @@ static PyObject *pygpu_batch_program_use_end(BPyGPUBatch *self)
   Py_RETURN_NONE;
 }
 
-#if (defined(__GNUC__) && !defined(__clang__))
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wcast-function-type"
+#ifdef __GNUC__
+#  ifdef __clang__
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wcast-function-type"
+#  else
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wcast-function-type"
+#  endif
 #endif
 
 static PyMethodDef pygpu_batch__tp_methods[] = {
@@ -397,8 +523,12 @@ static PyMethodDef pygpu_batch__tp_methods[] = {
     {nullptr, nullptr, 0, nullptr},
 };
 
-#if (defined(__GNUC__) && !defined(__clang__))
-#  pragma GCC diagnostic pop
+#ifdef __GNUC__
+#  ifdef __clang__
+#    pragma clang diagnostic pop
+#  else
+#    pragma GCC diagnostic pop
+#  endif
 #endif
 
 #ifdef USE_GPU_PY_REFERENCES
@@ -445,8 +575,8 @@ PyDoc_STRVAR(
     "   Reusable container for drawable geometry.\n"
     "\n"
     "   :arg type: The primitive type of geometry to be drawn.\n"
-    "      Possible values are `POINTS`, `LINES`, `TRIS`, `LINE_STRIP`, `LINE_LOOP`, `TRI_STRIP`, "
-    "`TRI_FAN`, `LINES_ADJ`, `TRIS_ADJ` and `LINE_STRIP_ADJ`.\n"
+    "      Possible values are ``POINTS``, ``LINES``, ``TRIS``, ``LINE_STRIP``, ``LINE_LOOP``, "
+    "``TRI_STRIP``, ``TRI_FAN``, ``LINES_ADJ``, ``TRIS_ADJ`` and ``LINE_STRIP_ADJ``.\n"
     "   :type type: str\n"
     "   :arg buf: Vertex buffer containing all or some of the attributes required for drawing.\n"
     "   :type buf: :class:`gpu.types.GPUVertBuf`\n"

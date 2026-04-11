@@ -6,9 +6,10 @@
  * \ingroup draw
  */
 
+#include <climits>
+
 #include "BLI_map.hh"
 #include "BLI_ordered_edge.hh"
-#include "BLI_vector.hh"
 
 #include "BKE_editmesh.hh"
 
@@ -19,7 +20,21 @@
 
 namespace blender::draw {
 
+/** Set when the edge has not yet been initialized. */
 #define NO_EDGE INT_MAX
+/**
+ * Set when the edge has been initialized and handled.
+ * This is set instead of #NO_EDGE so the edge isn't handled again
+ * which can write past the buffer bounds, see: #150841.
+ *
+ * \note this isn't ideal as the winding checks may match
+ * or not depending on the order triangles are handled.
+ * Typically we try to avoid differencing behavior based on the order of data
+ * however enforcing exactly matching behavior seems fairly involved without
+ * much benefit, so accept this shortcoming.
+ */
+#define NO_EDGE_HANDLED (INT_MAX - 1)
+#define NO_EDGE_INDEX_CHECK(i) ((i) >= NO_EDGE_HANDLED)
 
 static void create_lines_for_remaining_edges(MutableSpan<int> vert_to_corner,
                                              Map<OrderedEdge, int> &edge_hash,
@@ -28,7 +43,7 @@ static void create_lines_for_remaining_edges(MutableSpan<int> vert_to_corner,
 {
   for (const auto item : edge_hash.items()) {
     int v_data = item.value;
-    if (v_data == NO_EDGE) {
+    if (NO_EDGE_INDEX_CHECK(v_data)) {
       continue;
     }
 
@@ -86,9 +101,16 @@ inline void lines_adjacency_triangle(uint3 vert_tri,
             vert_to_corner[vert_tri[1]] = corner_tri[1];
             vert_to_corner[vert_tri[2]] = corner_tri[2];
           }
+          else if (UNLIKELY(v_data == NO_EDGE_HANDLED)) {
+            /* Ignore additional faces once this has been handled
+             * as this may exceed the pre-sized index buffer: see #150841 & !151084 for details. */
+
+            /* When there are 3+ users of an edge the mesh is not manifold (by definition). */
+            is_manifold = false;
+          }
           else {
             /* HACK Tag as not used. Prevent overhead of BLI_edgehash_remove. */
-            *value = NO_EDGE;
+            *value = NO_EDGE_HANDLED;
             bool inv_opposite = (v_data < 0);
             const int corner_opposite = abs(v_data) - 1;
             /* TODO: Make this part thread-safe. */
@@ -160,7 +182,7 @@ static void calc_adjacency_mesh(const MeshRenderData &mr,
   }
 }
 
-void extract_lines_adjacency(const MeshRenderData &mr, gpu::IndexBuf &ibo, bool &r_is_manifold)
+gpu::IndexBufPtr extract_lines_adjacency(const MeshRenderData &mr, bool &r_is_manifold)
 {
   /* Similar to poly_to_tri_count().
    * There is always (loop + triangle - 1) edges inside a face.
@@ -174,7 +196,7 @@ void extract_lines_adjacency(const MeshRenderData &mr, gpu::IndexBuf &ibo, bool 
   GPUIndexBufBuilder builder;
   GPU_indexbuf_init(&builder, GPU_PRIM_LINES_ADJ, tess_edge_len, mr.corners_num);
 
-  if (mr.extract_type == MR_EXTRACT_MESH) {
+  if (mr.extract_type == MeshExtractType::Mesh) {
     calc_adjacency_mesh(mr, vert_to_corner, edge_hash, builder, is_manifold);
   }
   else {
@@ -185,12 +207,11 @@ void extract_lines_adjacency(const MeshRenderData &mr, gpu::IndexBuf &ibo, bool 
 
   r_is_manifold = is_manifold;
 
-  GPU_indexbuf_build_in_place(&builder, &ibo);
+  return gpu::IndexBufPtr(GPU_indexbuf_build(&builder));
 }
 
-void extract_lines_adjacency_subdiv(const DRWSubdivCache &subdiv_cache,
-                                    gpu::IndexBuf &ibo,
-                                    bool &r_is_manifold)
+gpu::IndexBufPtr extract_lines_adjacency_subdiv(const DRWSubdivCache &subdiv_cache,
+                                                bool &r_is_manifold)
 {
   /* For each face there is (loop + triangle - 1) edges. Since we only have quads, and a quad
    * is split into 2 triangles, we have (loop + 2 - 1) = (loop + 1) edges for each quad, or in
@@ -236,7 +257,7 @@ void extract_lines_adjacency_subdiv(const DRWSubdivCache &subdiv_cache,
 
   r_is_manifold = is_manifold;
 
-  GPU_indexbuf_build_in_place(&builder, &ibo);
+  return gpu::IndexBufPtr(GPU_indexbuf_build(&builder));
 }
 
 #undef NO_EDGE

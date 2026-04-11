@@ -11,10 +11,14 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_input<decl::Color>("Color")
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
       .description("Color input on which correction will be applied");
-  b.add_input<decl::Float>("Bright").default_value(0.0f).min(-100.0f).max(100.0f).description(
-      "Brightness correction value.\n"
-      "An additive-type factor by which to increase the overall brightness of the image. "
-      "Use a negative number to darken an image, and a positive number to brighten it");
+  b.add_input<decl::Float>("Brightness", "Bright")
+      .default_value(0.0f)
+      .min(-100.0f)
+      .max(100.0f)
+      .description(
+          "Brightness correction value.\n"
+          "An additive-type factor by which to increase the overall brightness of the image. "
+          "Use a negative number to darken an image, and a positive number to brighten it");
   b.add_input<decl::Float>("Contrast")
       .default_value(0.0f)
       .min(-100.0f)
@@ -57,10 +61,14 @@ void register_node_type_sh_brightcontrast()
 
   static blender::bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, SH_NODE_BRIGHTCONTRAST, "Brightness/Contrast", NODE_CLASS_OP_COLOR);
+  sh_node_type_base(&ntype, "ShaderNodeBrightContrast", SH_NODE_BRIGHTCONTRAST);
+  ntype.ui_name = "Brightness/Contrast";
+  ntype.ui_description = "Control the brightness and contrast of the input color";
+  ntype.enum_name_legacy = "BRIGHTCONTRAST";
+  ntype.nclass = NODE_CLASS_OP_COLOR;
   ntype.declare = file_ns::node_declare;
   ntype.gpu_fn = file_ns::gpu_shader_brightcontrast;
   ntype.materialx_fn = file_ns::node_shader_materialx;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

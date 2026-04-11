@@ -6,11 +6,6 @@
  * \ingroup shader_fx
  */
 
-#include <cstdio>
-
-#include "DNA_gpencil_legacy_types.h"
-#include "DNA_object_types.h"
-#include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 
 #include "BLI_utildefines.h"
@@ -18,12 +13,13 @@
 #include "BLT_translation.hh"
 
 #include "BKE_context.hh"
+#include "BKE_idtype.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_modifier.hh"
 #include "BKE_screen.hh"
 #include "BKE_shader_fx.h"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "RNA_access.hh"
@@ -31,7 +27,6 @@
 #include "FX_shader_types.h"
 #include "FX_ui_common.h"
 
-#include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_build.hh"
 
 static void init_data(ShaderFxData *md)
@@ -88,22 +83,22 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
 
   PointerRNA *ptr = shaderfx_panel_get_property_pointers(panel, nullptr);
 
-  uiLayoutSetPropSep(layout, true);
+  layout->use_property_split_set(true);
 
-  uiItemR(layout, ptr, "shadow_color", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->prop(ptr, "shadow_color", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   /* Add the X, Y labels manually because size is a #PROP_PIXEL. */
-  col = uiLayoutColumn(layout, true);
+  col = &layout->column(true);
   PropertyRNA *prop = RNA_struct_find_property(ptr, "offset");
-  uiItemFullR(col, ptr, prop, 0, 0, UI_ITEM_NONE, IFACE_("Offset X"), ICON_NONE);
-  uiItemFullR(col, ptr, prop, 1, 0, UI_ITEM_NONE, IFACE_("Y"), ICON_NONE);
+  col->prop(ptr, prop, 0, 0, UI_ITEM_NONE, IFACE_("Offset X"), ICON_NONE);
+  col->prop(ptr, prop, 1, 0, UI_ITEM_NONE, IFACE_("Y"), ICON_NONE);
 
-  uiItemR(layout, ptr, "scale", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "rotation", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->prop(ptr, "scale", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  layout->prop(ptr, "rotation", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  row = uiLayoutRowWithHeading(layout, true, IFACE_("Object Pivot"));
-  uiItemR(row, ptr, "use_object", UI_ITEM_NONE, "", ICON_NONE);
-  uiItemR(row, ptr, "object", UI_ITEM_NONE, "", ICON_NONE);
+  row = &layout->row(true, IFACE_("Object Pivot"));
+  row->prop(ptr, "use_object", UI_ITEM_NONE, "", ICON_NONE);
+  row->prop(ptr, "object", UI_ITEM_NONE, "", ICON_NONE);
 
   shaderfx_panel_end(layout, ptr);
 }
@@ -115,15 +110,15 @@ static void blur_panel_draw(const bContext * /*C*/, Panel *panel)
 
   PointerRNA *ptr = shaderfx_panel_get_property_pointers(panel, nullptr);
 
-  uiLayoutSetPropSep(layout, true);
+  layout->use_property_split_set(true);
 
   /* Add the X, Y labels manually because size is a #PROP_PIXEL. */
-  col = uiLayoutColumn(layout, true);
+  col = &layout->column(true);
   PropertyRNA *prop = RNA_struct_find_property(ptr, "blur");
-  uiItemFullR(col, ptr, prop, 0, 0, UI_ITEM_NONE, IFACE_("Blur X"), ICON_NONE);
-  uiItemFullR(col, ptr, prop, 1, 0, UI_ITEM_NONE, IFACE_("Y"), ICON_NONE);
+  col->prop(ptr, prop, 0, 0, UI_ITEM_NONE, IFACE_("Blur X"), ICON_NONE);
+  col->prop(ptr, prop, 1, 0, UI_ITEM_NONE, IFACE_("Y"), ICON_NONE);
 
-  uiItemR(layout, ptr, "samples", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->prop(ptr, "samples", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 static void wave_header_draw(const bContext * /*C*/, Panel *panel)
@@ -132,7 +127,7 @@ static void wave_header_draw(const bContext * /*C*/, Panel *panel)
 
   PointerRNA *ptr = shaderfx_panel_get_property_pointers(panel, nullptr);
 
-  uiItemR(layout, ptr, "use_wave", UI_ITEM_NONE, IFACE_("Wave Effect"), ICON_NONE);
+  layout->prop(ptr, "use_wave", UI_ITEM_NONE, IFACE_("Wave Effect"), ICON_NONE);
 }
 
 static void wave_panel_draw(const bContext * /*C*/, Panel *panel)
@@ -141,14 +136,14 @@ static void wave_panel_draw(const bContext * /*C*/, Panel *panel)
 
   PointerRNA *ptr = shaderfx_panel_get_property_pointers(panel, nullptr);
 
-  uiLayoutSetPropSep(layout, true);
+  layout->use_property_split_set(true);
 
-  uiLayoutSetActive(layout, RNA_boolean_get(ptr, "use_wave"));
+  layout->active_set(RNA_boolean_get(ptr, "use_wave"));
 
-  uiItemR(layout, ptr, "orientation", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "amplitude", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "period", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "phase", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->prop(ptr, "orientation", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
+  layout->prop(ptr, "amplitude", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  layout->prop(ptr, "period", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  layout->prop(ptr, "phase", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 static void panel_register(ARegionType *region_type)
@@ -157,6 +152,13 @@ static void panel_register(ARegionType *region_type)
   shaderfx_subpanel_register(region_type, "blur", "Blur", nullptr, blur_panel_draw, panel_type);
   shaderfx_subpanel_register(
       region_type, "wave", "", wave_header_draw, wave_panel_draw, panel_type);
+}
+
+static void foreach_working_space_color(ShaderFxData *fx,
+                                        const IDTypeForeachColorFunctionCallback &fn)
+{
+  ShadowShaderFxData *fxd = (ShadowShaderFxData *)fx;
+  fn.single(fxd->shadow_rgba);
 }
 
 ShaderFxTypeInfo shaderfx_Type_Shadow = {
@@ -174,5 +176,6 @@ ShaderFxTypeInfo shaderfx_Type_Shadow = {
     /*update_depsgraph*/ update_depsgraph,
     /*depends_on_time*/ nullptr,
     /*foreach_ID_link*/ foreach_ID_link,
+    /*foreach_working_space_color*/ foreach_working_space_color,
     /*panel_register*/ panel_register,
 };

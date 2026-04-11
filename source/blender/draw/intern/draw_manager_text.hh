@@ -33,12 +33,12 @@ void DRW_text_cache_add(DRWTextStore *dt,
                         const bool shadow = false,
                         const bool align_center = false);
 
-void DRW_text_cache_draw(DRWTextStore *dt, ARegion *region, View3D *v3d);
+void DRW_text_cache_draw(const DRWTextStore *dt, const ARegion *region, const View3D *v3d);
 
 void DRW_text_edit_mesh_measure_stats(const ARegion *region,
                                       const View3D *v3d,
                                       const Object *ob,
-                                      const UnitSettings *unit,
+                                      const UnitSettings &unit,
                                       DRWTextStore *dt = DRW_text_cache_ensure());
 
 enum {

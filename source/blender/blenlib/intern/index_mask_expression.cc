@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+/** \file
+ * \ingroup bli
+ */
+
 /**
  * Expression evaluation has multiple phases:
  * 1. A coarse evaluation that tries to find segments which can be trivially evaluated. For
@@ -17,9 +21,9 @@
 #include "BLI_enumerable_thread_specific.hh"
 #include "BLI_index_mask_expression.hh"
 #include "BLI_stack.hh"
-#include "BLI_strict_flags.h"
 #include "BLI_task.hh"
-#include "BLI_timeit.hh"
+
+#include "BLI_strict_flags.h" /* IWYU pragma: keep */
 
 namespace blender::index_mask {
 
@@ -877,7 +881,7 @@ static IndexMaskSegment evaluate_exact_with_indices(const Expr &root_expression,
           const IndexMaskSegment term_segment = results[term.index];
           if (term_segment.size() == bounds.size()) {
             /* Can skip computing the union if we know that one of the inputs contains all possible
-             * indices already.  */
+             * indices already. */
             results[expression->index] = term_segment;
             used_short_circuit = true;
             break;
@@ -974,18 +978,11 @@ static IndexMaskSegment evaluate_exact_with_indices(const Expr &root_expression,
 static Vector<IndexMaskSegment> build_result_mask_segments(
     const Span<EvaluatedSegment> evaluated_segments)
 {
-  const std::array<int16_t, max_segment_size> &static_indices_array = get_static_indices_array();
-
   Vector<IndexMaskSegment> result_mask_segments;
   for (const EvaluatedSegment &evaluated_segment : evaluated_segments) {
     switch (evaluated_segment.type) {
       case EvaluatedSegment::Type::Full: {
-        const int64_t full_size = evaluated_segment.bounds.size();
-        for (int64_t i = 0; i < full_size; i += max_segment_size) {
-          const int64_t size = std::min(i + max_segment_size, full_size) - i;
-          result_mask_segments.append(IndexMaskSegment(
-              evaluated_segment.bounds.first() + i, Span(static_indices_array).take_front(size)));
-        }
+        index_range_to_mask_segments(evaluated_segment.bounds, result_mask_segments);
         break;
       }
       case EvaluatedSegment::Type::Copy: {
@@ -1203,7 +1200,7 @@ static void evaluate_short_unknown_segments_exactly(
   }
   else {
     /* Do exact evaluation in multiple threads. The allocators and evaluated segments created by
-     * each thread are merged in the end.  */
+     * each thread are merged in the end. */
     struct LocalData {
       LinearAllocator<> allocator;
       Vector<EvaluatedSegment, 16> evaluated_segments;

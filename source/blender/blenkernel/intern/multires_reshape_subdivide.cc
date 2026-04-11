@@ -6,17 +6,14 @@
  * \ingroup bke
  */
 
-#include "MEM_guardedalloc.h"
-
 #include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
 #include "DNA_modifier_types.h"
-#include "DNA_scene_types.h"
+#include "DNA_object_types.h"
 
 #include "BKE_customdata.hh"
 #include "BKE_mesh.hh"
 #include "BKE_multires.hh"
-#include "BKE_subsurf.hh"
 #include "BLI_math_vector.h"
 
 #include "multires_reshape.hh"
@@ -37,7 +34,7 @@ static void multires_subdivide_create_object_space_linear_grids(Mesh *mesh)
     for (int l = 0; l < face.size(); l++) {
       const int loop_index = face[l];
 
-      float(*disps)[3] = mdisps[loop_index].disps;
+      float (*disps)[3] = mdisps[loop_index].disps;
       mdisps[loop_index].totdisp = 4;
       mdisps[loop_index].level = 1;
 

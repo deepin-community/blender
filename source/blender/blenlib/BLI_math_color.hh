@@ -8,10 +8,7 @@
  * \ingroup bli
  */
 
-#include <cmath>
-#include <type_traits>
-
-#include "BLI_color.hh"
+#include "BLI_color_types.hh"
 #include "BLI_math_base.hh"
 #include "BLI_math_matrix_types.hh"
 

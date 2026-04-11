@@ -13,6 +13,10 @@
 #include "vk_staging_buffer.hh"
 #include "vk_state_manager.hh"
 
+#include "CLG_log.h"
+
+static CLG_LogRef LOG = {"gpu.vulkan"};
+
 namespace blender::gpu {
 
 void VKUniformBuffer::update(const void *data)
@@ -21,20 +25,23 @@ void VKUniformBuffer::update(const void *data)
     allocate();
   }
 
-  /* TODO: when buffer is mapped and newly created we should use `buffer_.update_immediately`. */
-  void *data_copy = MEM_mallocN(size_in_bytes_, __func__);
-  memcpy(data_copy, data, size_in_bytes_);
-  VKContext &context = *VKContext::get();
-  buffer_.update_render_graph(context, data_copy);
+  if (data) {
+    void *data_copy = MEM_mallocN(size_in_bytes_, __func__);
+    memcpy(data_copy, data, size_in_bytes_);
+    VKContext &context = *VKContext::get();
+    buffer_.update_render_graph(context, data_copy);
+    data_uploaded_ = true;
+  }
 }
 
 void VKUniformBuffer::allocate()
 {
   buffer_.create(size_in_bytes_,
-                 GPU_USAGE_STATIC,
                  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                      VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                 false);
+                 VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+                 VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+                 0.8f);
   debug::object_label(buffer_.vk_handle(), name_);
 }
 
@@ -45,20 +52,34 @@ void VKUniformBuffer::clear_to_zero()
   }
   VKContext &context = *VKContext::get();
   buffer_.clear(context, 0);
+  data_uploaded_ = true;
 }
 
 void VKUniformBuffer::ensure_updated()
 {
   if (!buffer_.is_allocated()) {
     allocate();
+    if (!buffer_.is_allocated()) {
+      CLOG_ERROR(&LOG,
+                 "Unable to allocate uniform buffer [%s]. Most likely an out of memory issue.",
+                 name_);
+      return;
+    }
   }
 
   /* Upload attached data, during bind time. */
   if (data_) {
-    /* TODO: when buffer is mapped and newly created we should use `buffer_.update_immediately`. */
-    VKContext &context = *VKContext::get();
-    buffer_.update_render_graph(context, std::move(data_));
-    data_ = nullptr;
+    if (!data_uploaded_ && buffer_.is_mapped()) {
+      buffer_.update_immediately(data_);
+      MEM_freeN(data_);
+      data_ = nullptr;
+    }
+    else {
+      VKContext &context = *VKContext::get();
+      buffer_.update_render_graph(context, std::move(data_));
+      data_ = nullptr;
+    }
+    data_uploaded_ = true;
   }
 }
 

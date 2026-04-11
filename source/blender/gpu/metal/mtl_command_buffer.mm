@@ -10,7 +10,7 @@
 #include "mtl_debug.hh"
 #include "mtl_framebuffer.hh"
 
-#include "intern/GHOST_ContextCGL.hh"
+#include "intern/GHOST_ContextMTL.hh"
 
 #include <fstream>
 
@@ -20,7 +20,7 @@ using namespace blender::gpu;
 namespace blender::gpu {
 
 /* Counter for active command buffers. */
-int MTLCommandBufferManager::num_active_cmd_bufs = 0;
+volatile std::atomic<int> MTLCommandBufferManager::num_active_cmd_bufs_in_system = 0;
 
 /* -------------------------------------------------------------------- */
 /** \name MTLCommandBuffer initialization and render coordination.
@@ -50,8 +50,8 @@ id<MTLCommandBuffer> MTLCommandBufferManager::ensure_begin()
      *
      * NOTE: We currently stall until completion of GPU work upon ::submit if we have reached the
      * in-flight command buffer limit. */
-    BLI_assert(MTLCommandBufferManager::num_active_cmd_bufs <
-               GHOST_ContextCGL::max_command_buffer_count);
+    BLI_assert(MTLCommandBufferManager::num_active_cmd_bufs_in_system <
+               GHOST_ContextMTL::max_command_buffer_count);
 
     if (G.debug & G_DEBUG_GPU) {
       /* Debug: Enable Advanced Errors for GPU work execution. */
@@ -68,7 +68,7 @@ id<MTLCommandBuffer> MTLCommandBufferManager::ensure_begin()
     }
 
     [active_command_buffer_ retain];
-    MTLCommandBufferManager::num_active_cmd_bufs++;
+    context_.main_command_buffer.inc_active_command_buffer_count();
 
     /* Ensure we begin new Scratch Buffer if we are on a new frame. */
     MTLScratchBufferManager &mem = context_.memory_manager;
@@ -90,6 +90,12 @@ bool MTLCommandBufferManager::submit(bool wait)
 {
   /* Skip submission if command buffer is empty. */
   if (empty_ || active_command_buffer_ == nil) {
+    if (wait) {
+      /* Wait for any previously submitted work on this context to complete.
+       * (The wait function will yield so may need reworking if this hits a
+       * performance critical path which is sensitive to CPU<->GPU latency) */
+      wait_until_active_command_buffers_complete();
+    }
     return false;
   }
 
@@ -123,7 +129,7 @@ bool MTLCommandBufferManager::submit(bool wait)
     [cmd_buffer_ref release];
 
     /* Decrement count. */
-    MTLCommandBufferManager::num_active_cmd_bufs--;
+    context_.main_command_buffer.dec_active_command_buffer_count();
   }];
 
   /* Submit command buffer to GPU. */
@@ -131,13 +137,13 @@ bool MTLCommandBufferManager::submit(bool wait)
 
   /* If we have too many active command buffers in flight, wait until completed to avoid running
    * out. We can increase */
-  if (MTLCommandBufferManager::num_active_cmd_bufs >=
-      (GHOST_ContextCGL::max_command_buffer_count - 1))
+  if (MTLCommandBufferManager::num_active_cmd_bufs_in_system >=
+      (GHOST_ContextMTL::max_command_buffer_count - 1))
   {
     wait = true;
     MTL_LOG_WARNING(
         "Maximum number of command buffers in flight. Host will wait until GPU work has "
-        "completed. Consider increasing GHOST_ContextCGL::max_command_buffer_count or reducing "
+        "completed. Consider increasing GHOST_ContextMTL::max_command_buffer_count or reducing "
         "work fragmentation to better utilize system hardware. Command buffers are flushed upon "
         "GPUContext switches, this is the most common cause of excessive command buffer "
         "generation.");
@@ -223,7 +229,7 @@ MTLFrameBuffer *MTLCommandBufferManager::get_active_framebuffer()
 
 /* Encoder and Pass management. */
 /* End currently active MTLCommandEncoder. */
-bool MTLCommandBufferManager::end_active_command_encoder()
+bool MTLCommandBufferManager::end_active_command_encoder(bool retain_framebuffers)
 {
 
   /* End active encoder if one is active. */
@@ -241,8 +247,10 @@ bool MTLCommandBufferManager::end_active_command_encoder()
         active_command_encoder_type_ = MTL_NO_COMMAND_ENCODER;
 
         /* Reset associated frame-buffer flag. */
-        active_frame_buffer_ = nullptr;
-        active_pass_descriptor_ = nullptr;
+        if (!retain_framebuffers) {
+          active_frame_buffer_ = nullptr;
+          active_pass_descriptor_ = nullptr;
+        }
         return true;
       }
 
@@ -483,10 +491,8 @@ bool MTLCommandBufferManager::do_break_submission()
     return ((current_draw_call_count_ > 30000) || (vertex_submitted_count_ > 100000000) ||
             (encoder_count_ > 25));
   }
-  else {
-    /* Apple Silicon is less efficient if splitting submissions. */
-    return false;
-  }
+  /* Apple Silicon is less efficient if splitting submissions. */
+  return false;
 }
 
 /** \} */
@@ -510,7 +516,7 @@ void MTLCommandBufferManager::push_debug_group(const char *name, int /*index*/)
       end_active_command_encoder();
     }
 
-    debug_group_stack.push_back(std::string(name));
+    debug_group_stack.emplace_back(name);
   }
 }
 
@@ -534,12 +540,12 @@ void MTLCommandBufferManager::pop_debug_group()
 #endif
 
     /* If we have pending debug groups, first pop the last pending one. */
-    if (debug_group_stack.size() > 0) {
+    if (!debug_group_stack.empty()) {
       debug_group_stack.pop_back();
     }
     else {
       /* Otherwise, close last active pushed group. */
-      if (debug_group_pushed_stack.size() > 0) {
+      if (!debug_group_pushed_stack.empty()) {
         debug_group_pushed_stack.pop_back();
 
         if (debug_group_pushed_stack.size() < uint(METAL_DEBUG_CAPTURE_MAX_NESTED_GROUPS)) {
@@ -570,9 +576,9 @@ void MTLCommandBufferManager::unfold_pending_debug_groups()
 }
 
 /* Workload Synchronization. */
-bool MTLCommandBufferManager::insert_memory_barrier(eGPUBarrier barrier_bits,
-                                                    eGPUStageBarrierBits before_stages,
-                                                    eGPUStageBarrierBits after_stages)
+bool MTLCommandBufferManager::insert_memory_barrier(GPUBarrier barrier_bits,
+                                                    GPUStageBarrierBits before_stages,
+                                                    GPUStageBarrierBits after_stages)
 {
   /* Apple Silicon does not support memory barriers for RenderCommandEncoder's.
    * We do not currently need these due to implicit API guarantees. However, render->render
@@ -589,10 +595,8 @@ bool MTLCommandBufferManager::insert_memory_barrier(eGPUBarrier barrier_bits,
       end_active_command_encoder();
       return true;
     }
-    else {
-      /* Skip all barriers for compute and blit passes as Metal will resolve these dependencies. */
-      return false;
-    }
+    /* Skip all barriers for compute and blit passes as Metal will resolve these dependencies. */
+    return false;
   }
 
   /* Resolve scope. */

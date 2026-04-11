@@ -20,7 +20,7 @@ namespace blender::bke::volume_grid::file_cache {
  */
 struct GridCache {
   /**
-   * Grid returned by #readAllGridMetadata. This only contains a the meta-data and transform of
+   * Grid returned by #readAllGridMetadata. This only contains the meta-data and transform of
    * the grid, but not the tree.
    */
   openvdb::GridBase::Ptr meta_data_grid;
@@ -62,7 +62,7 @@ struct FileCache {
  * Singleton cache that's shared throughout the application.
  */
 struct GlobalCache {
-  std::mutex mutex;
+  Mutex mutex;
   Map<std::string, FileCache> file_map;
 };
 
@@ -89,7 +89,9 @@ static FileCache create_file_cache(const StringRef file_path)
     /* Disable delay loading and file copying, this has poor performance
      * on network drives. */
     const bool delay_load = false;
+#  ifdef OPENVDB_USE_DELAYED_LOADING
     file.setCopyMaxBytes(0);
+#  endif
     file.open(delay_load);
     vdb_grids = *(file.readAllGridMetadata());
     file_cache.meta_data = *file.getMetadata();
@@ -185,7 +187,9 @@ static openvdb::GridBase::Ptr load_single_grid_from_disk(const StringRef file_pa
   const bool delay_load = false;
 
   openvdb::io::File file(file_path);
+#  ifdef OPENVDB_USE_DELAYED_LOADING
   file.setCopyMaxBytes(0);
+#  endif
   file.open(delay_load);
   return file.readGrid(grid_name);
 }

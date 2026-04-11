@@ -9,17 +9,14 @@
 #include <cstddef>
 #include <cstdlib>
 
+#include "DNA_space_types.h"
+
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
 
 #include "rna_internal.hh"
 
-#include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
-#include "DNA_workspace_types.h"
-
-#include "ED_info.hh"
-#include "ED_node.hh"
 
 const EnumPropertyItem rna_enum_region_type_items[] = {
     {RGN_TYPE_WINDOW, "WINDOW", 0, "Window", ""},
@@ -46,8 +43,6 @@ static const EnumPropertyItem rna_enum_region_panel_category_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-#include "ED_screen.hh"
-
 #include "UI_interface_c.hh"
 
 #include "WM_api.hh"
@@ -62,6 +57,10 @@ static const EnumPropertyItem rna_enum_region_panel_category_items[] = {
 #  include "BKE_workspace.hh"
 
 #  include "DEG_depsgraph.hh"
+
+#  include "ED_info.hh"
+#  include "ED_node.hh"
+#  include "ED_screen.hh"
 
 #  include "UI_view2d.hh"
 
@@ -292,8 +291,9 @@ static PointerRNA rna_Region_data_get(PointerRNA *ptr)
     if (region->regiontype == RGN_TYPE_WINDOW) {
       /* We could make this static, it won't change at run-time. */
       SpaceType *st = BKE_spacetype_from_id(SPACE_VIEW3D);
-      if (region->type == BKE_regiontype_from_id(st, region->regiontype)) {
-        PointerRNA newptr = RNA_pointer_create(&screen->id, &RNA_RegionView3D, region->regiondata);
+      if (region->runtime->type == BKE_regiontype_from_id(st, region->regiontype)) {
+        PointerRNA newptr = RNA_pointer_create_discrete(
+            &screen->id, &RNA_RegionView3D, region->regiondata);
         return newptr;
       }
     }
@@ -305,7 +305,7 @@ static int rna_Region_active_panel_category_editable_get(const PointerRNA *ptr,
                                                          const char **r_info)
 {
   ARegion *region = static_cast<ARegion *>(ptr->data);
-  if (BLI_listbase_is_empty(&region->panels_category)) {
+  if (BLI_listbase_is_empty(&region->runtime->panels_category)) {
     if (r_info) {
       *r_info = N_("This region does not support panel categories");
     }
@@ -345,7 +345,9 @@ static const EnumPropertyItem *rna_Region_active_panel_category_itemf(bContext *
   EnumPropertyItem item = {0, "", 0, "", ""};
   int totitems = 0;
   int category_index;
-  LISTBASE_FOREACH_INDEX (PanelCategoryDyn *, pc_dyn, &region->panels_category, category_index) {
+  LISTBASE_FOREACH_INDEX (
+      PanelCategoryDyn *, pc_dyn, &region->runtime->panels_category, category_index)
+  {
     item.value = category_index;
     item.identifier = pc_dyn->idname;
     item.name = pc_dyn->idname;
@@ -592,7 +594,7 @@ static void rna_def_region(BlenderRNA *brna)
        "FLOAT",
        0,
        "Float",
-       "Region floats on screen, doesn't use any fixed alignment"},
+       "Region floats on screen, does not use any fixed alignment"},
       {RGN_ALIGN_QSPLIT,
        "QUAD_SPLIT",
        0,

@@ -5,28 +5,58 @@
 #pragma once
 
 #include "kernel/camera/camera.h"
-#include "kernel/geom/geom.h"
-#include "kernel/sample/mapping.h"
+
+#include "kernel/geom/motion_triangle.h"
+#include "kernel/geom/object.h"
+#include "kernel/geom/primitive.h"
+
+#include "kernel/svm/attribute.h"
+#include "kernel/svm/types.h"
+#include "kernel/svm/util.h"
+#include "util/math_base.h"
 
 CCL_NAMESPACE_BEGIN
 
 /* Texture Coordinate Node */
 
+ccl_device_inline float3 svm_texco_reflection(const ccl_private ShaderData *sd)
+{
+  float3 data = sd->wi;
+  if (sd->object != OBJECT_NONE) {
+    data = -reflect(data, sd->N);
+  }
+  return data;
+}
+
+ccl_device_inline float3 svm_texco_camera(KernelGlobals kg,
+                                          const ccl_private ShaderData *sd,
+                                          const ccl_private float3 &P)
+{
+  float3 data = P;
+  const Transform tfm = kernel_data.cam.worldtocamera;
+  if (sd->object == OBJECT_NONE) {
+    data += camera_position(kg);
+  }
+  data = transform_point(&tfm, data);
+  return data;
+}
+
 ccl_device_noinline int svm_node_tex_coord(KernelGlobals kg,
                                            ccl_private ShaderData *sd,
-                                           uint32_t path_flag,
+                                           const uint32_t path_flag,
                                            ccl_private float *stack,
-                                           uint4 node,
+                                           const uint4 node,
                                            int offset)
 {
   float3 data = zero_float3();
-  uint type = node.y;
-  uint out_offset = node.z;
+  const uint type = node.y;
+  const uint out_offset = node.z;
 
-  switch (type) {
-    case NODE_TEXCO_OBJECT: {
+  switch ((NodeTexCoord)type) {
+    case NODE_TEXCO_OBJECT:
+    case NODE_TEXCO_OBJECT_WITH_TRANSFORM: {
       data = sd->P;
-      if (node.w == 0) {
+      if (type == NODE_TEXCO_OBJECT) {
         if (sd->object != OBJECT_NONE) {
           object_inverse_position_transform(kg, sd, &data);
         }
@@ -46,28 +76,24 @@ ccl_device_noinline int svm_node_tex_coord(KernelGlobals kg,
       break;
     }
     case NODE_TEXCO_CAMERA: {
-      Transform tfm = kernel_data.cam.worldtocamera;
-
-      if (sd->object != OBJECT_NONE)
-        data = transform_point(&tfm, sd->P);
-      else
-        data = transform_point(&tfm, sd->P + camera_position(kg));
+      const float3 P = sd->P;
+      data = svm_texco_camera(kg, sd, P);
       break;
     }
     case NODE_TEXCO_WINDOW: {
       if ((path_flag & PATH_RAY_CAMERA) && sd->object == OBJECT_NONE &&
           kernel_data.cam.type == CAMERA_ORTHOGRAPHIC)
+      {
         data = camera_world_to_ndc(kg, sd, sd->ray_P);
-      else
+      }
+      else {
         data = camera_world_to_ndc(kg, sd, sd->P);
+      }
       data.z = 0.0f;
       break;
     }
     case NODE_TEXCO_REFLECTION: {
-      if (sd->object != OBJECT_NONE)
-        data = 2.0f * dot(sd->N, sd->wi) * sd->N - sd->wi;
-      else
-        data = sd->wi;
+      data = svm_texco_reflection(sd);
       break;
     }
     case NODE_TEXCO_DUPLI_GENERATED: {
@@ -82,8 +108,9 @@ ccl_device_noinline int svm_node_tex_coord(KernelGlobals kg,
       data = sd->P;
 
 #ifdef __VOLUME__
-      if (sd->object != OBJECT_NONE)
+      if (sd->object != OBJECT_NONE) {
         data = volume_normalized_position(kg, sd, data);
+      }
 #endif
       break;
     }
@@ -93,22 +120,56 @@ ccl_device_noinline int svm_node_tex_coord(KernelGlobals kg,
   return offset;
 }
 
+ccl_device_inline float3 texco_normal_from_uv(KernelGlobals kg,
+                                              ccl_private ShaderData *sd,
+                                              const float u,
+                                              const float v)
+{
+  float3 N;
+  if ((sd->type & PRIMITIVE_TRIANGLE) && (sd->shader & SHADER_SMOOTH_NORMAL)) {
+    N = (sd->type == PRIMITIVE_TRIANGLE) ?
+            triangle_smooth_normal(kg, zero_float3(), sd->prim, u, v) :
+            motion_triangle_smooth_normal(kg, zero_float3(), sd->object, sd->prim, u, v, sd->time);
+    if (is_zero(N)) {
+      N = sd->Ng;
+      object_inverse_normal_transform(kg, sd, &N);
+    }
+    else {
+      if (sd->object_flag & SD_OBJECT_TRANSFORM_APPLIED) {
+        /* Transform to local space. */
+        object_inverse_normal_transform(kg, sd, &N);
+      }
+      if (sd->flag & SD_BACKFACING) {
+        N = -N;
+      }
+    }
+  }
+  else {
+    /* TODO: implement for curve. */
+    N = sd->N;
+    object_inverse_normal_transform(kg, sd, &N);
+  }
+  return N;
+}
+
 ccl_device_noinline int svm_node_tex_coord_bump_dx(KernelGlobals kg,
                                                    ccl_private ShaderData *sd,
-                                                   uint32_t path_flag,
+                                                   const uint32_t path_flag,
                                                    ccl_private float *stack,
-                                                   uint4 node,
+                                                   const uint4 node,
                                                    int offset)
 {
 #ifdef __RAY_DIFFERENTIALS__
   float3 data = zero_float3();
-  uint type = node.y;
-  uint out_offset = node.z;
+  const uint type = node.y;
+  const uint out_offset = node.z;
+  const float bump_filter_width = __uint_as_float(node.w);
 
-  switch (type) {
-    case NODE_TEXCO_OBJECT: {
-      data = svm_node_bump_P_dx(sd);
-      if (node.w == 0) {
+  switch ((NodeTexCoord)type) {
+    case NODE_TEXCO_OBJECT:
+    case NODE_TEXCO_OBJECT_WITH_TRANSFORM: {
+      data = svm_node_bump_P_dx(sd, bump_filter_width);
+      if (type == NODE_TEXCO_OBJECT) {
         if (sd->object != OBJECT_NONE) {
           object_inverse_position_transform(kg, sd, &data);
         }
@@ -123,33 +184,29 @@ ccl_device_noinline int svm_node_tex_coord_bump_dx(KernelGlobals kg,
       break;
     }
     case NODE_TEXCO_NORMAL: {
-      data = sd->N;
-      object_inverse_normal_transform(kg, sd, &data);
+      data = texco_normal_from_uv(
+          kg, sd, sd->u + sd->du.dx * bump_filter_width, sd->v + sd->dv.dx * bump_filter_width);
       break;
     }
     case NODE_TEXCO_CAMERA: {
-      Transform tfm = kernel_data.cam.worldtocamera;
-
-      if (sd->object != OBJECT_NONE)
-        data = transform_point(&tfm, svm_node_bump_P_dx(sd));
-      else
-        data = transform_point(&tfm, svm_node_bump_P_dx(sd) + camera_position(kg));
+      const float3 P = svm_node_bump_P_dx(sd, bump_filter_width);
+      data = svm_texco_camera(kg, sd, P);
       break;
     }
     case NODE_TEXCO_WINDOW: {
       if ((path_flag & PATH_RAY_CAMERA) && sd->object == OBJECT_NONE &&
           kernel_data.cam.type == CAMERA_ORTHOGRAPHIC)
+      {
         data = camera_world_to_ndc(kg, sd, sd->ray_P);
-      else
-        data = camera_world_to_ndc(kg, sd, svm_node_bump_P_dx(sd));
+      }
+      else {
+        data = camera_world_to_ndc(kg, sd, svm_node_bump_P_dx(sd, bump_filter_width));
+      }
       data.z = 0.0f;
       break;
     }
     case NODE_TEXCO_REFLECTION: {
-      if (sd->object != OBJECT_NONE)
-        data = 2.0f * dot(sd->N, sd->wi) * sd->N - sd->wi;
-      else
-        data = sd->wi;
+      data = svm_texco_reflection(sd);
       break;
     }
     case NODE_TEXCO_DUPLI_GENERATED: {
@@ -161,11 +218,12 @@ ccl_device_noinline int svm_node_tex_coord_bump_dx(KernelGlobals kg,
       break;
     }
     case NODE_TEXCO_VOLUME_GENERATED: {
-      data = svm_node_bump_P_dx(sd);
+      data = svm_node_bump_P_dx(sd, bump_filter_width);
 
 #  ifdef __VOLUME__
-      if (sd->object != OBJECT_NONE)
+      if (sd->object != OBJECT_NONE) {
         data = volume_normalized_position(kg, sd, data);
+      }
 #  endif
       break;
     }
@@ -180,20 +238,22 @@ ccl_device_noinline int svm_node_tex_coord_bump_dx(KernelGlobals kg,
 
 ccl_device_noinline int svm_node_tex_coord_bump_dy(KernelGlobals kg,
                                                    ccl_private ShaderData *sd,
-                                                   uint32_t path_flag,
+                                                   const uint32_t path_flag,
                                                    ccl_private float *stack,
-                                                   uint4 node,
+                                                   const uint4 node,
                                                    int offset)
 {
 #ifdef __RAY_DIFFERENTIALS__
   float3 data = zero_float3();
-  uint type = node.y;
-  uint out_offset = node.z;
+  const uint type = node.y;
+  const uint out_offset = node.z;
+  const float bump_filter_width = __uint_as_float(node.w);
 
-  switch (type) {
-    case NODE_TEXCO_OBJECT: {
-      data = svm_node_bump_P_dy(sd);
-      if (node.w == 0) {
+  switch ((NodeTexCoord)type) {
+    case NODE_TEXCO_OBJECT:
+    case NODE_TEXCO_OBJECT_WITH_TRANSFORM: {
+      data = svm_node_bump_P_dy(sd, bump_filter_width);
+      if (type == NODE_TEXCO_OBJECT) {
         if (sd->object != OBJECT_NONE) {
           object_inverse_position_transform(kg, sd, &data);
         }
@@ -208,33 +268,29 @@ ccl_device_noinline int svm_node_tex_coord_bump_dy(KernelGlobals kg,
       break;
     }
     case NODE_TEXCO_NORMAL: {
-      data = sd->N;
-      object_inverse_normal_transform(kg, sd, &data);
+      data = texco_normal_from_uv(
+          kg, sd, sd->u + sd->du.dy * bump_filter_width, sd->v + sd->dv.dy * bump_filter_width);
       break;
     }
     case NODE_TEXCO_CAMERA: {
-      Transform tfm = kernel_data.cam.worldtocamera;
-
-      if (sd->object != OBJECT_NONE)
-        data = transform_point(&tfm, svm_node_bump_P_dy(sd));
-      else
-        data = transform_point(&tfm, svm_node_bump_P_dy(sd) + camera_position(kg));
+      const float3 P = svm_node_bump_P_dy(sd, bump_filter_width);
+      data = svm_texco_camera(kg, sd, P);
       break;
     }
     case NODE_TEXCO_WINDOW: {
       if ((path_flag & PATH_RAY_CAMERA) && sd->object == OBJECT_NONE &&
           kernel_data.cam.type == CAMERA_ORTHOGRAPHIC)
+      {
         data = camera_world_to_ndc(kg, sd, sd->ray_P);
-      else
-        data = camera_world_to_ndc(kg, sd, svm_node_bump_P_dy(sd));
+      }
+      else {
+        data = camera_world_to_ndc(kg, sd, svm_node_bump_P_dy(sd, bump_filter_width));
+      }
       data.z = 0.0f;
       break;
     }
     case NODE_TEXCO_REFLECTION: {
-      if (sd->object != OBJECT_NONE)
-        data = 2.0f * dot(sd->N, sd->wi) * sd->N - sd->wi;
-      else
-        data = sd->wi;
+      data = svm_texco_reflection(sd);
       break;
     }
     case NODE_TEXCO_DUPLI_GENERATED: {
@@ -246,11 +302,12 @@ ccl_device_noinline int svm_node_tex_coord_bump_dy(KernelGlobals kg,
       break;
     }
     case NODE_TEXCO_VOLUME_GENERATED: {
-      data = svm_node_bump_P_dy(sd);
+      data = svm_node_bump_P_dy(sd, bump_filter_width);
 
 #  ifdef __VOLUME__
-      if (sd->object != OBJECT_NONE)
+      if (sd->object != OBJECT_NONE) {
         data = volume_normalized_position(kg, sd, data);
+      }
 #  endif
       break;
     }
@@ -266,21 +323,26 @@ ccl_device_noinline int svm_node_tex_coord_bump_dy(KernelGlobals kg,
 ccl_device_noinline void svm_node_normal_map(KernelGlobals kg,
                                              ccl_private ShaderData *sd,
                                              ccl_private float *stack,
-                                             uint4 node)
+                                             const uint4 node)
 {
-  uint color_offset, strength_offset, normal_offset, space;
+  uint color_offset;
+  uint strength_offset;
+  uint normal_offset;
+  uint space;
   svm_unpack_node_uchar4(node.y, &color_offset, &strength_offset, &normal_offset, &space);
 
   float3 color = stack_load_float3(stack, color_offset);
   color = 2.0f * make_float3(color.x - 0.5f, color.y - 0.5f, color.z - 0.5f);
 
-  bool is_backfacing = (sd->flag & SD_BACKFACING) != 0;
+  const bool is_backfacing = (sd->flag & SD_BACKFACING) != 0;
   float3 N;
   float strength = stack_load_float(stack, strength_offset);
+  bool linear_interpolate_strength = false;
+
   if (space == NODE_NORMAL_MAP_TANGENT) {
     /* tangent space */
     if (sd->object == OBJECT_NONE || (sd->type & PRIMITIVE_TRIANGLE) == 0) {
-      /* Fallback to unperturbed normal. */
+      /* Fall back to unperturbed normal. */
       stack_store_float3(stack, normal_offset, sd->N);
       return;
     }
@@ -290,18 +352,29 @@ ccl_device_noinline void svm_node_normal_map(KernelGlobals kg,
     const AttributeDescriptor attr_sign = find_attribute(kg, sd, node.w);
 
     if (attr.offset == ATTR_STD_NOT_FOUND || attr_sign.offset == ATTR_STD_NOT_FOUND) {
-      /* Fallback to unperturbed normal. */
+      /* Fall back to unperturbed normal. */
       stack_store_float3(stack, normal_offset, sd->N);
       return;
     }
 
     /* get _unnormalized_ interpolated normal and tangent */
-    float3 tangent = primitive_surface_attribute_float3(kg, sd, attr, NULL, NULL);
-    float sign = primitive_surface_attribute_float(kg, sd, attr_sign, NULL, NULL);
+    const float3 tangent = primitive_surface_attribute<float3>(kg, sd, attr).val;
+    const float sign = primitive_surface_attribute<float>(kg, sd, attr_sign).val;
     float3 normal;
 
     if (sd->shader & SHADER_SMOOTH_NORMAL) {
-      normal = triangle_smooth_normal_unnormalized(kg, sd, sd->Ng, sd->prim, sd->u, sd->v);
+      const AttributeDescriptor attr_undisplaced_normal = find_attribute(
+          kg, sd->object, sd->prim, ATTR_STD_NORMAL_UNDISPLACED);
+      if (attr_undisplaced_normal.offset != ATTR_STD_NOT_FOUND) {
+        normal =
+            primitive_surface_attribute<float3>(kg, sd, attr_undisplaced_normal, false, false).val;
+        /* Can't interpolate in tangent space as the displaced normal is not used
+         * for the tangent frame. */
+        linear_interpolate_strength = true;
+      }
+      else {
+        normal = triangle_smooth_normal_unnormalized(kg, sd, sd->Ng, sd->prim, sd->u, sd->v);
+      }
     }
     else {
       normal = sd->Ng;
@@ -314,13 +387,15 @@ ccl_device_noinline void svm_node_normal_map(KernelGlobals kg,
       object_inverse_normal_transform(kg, sd, &normal);
     }
     /* Apply strength in the tangent case. */
-    color.x *= strength;
-    color.y *= strength;
-    color.z = mix(1.0f, color.z, saturatef(strength));
+    if (!linear_interpolate_strength) {
+      color.x *= strength;
+      color.y *= strength;
+      color.z = mix(1.0f, color.z, saturatef(strength));
+    }
 
     /* apply normal map */
-    float3 B = sign * cross(normal, tangent);
-    N = safe_normalize(color.x * tangent + color.y * B + color.z * normal);
+    const float3 B = sign * cross(normal, tangent);
+    N = safe_normalize(to_global(color, tangent, B, normal));
 
     /* transform to world space */
     object_normal_transform(kg, sd, &N);
@@ -331,6 +406,8 @@ ccl_device_noinline void svm_node_normal_map(KernelGlobals kg,
     }
   }
   else {
+    linear_interpolate_strength = true;
+
     /* strange blender convention */
     if (space == NODE_NORMAL_MAP_BLENDER_OBJECT || space == NODE_NORMAL_MAP_BLENDER_WORLD) {
       color.y = -color.y;
@@ -351,15 +428,15 @@ ccl_device_noinline void svm_node_normal_map(KernelGlobals kg,
     if (is_backfacing) {
       N = -N;
     }
-
-    /* Apply strength in all but tangent space. */
-    if (strength != 1.0f) {
-      strength = max(strength, 0.0f);
-      N = safe_normalize(sd->N + (N - sd->N) * strength);
-    }
   }
 
-  if (is_zero(N)) {
+  /* Use simple linear interpolation if we can't do it in tangent space. */
+  if (linear_interpolate_strength && strength != 1.0f) {
+    strength = max(strength, 0.0f);
+    N = safe_normalize(sd->N + (N - sd->N) * strength);
+  }
+
+  if (is_zero(N) || !isfinite_safe(N)) {
     N = sd->N;
   }
 
@@ -369,9 +446,11 @@ ccl_device_noinline void svm_node_normal_map(KernelGlobals kg,
 ccl_device_noinline void svm_node_tangent(KernelGlobals kg,
                                           ccl_private ShaderData *sd,
                                           ccl_private float *stack,
-                                          uint4 node)
+                                          const uint4 node)
 {
-  uint tangent_offset, direction_type, axis;
+  uint tangent_offset;
+  uint direction_type;
+  uint axis;
   svm_unpack_node_uchar3(node.y, &tangent_offset, &direction_type, &axis);
 
   float3 tangent;
@@ -379,13 +458,13 @@ ccl_device_noinline void svm_node_tangent(KernelGlobals kg,
   const AttributeDescriptor desc = find_attribute(kg, sd, node.z);
   if (desc.offset != ATTR_STD_NOT_FOUND) {
     if (desc.type == NODE_ATTR_FLOAT2) {
-      float2 value = primitive_surface_attribute_float2(kg, sd, desc, NULL, NULL);
+      const float2 value = primitive_surface_attribute<float2>(kg, sd, desc).val;
       attribute_value.x = value.x;
       attribute_value.y = value.y;
       attribute_value.z = 0.0f;
     }
     else {
-      attribute_value = primitive_surface_attribute_float3(kg, sd, desc, NULL, NULL);
+      attribute_value = primitive_surface_attribute<float3>(kg, sd, desc).val;
     }
   }
 
@@ -395,25 +474,28 @@ ccl_device_noinline void svm_node_tangent(KernelGlobals kg,
       stack_store_float3(stack, tangent_offset, zero_float3());
       return;
     }
-    else {
-      tangent = attribute_value;
-    }
+    tangent = attribute_value;
   }
   else {
     /* radial */
     float3 generated;
 
-    if (desc.offset == ATTR_STD_NOT_FOUND)
+    if (desc.offset == ATTR_STD_NOT_FOUND) {
       generated = sd->P;
-    else
+    }
+    else {
       generated = attribute_value;
+    }
 
-    if (axis == NODE_TANGENT_AXIS_X)
+    if (axis == NODE_TANGENT_AXIS_X) {
       tangent = make_float3(0.0f, -(generated.z - 0.5f), (generated.y - 0.5f));
-    else if (axis == NODE_TANGENT_AXIS_Y)
+    }
+    else if (axis == NODE_TANGENT_AXIS_Y) {
       tangent = make_float3(-(generated.z - 0.5f), 0.0f, (generated.x - 0.5f));
-    else
+    }
+    else {
       tangent = make_float3(-(generated.y - 0.5f), (generated.x - 0.5f), 0.0f);
+    }
   }
 
   object_normal_transform(kg, sd, &tangent);

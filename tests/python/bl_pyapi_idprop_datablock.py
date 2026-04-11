@@ -46,18 +46,21 @@ def expect_false_or_abort(expr, msg=None):
         print_fail_msg_and_exit(msg)
 
 
-def expect_exception_or_abort(*, fn, ex):
+def expect_exception_or_abort(*, fn, ex, finalize=None):
     try:
         fn()
         exception = False
     except ex:
         exception = True
+    finally:
+        if finalize:
+            finalize()
     if exception:
         return  # OK
     print_fail_msg_and_exit("test failed")
 
 
-def expect_output_or_abort(*, fn, match_stderr=None, match_stdout=None):
+def expect_output_or_abort(*, fn, match_stderr=None, match_stdout=None, finalize=None):
 
     stdout, stderr = io.StringIO(), io.StringIO()
 
@@ -70,6 +73,9 @@ def expect_output_or_abort(*, fn, match_stderr=None, match_stdout=None):
         output = handle.getvalue()
         if not re.match(match, output):
             print_fail_msg_and_exit("%r not found in %r" % (match, output))
+
+    if finalize:
+        finalize()
 
 
 class TestClass(bpy.types.PropertyGroup):
@@ -93,6 +99,12 @@ def init():
         name="prop_array",
         type=TestClass)
     bpy.types.Object.prop = bpy.props.PointerProperty(type=bpy.types.Object)
+
+
+def finalize():
+    del bpy.types.Object.prop_array
+    del bpy.types.Object.prop
+    bpy.utils.unregister_class(TestClass)
 
 
 def make_lib():
@@ -119,9 +131,11 @@ def make_lib():
         bpy.context.collection.objects.link(ob)
 
     # nodes
-    bpy.data.scenes["Scene"].use_nodes = True
-    bpy.data.scenes["Scene"].node_tree.nodes['Render Layers']["prop"] =\
-        bpy.data.objects['Camera']
+    tree = bpy.data.node_groups.new("Compositor Nodes", "CompositorNodeTree")
+    bpy.data.scenes["Scene"].compositing_node_group = tree
+    rlayers = tree.nodes.new(type="CompositorNodeRLayers")
+    sys_idprops = rlayers.bl_system_properties_get(do_create=True)
+    sys_idprops["prop"] = bpy.data.objects['Camera']
 
     # rename scene and save
     bpy.data.scenes["Scene"].name = "Scene_lib"
@@ -174,10 +188,10 @@ def check_linked_scene_copying():
 
     # check node's props
     # must point to own scene camera
+    intern_sys_idprops = intern_sce.compositing_node_group.nodes['Render Layers'].bl_system_properties_get()
+    extern_sys_idprops = extern_sce.compositing_node_group.nodes['Render Layers'].bl_system_properties_get()
     expect_false_or_abort(
-        intern_sce.node_tree.nodes['Render Layers']["prop"] and
-        not (intern_sce.node_tree.nodes['Render Layers']["prop"] ==
-             extern_sce.node_tree.nodes['Render Layers']["prop"]))
+        intern_sys_idprops["prop"] and not (intern_sys_idprops["prop"] == extern_sys_idprops["prop"]))
 
 
 def check_scene_copying():
@@ -196,9 +210,9 @@ def check_scene_copying():
 
     # check node's props
     # must point to own scene camera
-    expect_false_or_abort(
-        not (first_sce.node_tree.nodes['Render Layers']["prop"] ==
-             second_sce.node_tree.nodes['Render Layers']["prop"]))
+    first_sys_idprops = first_sce.compositing_node_group.nodes['Render Layers'].bl_system_properties_get()
+    second_sys_idprops = second_sce.compositing_node_group.nodes['Render Layers'].bl_system_properties_get()
+    expect_false_or_abort(not (first_sys_idprops["prop"] == second_sys_idprops["prop"]))
 
 
 # count users
@@ -269,7 +283,9 @@ def test_restrictions1():
     expect_output_or_abort(
         fn=lambda: bpy.utils.register_class(TEST_Op),
         match_stderr="^ValueError: bpy_struct \"SCENE_OT_test_op\" registration error:",
+        finalize=lambda: bpy.utils.unregister_class(TEST_Op),
     )
+    bpy.utils.unregister_class(TEST_PT_DatablockProp)
 
     def poll(self, value):
         return value.name in bpy.data.scenes["Scene_lib"].objects
@@ -347,10 +363,12 @@ def test_restrictions2():
     expect_exception_or_abort(
         fn=lambda: bpy.utils.register_class(TestPrefs),
         ex=ValueError,
+        finalize=lambda: bpy.utils.unregister_class(TestPrefs),
     )
     expect_exception_or_abort(
         fn=lambda: bpy.utils.register_class(TEST_UL_list),
         ex=ValueError,
+        finalize=lambda: bpy.utils.unregister_class(TEST_UL_list),
     )
 
     bpy.utils.unregister_class(TestClassCollection)
@@ -372,6 +390,7 @@ def main():
             ex=AttributeError,
         )
         test_restrictions2()
+        finalize()
 
 
 if __name__ == "__main__":

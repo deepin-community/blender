@@ -3,11 +3,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
-#include "BLI_utildefines.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <stddef.h>
 
 /** \file
  * \ingroup bke
@@ -21,9 +17,9 @@ extern "C" {
  */
 
 /** Blender major and minor version. */
-#define BLENDER_VERSION 403
+#define BLENDER_VERSION 500
 /** Blender patch version for bug-fix releases. */
-#define BLENDER_VERSION_PATCH 2
+#define BLENDER_VERSION_PATCH 1
 /** Blender release cycle stage: alpha/beta/rc/release. */
 #define BLENDER_VERSION_CYCLE release
 /** Blender release type suffix. LTS or blank. */
@@ -31,7 +27,7 @@ extern "C" {
 
 /* Blender file format version. */
 #define BLENDER_FILE_VERSION BLENDER_VERSION
-#define BLENDER_FILE_SUBVERSION 34
+#define BLENDER_FILE_SUBVERSION 119
 
 /* Minimum Blender version that supports reading file written with the current
  * version. Older Blender versions will test this and cancel loading the file, showing a warning to
@@ -40,8 +36,8 @@ extern "C" {
  * See
  * https://developer.blender.org/docs/handbook/guidelines/compatibility_handling_for_blend_files/
  * for details. */
-#define BLENDER_FILE_MIN_VERSION 306
-#define BLENDER_FILE_MIN_SUBVERSION 13
+#define BLENDER_FILE_MIN_VERSION 405
+#define BLENDER_FILE_MIN_SUBVERSION 85
 
 /** User readable version string. */
 const char *BKE_blender_version_string(void);
@@ -69,7 +65,3 @@ void BKE_blender_version_blendfile_string_from_values(char *str_buff,
                                                       const size_t str_buff_maxncpy,
                                                       const short file_version,
                                                       const short file_subversion);
-
-#ifdef __cplusplus
-}
-#endif

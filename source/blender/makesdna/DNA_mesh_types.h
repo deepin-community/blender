@@ -9,6 +9,7 @@
 #pragma once
 
 #include "DNA_ID.h"
+#include "DNA_attribute_types.h"
 #include "DNA_customdata_types.h"
 #include "DNA_defs.h"
 #include "DNA_session_uid_types.h"
@@ -20,6 +21,7 @@
 
 #  include "BLI_math_vector_types.hh"
 #  include "BLI_memory_counter_fwd.hh"
+#  include "BLI_vector_set.hh"
 
 namespace blender {
 template<typename T> struct Bounds;
@@ -32,6 +34,7 @@ using offset_indices::OffsetIndices;
 template<typename T> class MutableSpan;
 template<typename T> class Span;
 namespace bke {
+struct BVHTreeFromMesh;
 struct MeshRuntime;
 class AttributeAccessor;
 class MutableAttributeAccessor;
@@ -46,7 +49,6 @@ typedef struct MeshRuntimeHandle MeshRuntimeHandle;
 #endif
 
 struct AnimData;
-struct Ipo;
 struct Key;
 struct MCol;
 struct MEdge;
@@ -54,14 +56,16 @@ struct MFace;
 struct Material;
 
 typedef struct Mesh {
+#ifdef __cplusplus
   DNA_DEFINE_CXX_METHODS(Mesh)
+  /** See #ID_Type comment for why this is here. */
+  static constexpr ID_Type id_type = ID_ME;
+#endif
 
   ID id;
   /** Animation data (must be immediately after id for utilities to use it). */
   struct AnimData *adt;
 
-  /** Old animation system, deprecated for 2.5. */
-  struct Ipo *ipo DNA_DEPRECATED;
   struct Key *key;
 
   /**
@@ -87,6 +91,12 @@ typedef struct Mesh {
    * Avoid accessing directly when possible.
    */
   int *face_offset_indices;
+
+  /**
+   * Vertex, edge, face, and corner generic attributes. Currently unused at runtime, but used for
+   * forward compatibility when reading files (see #122398).
+   */
+  struct AttributeStorage attribute_storage;
 
   CustomData vert_data;
   CustomData edge_data;
@@ -166,6 +176,17 @@ typedef struct Mesh {
   char *default_color_attribute;
 
   /**
+   * The UV map currently selected in the list and edited by a user.
+   * Currently only used for file reading/writing (see #AttributeStorage).
+   */
+  char *active_uv_map_attribute;
+  /**
+   * The UV map used by default (i.e. for rendering) if no name is given explicitly.
+   * Currently only used for file reading/writing (see #AttributeStorage).
+   */
+  char *default_uv_map_attribute;
+
+  /**
    * User-defined symmetry flag (#eMeshSymmetryType) that causes editing operations to maintain
    * symmetrical geometry. Supported by operations such as transform and weight-painting.
    */
@@ -217,7 +238,8 @@ typedef struct Mesh {
   /* Deprecated size of #fdata. */
   int totface_legacy;
 
-  char _pad1[4];
+  char _pad1;
+  int8_t radial_symmetry[3];
 
   /**
    * Data that isn't saved in files, including caches of derived data, temporary data to improve
@@ -258,7 +280,7 @@ typedef struct Mesh {
   blender::MutableSpan<int> face_offsets_for_write();
 
   /**
-   * Array of vertices for every face corner,  stored in the ".corner_vert" integer attribute.
+   * Array of vertices for every face corner, stored in the ".corner_vert" integer attribute.
    * For example, the vertices in a face can be retrieved with the #slice method:
    * \code{.cc}
    * const Span<int> face_verts = corner_verts.slice(face);
@@ -307,6 +329,12 @@ typedef struct Mesh {
 
   /** Set cached mesh bounds to a known-correct value to avoid their lazy calculation later on. */
   void bounds_set_eager(const blender::Bounds<blender::float3> &bounds);
+
+  /** Get the largest material index used by the mesh or `nullopt` if it has no faces. */
+  std::optional<int> material_index_max() const;
+
+  /** Get all the material indices actually used by the mesh. */
+  const blender::VectorSet<int> &material_indices_used() const;
 
   /**
    * Cached map containing the index of the face using each face corner.
@@ -384,19 +412,33 @@ typedef struct Mesh {
    * Normal direction of faces, defined by positions and the winding direction of face corners.
    */
   blender::Span<blender::float3> face_normals() const;
+  blender::Span<blender::float3> face_normals_true() const;
   /**
    * Normal direction of vertices, defined as the weighted average of face normals
    * surrounding each vertex and the normalized position for loose vertices.
    */
   blender::Span<blender::float3> vert_normals() const;
+  blender::Span<blender::float3> vert_normals_true() const;
   /**
    * Normal direction at each face corner. Defined by a combination of face normals, vertex
    * normals, the `sharp_edge` and `sharp_face` attributes, and potentially by custom normals.
    *
    * \note Because of the large memory requirements of storing normals per face corner, prefer
-   * using #face_normals() or #vert_normals() when possible (see #normals_domain()).
+   * using #face_normals() or #vert_normals() when possible (see #normals_domain()). For this
+   * reason, the "true" face corner normals aren't cached, since they're just the same as the
+   * corresponding face normals.
    */
   blender::Span<blender::float3> corner_normals() const;
+
+  blender::bke::BVHTreeFromMesh bvh_verts() const;
+  blender::bke::BVHTreeFromMesh bvh_edges() const;
+  blender::bke::BVHTreeFromMesh bvh_legacy_faces() const;
+  blender::bke::BVHTreeFromMesh bvh_corner_tris() const;
+  blender::bke::BVHTreeFromMesh bvh_corner_tris_no_hidden() const;
+  blender::bke::BVHTreeFromMesh bvh_loose_verts() const;
+  blender::bke::BVHTreeFromMesh bvh_loose_edges() const;
+  blender::bke::BVHTreeFromMesh bvh_loose_no_hidden_verts() const;
+  blender::bke::BVHTreeFromMesh bvh_loose_no_hidden_edges() const;
 
   void count_memory(blender::MemoryCounter &memory) const;
 
@@ -408,7 +450,7 @@ typedef struct Mesh {
   void tag_positions_changed_no_normals();
   /** Call when changing "sharp_face" or "sharp_edge" data. */
   void tag_sharpness_changed();
-  /** Call when changing #CD_CUSTOMLOOPNORMAL data. */
+  /** Call when changing "custom_normal" data. */
   void tag_custom_normals_changed();
   /** Call when face vertex order has changed but positions and faces haven't changed. */
   void tag_face_winding_changed();
@@ -416,6 +458,10 @@ typedef struct Mesh {
   void tag_edges_split();
   /** Call for topology updates not described by other update tags. */
   void tag_topology_changed();
+  /** Call when changing the ".hide_vert", ".hide_edge", or ".hide_poly" attributes. */
+  void tag_visibility_changed();
+  /** Call when changing the "material_index" attribute. */
+  void tag_material_index_changed();
 #endif
 } Mesh;
 
@@ -468,7 +514,11 @@ enum {
   ME_FLAG_UNUSED_0 = 1 << 0,     /* cleared */
   ME_FLAG_UNUSED_1 = 1 << 1,     /* cleared */
   ME_FLAG_DEPRECATED_2 = 1 << 2, /* deprecated */
-  ME_FLAG_UNUSED_3 = 1 << 3,     /* cleared */
+  /**
+   * The UV selection is marked as synchronized.
+   * See #BMesh::uv_select_sync_valid for details.
+   */
+  ME_FLAG_UV_SELECT_SYNC_VALID = 1 << 3,
   ME_FLAG_UNUSED_4 = 1 << 4,     /* cleared */
   ME_AUTOSMOOTH_LEGACY = 1 << 5, /* deprecated */
   ME_FLAG_UNUSED_6 = 1 << 6,     /* cleared */
@@ -505,10 +555,10 @@ enum {
 };
 
 /** #SubsurfModifierData.subdivType */
-enum {
+typedef enum MeshSubdivType {
   ME_CC_SUBSURF = 0,
   ME_SIMPLE_SUBSURF = 1,
-};
+} MeshSubdivType;
 
 /** #Mesh.symmetry */
 typedef enum eMeshSymmetryType {

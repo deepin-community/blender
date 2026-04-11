@@ -8,19 +8,21 @@ CCL_NAMESPACE_BEGIN
 
 class SkyLoader : public ImageLoader {
  private:
+  bool multiple_scattering;
   float sun_elevation;
   float altitude;
   float air_density;
-  float dust_density;
+  float aerosol_density;
   float ozone_density;
 
  public:
-  SkyLoader(float sun_elevation,
-            float altitude,
-            float air_density,
-            float dust_density,
-            float ozone_density);
-  ~SkyLoader();
+  SkyLoader(const bool multiple_scattering,
+            const float sun_elevation,
+            const float altitude,
+            const float air_density,
+            const float aerosol_density,
+            const float ozone_density);
+  ~SkyLoader() override;
 
   bool load_metadata(const ImageDeviceFeatures &features, ImageMetaData &metadata) override;
 

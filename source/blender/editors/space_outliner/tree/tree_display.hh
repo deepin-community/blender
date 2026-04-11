@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 
 struct ID;
@@ -30,9 +31,10 @@ struct Library;
 struct ListBase;
 struct Main;
 struct Scene;
-struct Sequence;
+struct Strip;
 struct SpaceOutliner;
 struct ViewLayer;
+struct WorkSpace;
 
 namespace blender::ed::outliner {
 
@@ -44,11 +46,12 @@ class TreeElementID;
  */
 struct TreeSourceData {
   Main *bmain;
+  WorkSpace *workspace;
   Scene *scene;
   ViewLayer *view_layer;
 
-  TreeSourceData(Main &bmain, Scene &scene, ViewLayer &view_layer)
-      : bmain(&bmain), scene(&scene), view_layer(&view_layer)
+  TreeSourceData(Main &bmain, WorkSpace &workspace, Scene &scene, ViewLayer &view_layer)
+      : bmain(&bmain), workspace(&workspace), scene(&scene), view_layer(&view_layer)
   {
   }
 };
@@ -217,11 +220,7 @@ class TreeDisplayOverrideLibraryHierarchies final : public AbstractTreeDisplay {
 /* -------------------------------------------------------------------- */
 /* Video Sequencer Tree-Display */
 
-enum SequenceAddOp {
-  SEQUENCE_DUPLICATE_NOOP = 0,
-  SEQUENCE_DUPLICATE_ADD,
-  SEQUENCE_DUPLICATE_NONE
-};
+enum class StripAddOp : int8_t { Noop = 0, Add, None };
 
 /**
  * \brief Tree-Display for the Video Sequencer display mode
@@ -237,8 +236,8 @@ class TreeDisplaySequencer final : public AbstractTreeDisplay {
   /**
    * Helped function to put duplicate sequence in the same tree.
    */
-  SequenceAddOp need_add_seq_dup(Sequence *seq) const;
-  void add_seq_dup(Sequence *seq, TreeElement *te, short index);
+  StripAddOp need_add_strip_dup(Strip *strip) const;
+  void add_strip_dup(Strip *strip, TreeElement *te, short index);
 };
 
 /* -------------------------------------------------------------------- */

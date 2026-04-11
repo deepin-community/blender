@@ -11,7 +11,7 @@
 #include "BKE_image.hh"
 #include "BKE_layer.hh"
 #include "BKE_main.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 
 #include "DNA_layer_types.h"
 #include "DNA_material_types.h"
@@ -19,11 +19,11 @@
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_compiler_attrs.h"
 #include "BLI_dynstr.h"
 #include "BLI_hash_mm3.hh"
 #include "BLI_listbase.h"
 #include "BLI_string.h"
+#include "BLI_string_utf8.h"
 
 #include "RE_pipeline.h"
 
@@ -34,7 +34,6 @@
 #include <iomanip>
 #include <sstream>
 #include <string>
-#include <string_view>
 
 struct CryptomatteSession {
   blender::Map<std::string, blender::bke::cryptomatte::CryptomatteLayer> layers;
@@ -51,9 +50,7 @@ struct CryptomatteSession {
   blender::bke::cryptomatte::CryptomatteLayer &add_layer(std::string layer_name);
   std::optional<std::string> operator[](float encoded_hash) const;
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("cryptomatte:CryptomatteSession")
-#endif
 };
 
 CryptomatteSession::CryptomatteSession(const Main *bmain)
@@ -63,6 +60,15 @@ CryptomatteSession::CryptomatteSession(const Main *bmain)
         RE_PASSNAME_CRYPTOMATTE_OBJECT);
     LISTBASE_FOREACH (ID *, id, &bmain->objects) {
       objects.add_ID(*id);
+    }
+
+    blender::bke::cryptomatte::CryptomatteLayer &assets = add_layer(RE_PASSNAME_CRYPTOMATTE_ASSET);
+    LISTBASE_FOREACH (ID *, id, &bmain->objects) {
+      const Object *asset_object = reinterpret_cast<Object *>(id);
+      while (asset_object->parent != nullptr) {
+        asset_object = asset_object->parent;
+      }
+      assets.add_ID(asset_object->id);
     }
   }
   if (!BLI_listbase_is_empty(&bmain->materials)) {
@@ -112,10 +118,12 @@ void CryptomatteSession::init(const ViewLayer *view_layer, bool build_meta_data)
   eViewLayerCryptomatteFlags cryptoflags = static_cast<eViewLayerCryptomatteFlags>(
       view_layer->cryptomatte_flag & VIEW_LAYER_CRYPTOMATTE_ALL);
   if (cryptoflags == 0) {
-    cryptoflags = static_cast<eViewLayerCryptomatteFlags>(VIEW_LAYER_CRYPTOMATTE_ALL);
+    cryptoflags = VIEW_LAYER_CRYPTOMATTE_ALL;
   }
 
-  ListBase *object_bases = BKE_view_layer_object_bases_get(const_cast<ViewLayer *>(view_layer));
+  ListBase *object_bases = build_meta_data ? BKE_view_layer_object_bases_get(
+                                                 const_cast<ViewLayer *>(view_layer)) :
+                                             nullptr;
 
   if (cryptoflags & VIEW_LAYER_CRYPTOMATTE_OBJECT) {
     blender::bke::cryptomatte::CryptomatteLayer &objects = add_layer(
@@ -129,7 +137,18 @@ void CryptomatteSession::init(const ViewLayer *view_layer, bool build_meta_data)
   }
 
   if (cryptoflags & VIEW_LAYER_CRYPTOMATTE_ASSET) {
-    add_layer(blender::StringRefNull(view_layer->name) + "." + RE_PASSNAME_CRYPTOMATTE_ASSET);
+    blender::bke::cryptomatte::CryptomatteLayer &assets = add_layer(
+        blender::StringRefNull(view_layer->name) + "." + RE_PASSNAME_CRYPTOMATTE_ASSET);
+
+    if (build_meta_data) {
+      LISTBASE_FOREACH (Base *, base, object_bases) {
+        const Object *asset_object = base->object;
+        while (asset_object->parent != nullptr) {
+          asset_object = asset_object->parent;
+        }
+        assets.add_ID(asset_object->id);
+      }
+    }
   }
 
   if (cryptoflags & VIEW_LAYER_CRYPTOMATTE_MATERIAL) {
@@ -256,7 +275,7 @@ bool BKE_cryptomatte_find_name(const CryptomatteSession *session,
     return false;
   }
 
-  BLI_strncpy(r_name, name->c_str(), name_maxncpy);
+  BLI_strncpy_utf8(r_name, name->c_str(), name_maxncpy);
   return true;
 }
 
@@ -268,7 +287,7 @@ char *BKE_cryptomatte_entries_to_matte_id(NodeCryptomatte *node_storage)
     if (!first) {
       BLI_dynstr_append(matte_id, ",");
     }
-    if (BLI_strnlen(entry->name, sizeof(entry->name)) != 0) {
+    if (entry->name[0] != '\0') {
       BLI_dynstr_nappend(matte_id, entry->name, sizeof(entry->name));
     }
     else {
@@ -313,13 +332,13 @@ void BKE_cryptomatte_matte_id_to_entries(NodeCryptomatte *node_storage, const ch
       token = token.substr(first, (last - first + 1));
       if (*token.begin() == '<' && *(--token.end()) == '>') {
         float encoded_hash = atof(token.substr(1, token.length() - 2).c_str());
-        entry = MEM_cnew<CryptomatteEntry>(__func__);
+        entry = MEM_callocN<CryptomatteEntry>(__func__);
         entry->encoded_hash = encoded_hash;
       }
       else {
         const char *name = token.c_str();
         int name_len = token.length();
-        entry = MEM_cnew<CryptomatteEntry>(__func__);
+        entry = MEM_callocN<CryptomatteEntry>(__func__);
         STRNCPY(entry->name, name);
         uint32_t hash = BKE_cryptomatte_hash(name, name_len);
         entry->encoded_hash = BKE_cryptomatte_hash_to_float(hash);

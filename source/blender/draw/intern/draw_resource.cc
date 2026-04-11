@@ -6,13 +6,10 @@
  * \ingroup draw
  */
 
-#include "DNA_particle_types.h"
-#include "RNA_access.hh"
-#include "RNA_path.hh"
-#include "RNA_types.hh"
+#include "BKE_duplilist.hh"
+#include "GPU_material.hh"
 
 #include "draw_handle.hh"
-#include "draw_manager.hh"
 #include "draw_shader_shared.hh"
 
 /* -------------------------------------------------------------------- */
@@ -22,15 +19,8 @@
 bool ObjectAttribute::sync(const blender::draw::ObjectRef &ref, const GPUUniformAttr &attr)
 {
   /* This function mirrors `lookup_instance_property` in `cycles/blender/blender_object.cpp`. */
-
   hash_code = attr.hash_code;
-
-  /* If requesting instance data, check the parent particle system and object. */
-  if (attr.use_dupli) {
-    return BKE_object_dupli_find_rgba_attribute(
-        ref.object, ref.dupli_object, ref.dupli_parent, attr.name, &data_x);
-  }
-  return BKE_object_dupli_find_rgba_attribute(ref.object, nullptr, nullptr, attr.name, &data_x);
+  return ref.find_rgba_attribute(attr, &data_x);
 }
 
 /** \} */

@@ -2,6 +2,10 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+__all__ = (
+    "classes",
+)
+
 from bpy.types import Operator
 
 from bpy.props import (
@@ -16,9 +20,9 @@ STATUS_ERR_MISSING_UV_LAYER = (1 << 4)
 STATUS_ERR_NO_FACES_SELECTED = (1 << 5)
 
 
-def extend(obj, EXTEND_MODE, use_uv_selection):
+def extend(scene, obj, EXTEND_MODE, use_uv_selection):
     import bmesh
-    from .uvcalc_transform import is_face_uv_selected
+    from .uvcalc_transform import is_face_uv_selected_fn_from_context
 
     me = obj.data
 
@@ -37,9 +41,10 @@ def extend(obj, EXTEND_MODE, use_uv_selection):
         return STATUS_ERR_MISSING_UV_LAYER  # Object's mesh doesn't have any UV layers.
 
     if use_uv_selection:
+        face_select_test_fn = is_face_uv_selected_fn_from_context(scene, bm)
         faces = [
             f for f in bm.faces
-            if f.select and len(f.verts) == 4 and is_face_uv_selected(f, uv_act, False)
+            if f.select and len(f.verts) == 4 and face_select_test_fn(f, False)
         ]
     else:
         faces = [
@@ -83,28 +88,38 @@ def extend(obj, EXTEND_MODE, use_uv_selection):
             faces_a, faces_b = faces_b, faces_a
             faces_b.clear()
 
-    def walk_edgeloop(l):
-        """
-        Could make this a generic function
-        """
-        e_first = l.edge
-        e = None
-        while True:
-            e = l.edge
-            yield e
+    # Utility, only for `walk_edgeloop_all`.
+    def walk_edgeloop_all_impl_loop(loop_stack, edges_visited, l):
+        l_other = l.link_loop_next.link_loop_next
+        l_other_edge = l_other.edge
+        if l_other_edge not in edges_visited:
+            edges_visited.add(l_other_edge)
+            yield l_other_edge
+            if not l_other_edge.is_boundary:
+                loop_stack.append(l_other)
 
-            # Don't step past non-manifold edges.
-            if e.is_manifold:
-                # Walk around the quad and then onto the next face.
-                l = l.link_loop_radial_next
-                if len(l.face.verts) == 4:
-                    l = l.link_loop_next.link_loop_next
-                    if l.edge is e_first:
-                        break
-                else:
-                    break
-            else:
-                break
+    def walk_edgeloop_all(e):
+        # Walks over all edge loops connected by quads (even edges with 3+ users).
+        # Could make this a generic function.
+
+        loop_stack = []
+        edges_visited = {e}
+
+        yield e
+
+        # This initial iteration is needed because the loops never walk back over the face they come from.
+        for l in e.link_loops:
+            if len(l.face.verts) != 4:
+                continue
+            yield from walk_edgeloop_all_impl_loop(loop_stack, edges_visited, l)
+
+        while loop_stack and (l_test := loop_stack.pop()):
+            # Walk around the quad and then onto the next face.
+            l = l_test
+            while (l := l.link_loop_radial_next) is not l_test:
+                if len(l.face.verts) != 4:
+                    continue
+                yield from walk_edgeloop_all_impl_loop(loop_stack, edges_visited, l)
 
     def extrapolate_uv(
             fac,
@@ -196,25 +211,29 @@ def extend(obj, EXTEND_MODE, use_uv_selection):
         for f in faces:
             # We know it's a quad.
             l_quad = f.loops[:]
-            l_pair_a = (l_quad[0], l_quad[2])
-            l_pair_b = (l_quad[1], l_quad[3])
 
-            for l_pair in (l_pair_a, l_pair_b):
-                if edge_lengths[l_pair[0].edge.index] is None:
+            # The opposite loops `l_quad[2]` & `l_quad[3]` are implicit (walking will handle).
+            for l_init in (l_quad[0], l_quad[1]):
+                # No need to check both because the initializing
+                # one side of the pair will have initialized the second.
+                l_init_edge = l_init.edge
+                if edge_lengths[l_init_edge.index] is not None:
+                    continue
 
-                    edge_length_store = [-1.0]
-                    edge_length_accum = 0.0
-                    edge_length_total = 0
+                edge_length_store = [-1.0]
+                edge_length_accum = 0.0
+                edge_length_total = 0
 
-                    for l in l_pair:
-                        if edge_lengths[l.edge.index] is None:
-                            for e in walk_edgeloop(l):
-                                if edge_lengths[e.index] is None:
-                                    edge_lengths[e.index] = edge_length_store
-                                    edge_length_accum += e.calc_length()
-                                    edge_length_total += 1
+                for e in walk_edgeloop_all(l_init_edge):
+                    # Any previously met edges should have expanded into `l_init_edge`
+                    # (which has no length).
+                    assert edge_lengths[e.index] is None
 
-                    edge_length_store[0] = edge_length_accum / edge_length_total
+                    edge_lengths[e.index] = edge_length_store
+                    edge_length_accum += e.calc_length()
+                    edge_length_total += 1
+
+                edge_length_store[0] = edge_length_accum / edge_length_total
 
     # done with average length
     # ------------------------
@@ -228,6 +247,7 @@ def extend(obj, EXTEND_MODE, use_uv_selection):
 
 
 def main(context, operator):
+    scene = context.scene
     use_uv_selection = True
     if context.space_data and context.space_data.type == 'VIEW_3D':
         use_uv_selection = False  # When called from the 3D editor, UV selection is ignored.
@@ -239,8 +259,7 @@ def main(context, operator):
     ob_list = context.objects_in_mode_unique_data
     for ob in ob_list:
         num_meshes += 1
-
-        ret = extend(ob, operator.properties.mode, use_uv_selection)
+        ret = extend(scene, ob, operator.properties.mode, use_uv_selection)
         if ret != STATUS_OK:
             num_errors += 1
             status |= ret

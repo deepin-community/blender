@@ -33,7 +33,8 @@ class NODE_OT_connect_to_output(Operator, NodeEditorBase):
         default=True,
     )
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.shader_output_idname = ""
 
     @classmethod
@@ -178,8 +179,10 @@ class NODE_OT_connect_to_output(Operator, NodeEditorBase):
                     if mat.node_tree == bpy.context.space_data.node_tree or not hasattr(mat.node_tree, "nodes"):
                         continue
                     # Get viewer node.
-                    output_node = get_group_output_node(mat.node_tree,
-                                                        output_node_idname=self.shader_output_idname)
+                    output_node = get_group_output_node(
+                        mat.node_tree,
+                        output_node_idname=self.shader_output_idname,
+                    )
                     if output_node is not None:
                         self.search_connected_viewer_sockets(output_node, self.other_viewer_sockets_users)
         return socket in self.other_viewer_sockets_users
@@ -189,6 +192,8 @@ class NODE_OT_connect_to_output(Operator, NodeEditorBase):
         out_i = None
         valid_outputs = []
         for i, out in enumerate(node.outputs):
+            if out.select:
+                return i
             if is_visible_socket(out) and (not check_type or out.type == socket_type):
                 valid_outputs.append(i)
         if valid_outputs:
@@ -215,7 +220,8 @@ class NODE_OT_connect_to_output(Operator, NodeEditorBase):
             viewer_socket = self.ensure_viewer_socket(
                 tree, socket_type,
                 connect_socket=node.outputs[active_node_socket_id]
-                if path_index == 0 else None)
+                if path_index == 0 else None,
+            )
             if viewer_socket in self.delete_sockets:
                 self.delete_sockets.remove(viewer_socket)
 
@@ -255,7 +261,7 @@ class NODE_OT_connect_to_output(Operator, NodeEditorBase):
 
         mlocx = event.mouse_region_x
         mlocy = event.mouse_region_y
-        select_node = bpy.ops.node.select(location=(mlocx, mlocy), extend=False)
+        select_node = bpy.ops.node.select(location=(mlocx, mlocy), extend=False, socket_select=True)
         if 'FINISHED' not in select_node:  # only run if mouse click is on a node.
             return {'CANCELLED'}
 
@@ -300,15 +306,18 @@ class NODE_OT_connect_to_output(Operator, NodeEditorBase):
             socket_type = find_base_socket_type(node_output)
             if output_node_socket_index is None:
                 output_node_socket_index = self.ensure_viewer_socket(
-                    base_node_tree, socket_type, connect_socket=None)
+                    base_node_tree, socket_type, connect_socket=None,
+                )
 
         # For shader node trees, we connect to a material output.
         elif space.tree_type == 'ShaderNodeTree':
             self.init_shader_variables(space, space.shader_type)
 
             # Get or create material_output node.
-            output_node = get_group_output_node(base_node_tree,
-                                                output_node_idname=self.shader_output_idname)
+            output_node = get_group_output_node(
+                base_node_tree,
+                output_node_idname=self.shader_output_idname,
+            )
             if not output_node:
                 output_node = base_node_tree.nodes.new(self.shader_output_idname)
                 output_node.location = get_output_location(base_node_tree)

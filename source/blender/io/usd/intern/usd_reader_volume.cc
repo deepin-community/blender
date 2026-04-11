@@ -4,8 +4,10 @@
 
 #include "usd_reader_volume.hh"
 
+#include "BLI_path_utils.hh"
 #include "BLI_string.h"
 
+#include "BKE_main.hh"
 #include "BKE_object.hh"
 #include "BKE_volume.hh"
 
@@ -15,33 +17,19 @@
 #include <pxr/usd/usdVol/openVDBAsset.h>
 #include <pxr/usd/usdVol/volume.h>
 
-namespace usdtokens {
-
-static const pxr::TfToken density("density", pxr::TfToken::Immortal);
-
-}
-
 namespace blender::io::usd {
 
-void USDVolumeReader::create_object(Main *bmain, const double /*motionSampleTime*/)
+void USDVolumeReader::create_object(Main *bmain)
 {
-  Volume *volume = (Volume *)BKE_volume_add(bmain, name_.c_str());
+  Volume *volume = BKE_volume_add(bmain, name_.c_str());
 
   object_ = BKE_object_add_only_object(bmain, OB_VOLUME, name_.c_str());
   object_->data = volume;
 }
 
-void USDVolumeReader::read_object_data(Main *bmain, const double motionSampleTime)
+void USDVolumeReader::read_object_data(Main *bmain, const pxr::UsdTimeCode time)
 {
-  if (!volume_) {
-    return;
-  }
-
   Volume *volume = static_cast<Volume *>(object_->data);
-
-  if (!volume) {
-    return;
-  }
 
   pxr::UsdVolVolume::FieldMap fields = volume_.GetFieldPaths();
 
@@ -59,29 +47,35 @@ void USDVolumeReader::read_object_data(Main *bmain, const double motionSampleTim
 
     if (filepathAttr.IsAuthored()) {
       pxr::SdfAssetPath fp;
-      filepathAttr.Get(&fp, motionSampleTime);
+      filepathAttr.Get(&fp, time);
+
+      const std::string filepath = fp.GetResolvedPath();
+      STRNCPY(volume->filepath, filepath.c_str());
+
+      if (import_params_.relative_path && !BLI_path_is_rel(volume->filepath)) {
+        BLI_path_rel(volume->filepath, BKE_main_blendfile_path_from_global());
+      }
 
       if (filepathAttr.ValueMightBeTimeVarying()) {
         std::vector<double> filePathTimes;
         filepathAttr.GetTimeSamples(&filePathTimes);
 
         if (!filePathTimes.empty()) {
-          int start = int(filePathTimes.front());
-          int end = int(filePathTimes.back());
+          const int start = int(filePathTimes.front());
+          const int end = int(filePathTimes.back());
+          const int offset = BLI_path_sequence_decode(
+              volume->filepath, nullptr, 0, nullptr, 0, nullptr);
 
           volume->is_sequence = char(true);
           volume->frame_start = start;
           volume->frame_duration = (end - start) + 1;
+          volume->frame_offset = offset - 1;
         }
       }
-
-      std::string filepath = fp.GetResolvedPath();
-
-      STRNCPY(volume->filepath, filepath.c_str());
     }
   }
 
-  USDXformReader::read_object_data(bmain, motionSampleTime);
+  USDXformReader::read_object_data(bmain, time);
 }
 
 }  // namespace blender::io::usd

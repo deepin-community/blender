@@ -2,18 +2,18 @@
  *
  * SPDX-License-Identifier: Apache-2.0 */
 
+#include "device/queue.h"
+
 #include "integrator/pass_accessor_gpu.h"
 
-#include "device/queue.h"
 #include "session/buffers.h"
-#include "util/log.h"
 
 CCL_NAMESPACE_BEGIN
 
 PassAccessorGPU::PassAccessorGPU(DeviceQueue *queue,
                                  const PassAccessInfo &pass_access_info,
-                                 float exposure,
-                                 int num_samples)
+                                 const float exposure,
+                                 const int num_samples)
     : PassAccessor(pass_access_info, exposure, num_samples), queue_(queue)
 {
 }
@@ -42,31 +42,31 @@ void PassAccessorGPU::run_film_convert_kernels(DeviceKernel kernel,
   if (destination.d_pixels) {
     DCHECK_EQ(destination.stride, 0) << "Custom stride for float destination is not implemented.";
 
-    DeviceKernelArguments args(&kfilm_convert,
-                               &destination.d_pixels,
-                               &render_buffers->buffer.device_pointer,
-                               &work_size,
-                               &buffer_params.window_width,
-                               &offset,
-                               &buffer_params.stride,
-                               &destination.pixel_offset,
-                               &destination.offset,
-                               &destination_stride);
+    const DeviceKernelArguments args(&kfilm_convert,
+                                     &destination.d_pixels,
+                                     &render_buffers->buffer.device_pointer,
+                                     &work_size,
+                                     &buffer_params.window_width,
+                                     &offset,
+                                     &buffer_params.stride,
+                                     &destination.pixel_offset,
+                                     &destination.offset,
+                                     &destination_stride);
 
     queue_->enqueue(kernel, work_size, args);
   }
   if (destination.d_pixels_half_rgba) {
     const DeviceKernel kernel_half_float = static_cast<DeviceKernel>(kernel + 1);
 
-    DeviceKernelArguments args(&kfilm_convert,
-                               &destination.d_pixels_half_rgba,
-                               &render_buffers->buffer.device_pointer,
-                               &work_size,
-                               &buffer_params.window_width,
-                               &offset,
-                               &buffer_params.stride,
-                               &destination.offset,
-                               &destination_stride);
+    const DeviceKernelArguments args(&kfilm_convert,
+                                     &destination.d_pixels_half_rgba,
+                                     &render_buffers->buffer.device_pointer,
+                                     &work_size,
+                                     &buffer_params.window_width,
+                                     &offset,
+                                     &buffer_params.stride,
+                                     &destination.offset,
+                                     &destination_stride);
 
     queue_->enqueue(kernel_half_float, work_size, args);
   }
@@ -90,11 +90,13 @@ void PassAccessorGPU::run_film_convert_kernels(DeviceKernel kernel,
 /* Float (scalar) passes. */
 DEFINE_PASS_ACCESSOR(depth, DEPTH);
 DEFINE_PASS_ACCESSOR(mist, MIST);
+DEFINE_PASS_ACCESSOR(volume_majorant, VOLUME_MAJORANT);
 DEFINE_PASS_ACCESSOR(sample_count, SAMPLE_COUNT);
 DEFINE_PASS_ACCESSOR(float, FLOAT);
 
 /* Float3 passes. */
 DEFINE_PASS_ACCESSOR(light_path, LIGHT_PATH);
+DEFINE_PASS_ACCESSOR(rgbe, RGBE);
 DEFINE_PASS_ACCESSOR(float3, FLOAT3);
 
 /* Float4 passes. */

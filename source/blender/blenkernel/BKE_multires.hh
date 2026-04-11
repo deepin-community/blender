@@ -8,11 +8,11 @@
  * \ingroup bke
  */
 
-#include "BKE_subsurf.hh"
+#include "BLI_array.hh"
+#include "BLI_math_matrix_types.hh"
 #include "BLI_utildefines.h"
 
 struct Depsgraph;
-struct DerivedMesh;
 struct MDisps;
 struct Mesh;
 struct ModifierData;
@@ -24,6 +24,14 @@ namespace blender::bke::subdiv {
 struct Settings;
 struct ToMeshSettings;
 }  // namespace blender::bke::subdiv
+
+enum MultiresModifiedFlags {
+  /* indicates the grids have been sculpted on, so MDisps
+   * have to be updated */
+  MULTIRES_COORDS_MODIFIED = 1,
+  /* indicates elements have been hidden or unhidden */
+  MULTIRES_HIDDEN_MODIFIED = 2,
+};
 
 /**
  * Delete mesh mdisps and grid paint masks.
@@ -38,25 +46,18 @@ void multires_flush_sculpt_updates(Object *object);
 void multires_force_sculpt_rebuild(Object *object);
 void multires_force_external_reload(Object *object);
 
-/* internal, only called in subsurf_ccg.cc */
-void multires_modifier_update_mdisps(DerivedMesh *dm, Scene *scene);
-void multires_modifier_update_hidden(DerivedMesh *dm);
-
 /**
  * Reset the multi-res levels to match the number of mdisps.
  */
 void multiresModifier_set_levels_from_disps(MultiresModifierData *mmd, Object *ob);
 
-enum MultiresFlags {
-  MULTIRES_USE_LOCAL_MMD = 1,
-  MULTIRES_USE_RENDER_PARAMS = 2,
-  MULTIRES_ALLOC_PAINT_MASK = 4,
-  MULTIRES_IGNORE_SIMPLIFY = 8,
+enum class MultiresFlags : uint8_t {
+  UseLocalMMD = 1,
+  UseRenderParams = 2,
+  AllocPaintMask = 4,
+  IgnoreSimplify = 8,
 };
-ENUM_OPERATORS(MultiresFlags, MULTIRES_IGNORE_SIMPLIFY);
-
-DerivedMesh *multires_make_derived_from_derived(
-    DerivedMesh *dm, MultiresModifierData *mmd, Scene *scene, Object *ob, MultiresFlags flags);
+ENUM_OPERATORS(MultiresFlags, MultiresFlags::IgnoreSimplify);
 
 MultiresModifierData *find_multires_modifier_before(Scene *scene, ModifierData *lastmd);
 /**
@@ -89,7 +90,16 @@ void multiresModifier_del_levels(MultiresModifierData *mmd,
                                  Scene *scene,
                                  Object *object,
                                  int direction);
-void multiresModifier_base_apply(Depsgraph *depsgraph, Object *object, MultiresModifierData *mmd);
+
+enum class ApplyBaseMode : int8_t {
+  Base,
+  ForSubdivision,
+};
+
+void multiresModifier_base_apply(Depsgraph *depsgraph,
+                                 Object *object,
+                                 MultiresModifierData *mmd,
+                                 ApplyBaseMode mode);
 int multiresModifier_rebuild_subdiv(Depsgraph *depsgraph,
                                     Object *object,
                                     MultiresModifierData *mmd,
@@ -129,18 +139,8 @@ void multiresModifier_ensure_external_read(Mesh *mesh, const MultiresModifierDat
 /* Adapted from `sculptmode.c` */
 
 void old_mdisps_bilinear(float out[3], float (*disps)[3], int st, float u, float v);
-/**
- * Find per-corner coordinate with given per-face UV coord.
- */
-int mdisp_rot_face_to_crn(int face_size, int face_side, float u, float v, float *x, float *y);
 
 /* Reshaping, define in multires_reshape.cc */
-
-bool multiresModifier_reshapeFromVertcos(Depsgraph *depsgraph,
-                                         Object *object,
-                                         MultiresModifierData *mmd,
-                                         const float (*vert_coords)[3],
-                                         int num_vert_coords);
 /**
  * Returns truth on success, false otherwise.
  *
@@ -159,15 +159,15 @@ bool multiresModifier_reshapeFromCCG(int tot_level, Mesh *coarse_mesh, SubdivCCG
 
 /* Subdivide multi-res displacement once. */
 
-enum eMultiresSubdivideModeType {
-  MULTIRES_SUBDIVIDE_CATMULL_CLARK,
-  MULTIRES_SUBDIVIDE_SIMPLE,
-  MULTIRES_SUBDIVIDE_LINEAR,
+enum class MultiresSubdivideModeType : int8_t {
+  CatmullClark,
+  Simple,
+  Linear,
 };
 
 void multiresModifier_subdivide(Object *object,
                                 MultiresModifierData *mmd,
-                                eMultiresSubdivideModeType mode);
+                                MultiresSubdivideModeType mode);
 void multires_subdivide_create_tangent_displacement_linear_grids(Object *object,
                                                                  MultiresModifierData *mmd);
 
@@ -178,7 +178,7 @@ void multires_subdivide_create_tangent_displacement_linear_grids(Object *object,
 void multiresModifier_subdivide_to_level(Object *object,
                                          MultiresModifierData *mmd,
                                          int top_level,
-                                         eMultiresSubdivideModeType mode);
+                                         MultiresSubdivideModeType mode);
 
 /* Subdivision integration, defined in multires_subdiv.cc */
 
@@ -202,9 +202,9 @@ void BKE_multires_subdiv_mesh_settings_init(blender::bke::subdiv::ToMeshSettings
  * Corner needs to be known to properly "rotate" partial derivatives when the
  * matrix is being constructed for quad. For non-quad the corner is to be set to 0.
  */
-BLI_INLINE void BKE_multires_construct_tangent_matrix(float tangent_matrix[3][3],
-                                                      const float dPdu[3],
-                                                      const float dPdv[3],
+BLI_INLINE void BKE_multires_construct_tangent_matrix(blender::float3x3 &tangent_matrix,
+                                                      const blender::float3 &dPdu,
+                                                      const blender::float3 &dPdv,
                                                       int corner);
 
 /* Versioning. */
@@ -215,4 +215,4 @@ BLI_INLINE void BKE_multires_construct_tangent_matrix(float tangent_matrix[3][3]
  */
 void multires_do_versions_simple_to_catmull_clark(Object *object, MultiresModifierData *mmd);
 
-#include "intern/multires_inline.hh"
+#include "intern/multires_inline.hh"  // IWYU pragma: export

@@ -8,19 +8,20 @@
 
 #include "BKE_image.hh"
 #include "BKE_node.hh"
+#include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
 
-#include "BLI_map.hh"
 #include "BLI_math_vector.h"
-#include "BLI_math_vector.hh"
 #include "BLI_path_utils.hh"
 #include "BLI_string.h"
 
 #include "DNA_material_types.h"
 #include "DNA_node_types.h"
 
-#include "obj_export_mesh.hh"
 #include "obj_export_mtl.hh"
+
+#include "CLG_log.h"
+static CLG_LogRef LOG = {"io.obj"};
 
 namespace blender::io::obj {
 
@@ -51,7 +52,7 @@ static void copy_property_from_node(const eNodeSocketDatatype property_type,
     return;
   }
   const bNodeSocket *socket = bke::node_find_socket(
-      const_cast<bNode *>(node), SOCK_IN, identifier);
+      *const_cast<bNode *>(node), SOCK_IN, identifier);
   BLI_assert(socket && socket->type == property_type);
   if (!socket) {
     return;
@@ -121,7 +122,7 @@ static const bNode *get_node_of_type(Span<const bNodeSocket *> sockets_list, con
 {
   for (const bNodeSocket *socket : sockets_list) {
     const bNode &parent_node = socket->owner_node();
-    if (parent_node.typeinfo->type == node_type) {
+    if (parent_node.typeinfo->type_legacy == node_type) {
       return &parent_node;
     }
   }
@@ -145,10 +146,10 @@ static std::string get_image_filepath(const bNode *tex_node)
   if (BKE_image_has_packedfile(tex_image)) {
     /* Put image in the same directory as the `.MTL` file. */
     const char *filename = BLI_path_basename(tex_image->filepath);
-    fprintf(stderr,
-            "Packed image found:'%s'. Unpack and place the image in the same "
-            "directory as the .MTL file.\n",
-            filename);
+    CLOG_INFO(&LOG,
+              "Packed image found:'%s'. Unpack and place the image in the same "
+              "directory as the .MTL file.",
+              filename);
     return filename;
   }
 
@@ -180,7 +181,7 @@ static const bNode *find_bsdf_node(const bNodeTree *nodetree)
     const bNodeSocket &node_input_socket0 = node->input_socket(0);
     for (const bNodeSocket *out_sock : node_input_socket0.directly_linked_sockets()) {
       const bNode &in_node = out_sock->owner_node();
-      if (in_node.typeinfo->type == SH_NODE_BSDF_PRINCIPLED) {
+      if (in_node.typeinfo->type_legacy == SH_NODE_BSDF_PRINCIPLED) {
         return &in_node;
       }
     }

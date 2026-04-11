@@ -4,13 +4,13 @@
 
 #include "BKE_curves.hh"
 #include "BKE_grease_pencil.hh"
-#include "BLI_task.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "NOD_socket_search_link.hh"
 
+#include "GEO_foreach_geometry.hh"
 #include "GEO_trim_curves.hh"
 
 #include "NOD_rna_define.hh"
@@ -23,9 +23,14 @@ NODE_STORAGE_FUNCS(NodeGeometryCurveTrim)
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Geometry>("Curve").supported_type(
-      {GeometryComponent::Type::Curve, GeometryComponent::Type::GreasePencil});
-  b.add_input<decl::Bool>("Selection").default_value(true).hide_value().supports_field();
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
+  b.add_default_layout();
+  b.add_input<decl::Geometry>("Curve")
+      .supported_type({GeometryComponent::Type::Curve, GeometryComponent::Type::GreasePencil})
+      .description("Curves to shorten");
+  b.add_output<decl::Geometry>("Curve").propagate_all().align_with_previous();
+  b.add_input<decl::Bool>("Selection").default_value(true).hide_value().field_on_all();
   auto &start_fac = b.add_input<decl::Float>("Start")
                         .min(0.0f)
                         .max(1.0f)
@@ -58,7 +63,6 @@ static void node_declare(NodeDeclarationBuilder &b)
                         node_storage(node).mode = GEO_NODE_CURVE_SAMPLE_LENGTH;
                       })
                       .field_on_all();
-  b.add_output<decl::Geometry>("Curve").propagate_all();
 
   const bNode *node = b.node_or_null();
   if (node != nullptr) {
@@ -74,12 +78,12 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "mode", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  layout->prop(ptr, "mode", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryCurveTrim *data = MEM_cnew<NodeGeometryCurveTrim>(__func__);
+  NodeGeometryCurveTrim *data = MEM_callocN<NodeGeometryCurveTrim>(__func__);
 
   data->mode = GEO_NODE_CURVE_SAMPLE_FACTOR;
   node->storage = data;
@@ -127,7 +131,7 @@ static bool trim_curves(const bke::CurvesGeometry &src_curves,
                         const AttributeFilter &attribute_filter,
                         bke::CurvesGeometry &dst_curves)
 {
-  if (src_curves.curves_num() == 0) {
+  if (src_curves.is_empty()) {
     return false;
   }
   fn::FieldEvaluator evaluator{field_context, src_curves.curves_num()};
@@ -216,7 +220,7 @@ static void node_geo_exec(GeoNodeExecParams params)
   if (mode == GEO_NODE_CURVE_SAMPLE_FACTOR) {
     Field<float> start_field = params.extract_input<Field<float>>("Start");
     Field<float> end_field = params.extract_input<Field<float>>("End");
-    geometry_set.modify_geometry_sets([&](GeometrySet &geometry_set) {
+    geometry::foreach_real_geometry(geometry_set, [&](GeometrySet &geometry_set) {
       geometry_set_curve_trim(
           geometry_set, mode, selection_field, start_field, end_field, attribute_filter);
     });
@@ -224,7 +228,7 @@ static void node_geo_exec(GeoNodeExecParams params)
   else if (mode == GEO_NODE_CURVE_SAMPLE_LENGTH) {
     Field<float> start_field = params.extract_input<Field<float>>("Start_001");
     Field<float> end_field = params.extract_input<Field<float>>("End_001");
-    geometry_set.modify_geometry_sets([&](GeometrySet &geometry_set) {
+    geometry::foreach_real_geometry(geometry_set, [&](GeometrySet &geometry_set) {
       geometry_set_curve_trim(
           geometry_set, mode, selection_field, start_field, end_field, attribute_filter);
     });
@@ -260,15 +264,19 @@ static void node_rna(StructRNA *srna)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-  geo_node_type_base(&ntype, GEO_NODE_TRIM_CURVE, "Trim Curve", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeTrimCurve", GEO_NODE_TRIM_CURVE);
+  ntype.ui_name = "Trim Curve";
+  ntype.ui_description = "Shorten curves by removing portions at the start or end";
+  ntype.enum_name_legacy = "TRIM_CURVE";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
   ntype.declare = node_declare;
   blender::bke::node_type_storage(
-      &ntype, "NodeGeometryCurveTrim", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeGeometryCurveTrim", node_free_standard_storage, node_copy_standard_storage);
   ntype.initfunc = node_init;
   ntype.gather_link_search_ops = node_gather_link_searches;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

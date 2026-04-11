@@ -16,17 +16,16 @@ device_memory::device_memory(Device *device, const char *_name, MemoryType type)
       device_size(0),
       data_width(0),
       data_height(0),
-      data_depth(0),
       type(type),
       name_storage(_name),
       device(device),
       device_pointer(0),
-      host_pointer(0),
-      shared_pointer(0),
+      host_pointer(nullptr),
+      shared_pointer(nullptr),
       shared_counter(0),
       original_device_ptr(0),
       original_device_size(0),
-      original_device(0),
+      original_device(nullptr),
       need_realloc_(false),
       modified(false)
 {
@@ -35,48 +34,47 @@ device_memory::device_memory(Device *device, const char *_name, MemoryType type)
 
 device_memory::~device_memory()
 {
-  assert(shared_pointer == 0);
+  assert(shared_pointer == nullptr);
   assert(shared_counter == 0);
 }
 
-void *device_memory::host_alloc(size_t size)
+void *device_memory::host_alloc(const size_t size)
 {
   if (!size) {
-    return 0;
+    return nullptr;
   }
 
-  void *ptr = util_aligned_malloc(size, MIN_ALIGNMENT_CPU_DATA_TYPES);
+  void *ptr = device->host_alloc(type, size);
 
-  if (ptr) {
-    util_guarded_mem_alloc(size);
-  }
-  else {
+  if (ptr == nullptr) {
     throw std::bad_alloc();
   }
 
   return ptr;
 }
 
-void device_memory::host_free()
+void device_memory::host_and_device_free()
 {
   if (host_pointer) {
-    util_guarded_mem_free(memory_size());
-    util_aligned_free((void *)host_pointer);
-    host_pointer = 0;
+    if (host_pointer != shared_pointer) {
+      device->host_free(type, host_pointer, memory_size());
+    }
+    host_pointer = nullptr;
   }
+
+  if (device_pointer) {
+    device->mem_free(*this);
+  }
+
+  data_size = 0;
+  data_width = 0;
+  data_height = 0;
 }
 
 void device_memory::device_alloc()
 {
   assert(!device_pointer && type != MEM_TEXTURE && type != MEM_GLOBAL);
   device->mem_alloc(*this);
-}
-
-void device_memory::device_free()
-{
-  if (device_pointer) {
-    device->mem_free(*this);
-  }
 }
 
 void device_memory::device_copy_to()
@@ -86,7 +84,14 @@ void device_memory::device_copy_to()
   }
 }
 
-void device_memory::device_copy_from(size_t y, size_t w, size_t h, size_t elem)
+void device_memory::device_move_to_host()
+{
+  if (host_pointer) {
+    device->mem_move_to_host(*this);
+  }
+}
+
+void device_memory::device_copy_from(const size_t y, const size_t w, size_t h, const size_t elem)
 {
   assert(type != MEM_TEXTURE && type != MEM_READ_ONLY && type != MEM_GLOBAL);
   device->mem_copy_from(*this, y, w, h, elem);
@@ -105,7 +110,7 @@ bool device_memory::device_is_cpu()
 }
 
 void device_memory::swap_device(Device *new_device,
-                                size_t new_device_size,
+                                const size_t new_device_size,
                                 device_ptr new_device_ptr)
 {
   original_device = device;
@@ -129,9 +134,15 @@ bool device_memory::is_resident(Device *sub_device) const
   return device->is_resident(device_pointer, sub_device);
 }
 
+bool device_memory::is_shared(Device *sub_device) const
+{
+  return device->is_shared(shared_pointer, device_pointer, sub_device);
+}
+
 /* Device Sub `ptr`. */
 
-device_sub_ptr::device_sub_ptr(device_memory &mem, size_t offset, size_t size) : device(mem.device)
+device_sub_ptr::device_sub_ptr(device_memory &mem, const size_t offset, const size_t size)
+    : device(mem.device)
 {
   ptr = device->mem_alloc_sub_ptr(mem, offset, size);
 }
@@ -167,8 +178,10 @@ device_texture::device_texture(Device *device,
     case IMAGE_DATA_TYPE_BYTE:
     case IMAGE_DATA_TYPE_NANOVDB_FLOAT:
     case IMAGE_DATA_TYPE_NANOVDB_FLOAT3:
+    case IMAGE_DATA_TYPE_NANOVDB_FLOAT4:
     case IMAGE_DATA_TYPE_NANOVDB_FPN:
     case IMAGE_DATA_TYPE_NANOVDB_FP16:
+    case IMAGE_DATA_TYPE_NANOVDB_EMPTY:
       data_type = TYPE_UCHAR;
       data_elements = 1;
       break;
@@ -193,7 +206,6 @@ device_texture::device_texture(Device *device,
       return;
   }
 
-  memset(&info, 0, sizeof(info));
   info.data_type = image_data_type;
   info.interpolation = interpolation;
   info.extension = extension;
@@ -201,18 +213,16 @@ device_texture::device_texture(Device *device,
 
 device_texture::~device_texture()
 {
-  device_free();
-  host_free();
+  host_and_device_free();
 }
 
 /* Host memory allocation. */
-void *device_texture::alloc(const size_t width, const size_t height, const size_t depth)
+void *device_texture::alloc(const size_t width, const size_t height)
 {
-  const size_t new_size = size(width, height, depth);
+  const size_t new_size = size(width, height);
 
   if (new_size != data_size) {
-    device_free();
-    host_free();
+    host_and_device_free();
     host_pointer = host_alloc(data_elements * datatype_size(data_type) * new_size);
     assert(device_pointer == 0);
   }
@@ -220,11 +230,9 @@ void *device_texture::alloc(const size_t width, const size_t height, const size_
   data_size = new_size;
   data_width = width;
   data_height = height;
-  data_depth = depth;
 
   info.width = width;
   info.height = height;
-  info.depth = depth;
 
   return host_pointer;
 }

@@ -8,6 +8,7 @@ from bpy.props import (
     BoolProperty,
     EnumProperty,
 )
+from bpy.app.translations import contexts as i18n_contexts
 
 DIRNAME, FILENAME = os.path.split(__file__)
 IDNAME = os.path.splitext(FILENAME)[0]
@@ -40,12 +41,12 @@ class Prefs(bpy.types.KeyConfigPreferences):
         items=(
             ('PLAY', "Play",
              "Toggle animation playback "
-             "('Shift-Space' for Tools)",
+             "('Shift-Space' for Tools or brush asset popup)",
              1),
             ('TOOL', "Tools",
-             "Open the popup tool-bar\n"
-             "When 'Space' is held and used as a modifier:\n"
-             "\u2022 Pressing the tools binding key switches to it immediately.\n"
+             "Open the popup tool-bar or brush asset popup\n"
+             "When holding 'Space' for the tool-bar popup:\n"
+             "\u2022 Pressing the a tool shortcut switches to it immediately.\n"
              "\u2022 Dragging the cursor over a tool and releasing activates it (like a pie menu).\n"
              "For Play use 'Shift-Space'",
              0),
@@ -88,7 +89,6 @@ class Prefs(bpy.types.KeyConfigPreferences):
         update=update_fn,
     )
 
-    # Experimental: only show with developer extras, see: #107785.
     use_region_toggle_pie: BoolProperty(
         name="Region Toggle Pie",
         description=(
@@ -140,6 +140,7 @@ class Prefs(bpy.types.KeyConfigPreferences):
 
     gizmo_action: EnumProperty(
         name="Activate Gizmo",
+        translation_context=i18n_contexts.editor_view3d,
         items=(
             ('PRESS', "Press", "Press causes immediate activation, preventing click being passed to the tool"),
             ('DRAG', "Drag", "Drag allows click events to pass through to the tool, adding a small delay"),
@@ -295,9 +296,8 @@ class Prefs(bpy.types.KeyConfigPreferences):
         row = sub.row()
         row.prop(self, "use_select_all_toggle")
 
-        if show_developer_ui:
-            row = sub.row()
-            row.prop(self, "use_region_toggle_pie")
+        row = sub.row()
+        row.prop(self, "use_region_toggle_pie")
 
         # 3DView settings.
         col = layout.column()
@@ -345,7 +345,7 @@ def load():
             use_mouse_emulate_3_button=use_mouse_emulate_3_button,
             spacebar_action=kc_prefs.spacebar_action,
             use_key_activate_tools=(kc_prefs.tool_key_mode == 'TOOL'),
-            use_region_toggle_pie=(show_developer_ui and kc_prefs.use_region_toggle_pie),
+            use_region_toggle_pie=kc_prefs.use_region_toggle_pie,
             v3d_tilde_action=kc_prefs.v3d_tilde_action,
             use_v3d_mmb_pan=(kc_prefs.v3d_mmb_action == 'PAN'),
             v3d_alt_mmb_drag_action=kc_prefs.v3d_alt_mmb_drag_action,

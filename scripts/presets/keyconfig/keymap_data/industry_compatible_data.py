@@ -85,7 +85,7 @@ def _template_items_object_subdivision_set():
     return [
         ("object.subdivision_set",
          {"type": NUMBERS_0[i], "value": 'PRESS', "ctrl": True},
-         {"properties": [("level", i), ("relative", False)]})
+         {"properties": [("level", i), ("relative", False), ("ensure_modifier", True)]})
         for i in range(6)
     ]
 
@@ -205,13 +205,13 @@ def km_window(params):
         # NDOF settings
         op_panel("USERPREF_PT_ndof_settings", {"type": 'NDOF_BUTTON_MENU', "value": 'PRESS'}),
         ("wm.context_scale_float", {"type": 'NDOF_BUTTON_PLUS', "value": 'PRESS'},
-         {"properties": [("data_path", "preferences.inputs.ndof_sensitivity"), ("value", 1.1)]}),
+         {"properties": [("data_path", "preferences.inputs.ndof_translation_sensitivity"), ("value", 1.1)]}),
         ("wm.context_scale_float", {"type": 'NDOF_BUTTON_MINUS', "value": 'PRESS'},
-         {"properties": [("data_path", "preferences.inputs.ndof_sensitivity"), ("value", 1.0 / 1.1)]}),
+         {"properties": [("data_path", "preferences.inputs.ndof_translation_sensitivity"), ("value", 1.0 / 1.1)]}),
         ("wm.context_scale_float", {"type": 'NDOF_BUTTON_PLUS', "value": 'PRESS', "shift": True},
-         {"properties": [("data_path", "preferences.inputs.ndof_sensitivity"), ("value", 1.5)]}),
+         {"properties": [("data_path", "preferences.inputs.ndof_translation_sensitivity"), ("value", 1.5)]}),
         ("wm.context_scale_float", {"type": 'NDOF_BUTTON_MINUS', "value": 'PRESS', "shift": True},
-         {"properties": [("data_path", "preferences.inputs.ndof_sensitivity"), ("value", 2.0 / 3.0)]}),
+         {"properties": [("data_path", "preferences.inputs.ndof_translation_sensitivity"), ("value", 2.0 / 3.0)]}),
         ("info.reports_display_update", {"type": 'TIMER_REPORT', "value": 'ANY', "any": True}, None),
     ])
 
@@ -289,6 +289,10 @@ def km_screen_editing(params):
          {"properties": [("use_viewport", True)]}),
         ("render.render", {"type": 'RET', "value": 'PRESS', "ctrl": True, "alt": True},
          {"properties": [("animation", True), ("use_viewport", True)]}),
+        ("render.render", {"type": 'F12', "value": 'PRESS', "alt": True},
+         {"properties": [("use_sequencer_scene", True), ("use_viewport", True)]}),
+        ("render.render", {"type": 'F12', "value": 'PRESS', "ctrl": True, "alt": True},
+         {"properties": [("animation", True), ("use_sequencer_scene", True), ("use_viewport", True)]}),
         ("render.view_cancel", {"type": 'ESC', "value": 'PRESS'}, None),
     ])
 
@@ -420,6 +424,7 @@ def km_user_interface(params):
         ("anim.driver_button_remove", {"type": 'D', "value": 'PRESS', "alt": True}, None),
         ("anim.keyingset_button_add", {"type": 'K', "value": 'PRESS'}, None),
         ("anim.keyingset_button_remove", {"type": 'K', "value": 'PRESS', "alt": True}, None),
+        ("ui.view_item_select", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
     ])
 
     return keymap
@@ -548,8 +553,8 @@ def km_outliner(params):
         ("outliner.drivers_delete_selected", {"type": 'D', "value": 'PRESS', "ctrl": True, "alt": True}, None),
         ("outliner.delete", {"type": 'BACK_SPACE', "value": 'PRESS'}, None),
         ("outliner.delete", {"type": 'DEL', "value": 'PRESS'}, None),
-        ("object.move_to_collection", {"type": 'G', "value": 'PRESS', "ctrl": True}, None),
-        ("object.link_to_collection", {"type": 'M', "value": 'PRESS', "shift": True, "ctrl": True}, None),
+        op_menu("OBJECT_MT_move_to_collection", {"type": 'G', "value": 'PRESS', "ctrl": True}),
+        op_menu("OBJECT_MT_link_to_collection", {"type": 'M', "value": 'PRESS', "shift": True, "ctrl": True}),
         ("outliner.collection_exclude_set", {"type": 'E', "value": 'PRESS'}, None),
         ("outliner.collection_exclude_clear", {"type": 'E', "value": 'PRESS', "alt": True}, None),
         ("outliner.hide", {"type": 'H', "value": 'PRESS', "ctrl": True}, None),
@@ -583,8 +588,8 @@ def km_uv_editor(params):
          {"properties": [("type", 'EDGE')]}),
         ("uv.select_mode", {"type": 'THREE', "value": 'PRESS'},
          {"properties": [("type", 'FACE')]}),
-        ("uv.select_mode", {"type": 'FOUR', "value": 'PRESS'},
-         {"properties": [("type", 'ISLAND')]}),
+        ("wm.context_toggle", {"type": 'FOUR', "value": 'PRESS'},
+         {"properties": [("data_path", "tool_settings.use_uv_select_island")]}),
 
         ("uv.select", {"type": 'LEFTMOUSE', "value": 'CLICK'},
          {"properties": [("deselect_all", True)]}),
@@ -608,6 +613,8 @@ def km_uv_editor(params):
         ("uv.hide", {"type": 'H', "value": 'PRESS', "shift": True},
          {"properties": [("unselected", True)]}),
         ("uv.reveal", {"type": 'H', "value": 'PRESS', "alt": True}, None),
+        ("uv.copy", {"type": 'C', "value": 'PRESS', "ctrl": True}, None),
+        ("uv.paste", {"type": 'V', "value": 'PRESS', "ctrl": True}, None),
         op_menu_pie("IMAGE_MT_uvs_snap_pie", {"type": 'X', "value": 'PRESS', "shift": True}),
         *_template_items_context_menu("IMAGE_MT_uvs_context_menu", {"type": 'RIGHTMOUSE', "value": 'PRESS'}),
         ("wm.context_toggle", {"type": 'B', "value": 'PRESS'},
@@ -670,6 +677,10 @@ def km_view3d(params):
         op_menu_pie("VIEW3D_MT_view_pie", {"type": 'V', "value": 'PRESS'}),
         # Navigation.
         ("view3d.rotate", {"type": 'LEFTMOUSE', "value": 'PRESS', "alt": True}, None),
+        ("view3d.view_pan", {"type": 'WHEELLEFTMOUSE', "value": 'PRESS'},
+            {"properties": [("type", 'PANLEFT')]}),
+        ("view3d.view_pan", {"type": 'WHEELRIGHTMOUSE', "value": 'PRESS'},
+            {"properties": [("type", 'PANRIGHT')]}),
         ("view3d.move", {"type": 'MIDDLEMOUSE', "value": 'PRESS', "alt": True}, None),
         ("view3d.zoom", {"type": 'RIGHTMOUSE', "value": 'PRESS', "alt": True}, None),
         ("view3d.view_selected", {"type": 'F', "value": 'PRESS'},
@@ -1750,10 +1761,10 @@ def km_text(params):
     return keymap
 
 
-def km_sequencercommon(_params):
+def km_sequencer_generic(_params):
     items = []
     keymap = (
-        "SequencerCommon",
+        "Video Sequence Editor",
         {"space_type": 'SEQUENCE_EDITOR', "region_type": 'WINDOW'},
         {"items": items},
     )
@@ -1817,13 +1828,13 @@ def km_sequencer(params):
         ("sequencer.view_selected", {"type": 'F', "value": 'PRESS'}, None),
         ("sequencer.view_frame", {"type": 'NUMPAD_0', "value": 'PRESS'}, None),
         ("sequencer.strip_jump", {"type": 'PAGE_UP', "value": 'PRESS', "repeat": True},
-         {"properties": [("next", True), ("center", False)]}),
-        ("sequencer.strip_jump", {"type": 'PAGE_DOWN', "value": 'PRESS', "repeat": True},
          {"properties": [("next", False), ("center", False)]}),
+        ("sequencer.strip_jump", {"type": 'PAGE_DOWN', "value": 'PRESS', "repeat": True},
+         {"properties": [("next", True), ("center", False)]}),
         ("sequencer.strip_jump", {"type": 'PAGE_UP', "value": 'PRESS', "alt": True, "repeat": True},
-         {"properties": [("next", True), ("center", True)]}),
-        ("sequencer.strip_jump", {"type": 'PAGE_DOWN', "value": 'PRESS', "alt": True, "repeat": True},
          {"properties": [("next", False), ("center", True)]}),
+        ("sequencer.strip_jump", {"type": 'PAGE_DOWN', "value": 'PRESS', "alt": True, "repeat": True},
+         {"properties": [("next", True), ("center", True)]}),
         ("sequencer.swap", {"type": 'LEFT_ARROW', "value": 'PRESS', "alt": True, "repeat": True},
          {"properties": [("side", 'LEFT')]}),
         ("sequencer.swap", {"type": 'RIGHT_ARROW', "value": 'PRESS', "alt": True, "repeat": True},
@@ -1880,15 +1891,16 @@ def km_sequencer(params):
         # Tools
         op_tool_cycle("builtin.select_box", {"type": 'Q', "value": 'PRESS'}),
         op_tool_cycle("builtin.blade", {"type": 'B', "value": 'PRESS'}),
+        op_tool_cycle("builtin.slip", {"type": 'S', "value": 'PRESS'}),
     ])
 
     return keymap
 
 
-def km_sequencerpreview(params):
+def km_sequencer_preview(params):
     items = []
     keymap = (
-        "SequencerPreview",
+        "Preview",
         {"space_type": 'SEQUENCE_EDITOR', "region_type": 'WINDOW'},
         {"items": items},
     )
@@ -2538,8 +2550,8 @@ def km_object_mode(params):
         ("anim.keyframe_delete_v3d", {"type": 'S', "value": 'PRESS', "alt": True}, None),
         ("anim.keying_set_active_set", {"type": 'S', "value": 'PRESS', "shift": True, "ctrl": True, "alt": True}, None),
         *_template_items_context_menu("VIEW3D_MT_object_context_menu", {"type": 'RIGHTMOUSE', "value": 'PRESS'}),
-        ("object.move_to_collection", {"type": 'G', "value": 'PRESS', "ctrl": True}, None),
-        ("object.link_to_collection", {"type": 'G', "value": 'PRESS', "shift": True, "ctrl": True}, None),
+        op_menu("OBJECT_MT_move_to_collection", {"type": 'G', "value": 'PRESS', "ctrl": True}),
+        op_menu("OBJECT_MT_link_to_collection", {"type": 'G', "value": 'PRESS', "shift": True, "ctrl": True}),
         ("object.hide_view_clear", {"type": 'H', "value": 'PRESS', "alt": True}, None),
         ("object.hide_view_set", {"type": 'H', "value": 'PRESS', "ctrl": True},
          {"properties": [("unselected", False)]}),
@@ -2641,7 +2653,7 @@ def km_curve(params):
 
 def radial_control_properties(paint, prop, secondary_prop, secondary_rotation=False, color=False, zoom=False):
     brush_path = "tool_settings." + paint + ".brush"
-    unified_path = "tool_settings.unified_paint_settings"
+    unified_path = "tool_settings." + paint + ".unified_paint_settings"
     rotation = "mask_texture_slot.angle" if secondary_rotation else "texture_slot.angle"
     return {
         "properties": [
@@ -2723,7 +2735,8 @@ def km_image_paint(params):
         ("paint.image_paint", {"type": 'LEFTMOUSE', "value": 'PRESS', "ctrl": True},
          {"properties": [("mode", 'INVERT')]}),
         # Colors
-        ("paint.sample_color", {"type": 'I', "value": 'PRESS'}, None),
+        ("paint.sample_color", {"type": 'I', "value": 'PRESS'}, {"properties": [("merged", False)]}),
+        ("paint.sample_color", {"type": 'I', "value": 'PRESS', "shift": True}, {"properties": [("merged", True)]}),
         ("paint.brush_colors_flip", {"type": 'X', "value": 'PRESS'}, None),
         # Clone
         ("paint.grab_clone", {"type": 'MIDDLEMOUSE', "value": 'PRESS'}, None),
@@ -2782,7 +2795,7 @@ def km_vertex_paint(params):
         ("paint.vertex_paint", {"type": 'LEFTMOUSE', "value": 'PRESS', "shift": True},
          {"properties": [("mode", 'SMOOTH')]}),
         # Colors
-        ("paint.sample_color", {"type": 'I', "value": 'PRESS'}, None),
+        ("paint.sample_color", {"type": 'I', "value": 'PRESS'}, {"properties": [("merged", False)]}),
         ("paint.brush_colors_flip", {"type": 'X', "value": 'PRESS'}, None),
         ("paint.vertex_color_set", {"type": 'BACK_SPACE', "value": 'PRESS'}, None),
         # Brush properties
@@ -2940,9 +2953,9 @@ def km_sculpt(params):
         # Subdivision levels
         *_template_items_object_subdivision_set(),
         ("object.subdivision_set", {"type": 'D', "value": 'PRESS', "repeat": True},
-         {"properties": [("level", 1), ("relative", True)]}),
+         {"properties": [("level", 1), ("relative", True), ("ensure_modifier", False)]}),
         ("object.subdivision_set", {"type": 'D', "value": 'PRESS', "shift": True, "repeat": True},
-         {"properties": [("level", -1), ("relative", True)]}),
+         {"properties": [("level", -1), ("relative", True), ("ensure_modifier", False)]}),
         # Mask
         ("paint.mask_flood_fill", {"type": 'A', "value": 'PRESS', "ctrl": True, "shift": True},
          {"properties": [("mode", 'VALUE'), ("value", 1.0)]}),
@@ -3414,6 +3427,30 @@ def km_sculpt_curves(params):
     return keymap
 
 
+# Point cloud edit mode.
+def km_pointcloud(params):
+    items = []
+    keymap = (
+        "Point Cloud",
+        {"space_type": 'EMPTY', "region_type": 'WINDOW'},
+        {"items": items},
+    )
+
+    items.extend([
+        # Selection Operators
+        ("pointcloud.select_all", {"type": 'A', "value": 'PRESS',
+         "ctrl": True}, {"properties": [("action", 'SELECT')]}),
+        ("pointcloud.select_all", {"type": 'A', "value": 'PRESS', "shift": True,
+         "ctrl": True}, {"properties": [("action", 'DESELECT')]}),
+        ("pointcloud.select_all", {"type": 'I', "value": 'PRESS',
+         "ctrl": True}, {"properties": [("action", 'INVERT')]}),
+        # Delete
+        ("pointcloud.delete", {"type": 'DEL', "value": 'PRESS'}, None),
+    ])
+
+    return keymap
+
+
 def km_object_non_modal(params):
     items = []
     keymap = (
@@ -3579,6 +3616,7 @@ def km_transform_modal_map(_params):
         ("AUTOCONSTRAINPLANE", {"type": 'MIDDLEMOUSE', "value": 'ANY', "shift": True}, None),
         ("PRECISION", {"type": 'LEFT_SHIFT', "value": 'ANY', "any": True}, None),
         ("PRECISION", {"type": 'RIGHT_SHIFT', "value": 'ANY', "any": True}, None),
+        ("STRIP_CLAMP_TOGGLE", {"type": 'C', "value": 'PRESS', "any": True}, None),
     ])
 
     return keymap
@@ -3608,7 +3646,7 @@ def km_image_editor_tool_uv_select(params):
 
 def km_sequencer_editor_tool_select_preview(params):
     return (
-        "Sequencer Preview Tool: Select Box",
+        "Preview Tool: Select Box",
         {"space_type": 'SEQUENCE_EDITOR', "region_type": 'WINDOW'},
         {"items": _template_items_tool_select(params, "sequencer.select", extend="toggle")}
     )
@@ -3616,7 +3654,7 @@ def km_sequencer_editor_tool_select_preview(params):
 
 def km_sequencer_editor_tool_select_timeline(params):
     return (
-        "Sequencer Timeline Tool: Select Box",
+        "Sequencer Tool: Select Box",
         {"space_type": 'SEQUENCE_EDITOR', "region_type": 'WINDOW'},
         {"items": _template_items_tool_select(params, "sequencer.select", extend="toggle")}
     )
@@ -3732,9 +3770,9 @@ def generate_keymaps_impl(params=None):
         km_nla_editor(params),
         km_text_generic(params),
         km_text(params),
-        km_sequencercommon(params),
+        km_sequencer_generic(params),
         km_sequencer(params),
-        km_sequencerpreview(params),
+        km_sequencer_preview(params),
         km_sequencer_channels(params),
         km_console(params),
         km_clip(params),
@@ -3767,6 +3805,7 @@ def generate_keymaps_impl(params=None):
         km_font(params),
         km_curves(params),
         km_sculpt_curves(params),
+        km_pointcloud(params),
         km_object_non_modal(params),
 
         # Modal maps.

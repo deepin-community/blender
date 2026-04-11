@@ -8,7 +8,7 @@
 
 #include "testing/testing.h"
 
-#include "BLI_strict_flags.h" /* Keep last. */
+#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
 
 namespace blender::memory_cache::tests {
 
@@ -35,6 +35,12 @@ class GenericIntKey : public GenericKey {
   std::unique_ptr<GenericKey> to_storable() const override
   {
     return std::make_unique<GenericIntKey>(*this);
+  }
+
+ public:
+  int value() const
+  {
+    return value_;
   }
 };
 
@@ -78,6 +84,25 @@ TEST(memory_cache, Simple)
                  })->value);
     EXPECT_TRUE(newly_computed);
   }
+}
+
+TEST(memory_cache, RemoveIf)
+{
+  memory_cache::clear();
+
+  memory_cache::get<CachedInt>(GenericIntKey(1), []() { return std::make_unique<CachedInt>(1); });
+  memory_cache::get<CachedInt>(GenericIntKey(2), []() { return std::make_unique<CachedInt>(2); });
+
+  memory_cache::remove_if([](const GenericKey &key) {
+    return dynamic_cast<const GenericIntKey *>(&key)->value() == 1;
+  });
+
+  EXPECT_EQ(10, memory_cache::get<CachedInt>(GenericIntKey(1), [&]() {
+                  return std::make_unique<CachedInt>(10);
+                })->value);
+  EXPECT_EQ(2, memory_cache::get<CachedInt>(GenericIntKey(2), [&]() {
+                 return std::make_unique<CachedInt>(10);
+               })->value);
 }
 
 }  // namespace blender::memory_cache::tests

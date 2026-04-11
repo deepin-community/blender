@@ -6,8 +6,6 @@
  * \ingroup modifiers
  */
 
-#include "MEM_guardedalloc.h"
-
 #include "BLI_utildefines.h"
 
 #include "BLI_array_utils.hh"
@@ -30,7 +28,7 @@
 #include "BKE_mesh.hh"
 #include "BKE_modifier.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "RNA_access.hh"
@@ -98,7 +96,7 @@ static void compute_vertex_mask__armature_mode(const MDeformVert *dvert,
 
   LISTBASE_FOREACH (bDeformGroup *, def, &mesh->vertex_group_names) {
     bPoseChannel *pchan = BKE_pose_channel_find_name(armature_ob->pose, def->name);
-    bool bone_for_group_exists = pchan && pchan->bone && (pchan->bone->flag & BONE_SELECTED);
+    bool bone_for_group_exists = pchan && pchan->bone && (pchan->flag & POSE_SELECTED);
     selected_bone_uses_group.append(bone_for_group_exists);
   }
   const int64_t total_size = selected_bone_uses_group.size();
@@ -399,13 +397,8 @@ static void add_interp_verts_copy_edges_to_new_mesh(const Mesh &src_mesh,
           dvert, defgrp_index, threshold, e_src[0], e_src[1]);
 
       float weights[2] = {1.0f - fac, fac};
-      CustomData_interp(&src_mesh.vert_data,
-                        &dst_mesh.vert_data,
-                        (int *)&e_src[0],
-                        weights,
-                        nullptr,
-                        2,
-                        vert_index);
+      CustomData_interp(
+          &src_mesh.vert_data, &dst_mesh.vert_data, (int *)&e_src[0], weights, 2, vert_index);
       vert_index++;
     }
   }
@@ -549,7 +542,7 @@ static void add_interpolated_faces_to_new_mesh(const Mesh &src_mesh,
         float weights[2] = {1.0f - fac, fac};
         int indices[2] = {i_ml_src + last_index, i_ml_src + index};
         CustomData_interp(
-            &src_mesh.corner_data, &dst_mesh.corner_data, indices, weights, nullptr, 2, i_ml_dst);
+            &src_mesh.corner_data, &dst_mesh.corner_data, indices, weights, 2, i_ml_dst);
         dst_corner_edges[i_ml_dst] = edge_map[face_edges_src[last_index]];
         dst_corner_verts[i_ml_dst] = dst_edges[dst_corner_edges[i_ml_dst]][0];
         i_ml_dst++;
@@ -568,7 +561,7 @@ static void add_interpolated_faces_to_new_mesh(const Mesh &src_mesh,
         float weights[2] = {1.0f - fac, fac};
         int indices[2] = {i_ml_src + last_index, i_ml_src + index};
         CustomData_interp(
-            &src_mesh.corner_data, &dst_mesh.corner_data, indices, weights, nullptr, 2, i_ml_dst);
+            &src_mesh.corner_data, &dst_mesh.corner_data, indices, weights, 2, i_ml_dst);
         dst_corner_edges[i_ml_dst] = edge_index;
         dst_corner_verts[i_ml_dst] = dst_edges[edge_map[face_edges_src[last_index]]][0];
 
@@ -767,25 +760,25 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
 
   int mode = RNA_enum_get(ptr, "mode");
 
-  uiItemR(layout, ptr, "mode", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  layout->prop(ptr, "mode", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
 
-  uiLayoutSetPropSep(layout, true);
+  layout->use_property_split_set(true);
 
   if (mode == MOD_MASK_MODE_ARM) {
-    row = uiLayoutRow(layout, true);
-    uiItemR(row, ptr, "armature", UI_ITEM_NONE, nullptr, ICON_NONE);
-    sub = uiLayoutRow(row, true);
-    uiLayoutSetPropDecorate(sub, false);
-    uiItemR(sub, ptr, "invert_vertex_group", UI_ITEM_NONE, "", ICON_ARROW_LEFTRIGHT);
+    row = &layout->row(true);
+    row->prop(ptr, "armature", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+    sub = &row->row(true);
+    sub->use_property_decorate_set(false);
+    sub->prop(ptr, "invert_vertex_group", UI_ITEM_NONE, "", ICON_ARROW_LEFTRIGHT);
   }
   else if (mode == MOD_MASK_MODE_VGROUP) {
-    modifier_vgroup_ui(layout, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", nullptr);
-    uiItemR(layout, ptr, "use_smooth", UI_ITEM_NONE, nullptr, ICON_NONE);
+    modifier_vgroup_ui(layout, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", std::nullopt);
+    layout->prop(ptr, "use_smooth", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 
-  uiItemR(layout, ptr, "threshold", UI_ITEM_NONE, nullptr, ICON_NONE);
+  layout->prop(ptr, "threshold", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  modifier_panel_end(layout, ptr);
+  modifier_error_message_draw(layout, ptr);
 }
 
 static void panel_register(ARegionType *region_type)
@@ -801,8 +794,8 @@ ModifierTypeInfo modifierType_Mask = {
     /*srna*/ &RNA_MaskModifier,
     /*type*/ ModifierTypeType::Nonconstructive,
     /*flags*/
-    (ModifierTypeFlag)(eModifierTypeFlag_AcceptsMesh | eModifierTypeFlag_SupportsMapping |
-                       eModifierTypeFlag_SupportsEditmode),
+    (eModifierTypeFlag_AcceptsMesh | eModifierTypeFlag_SupportsMapping |
+     eModifierTypeFlag_SupportsEditmode),
     /*icon*/ ICON_MOD_MASK,
 
     /*copy_data*/ BKE_modifier_copydata_generic,
@@ -828,4 +821,5 @@ ModifierTypeInfo modifierType_Mask = {
     /*blend_write*/ nullptr,
     /*blend_read*/ nullptr,
     /*foreach_cache*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
 };

@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "editors/sculpt_paint/brushes/types.hh"
+#include "editors/sculpt_paint/brushes/brushes.hh"
 
 #include "DNA_brush_types.h"
 #include "DNA_mesh_types.h"
@@ -11,21 +11,21 @@
 
 #include "BKE_mesh.hh"
 #include "BKE_paint.hh"
-#include "BKE_pbvh.hh"
+#include "BKE_paint_bvh.hh"
 #include "BKE_subdiv_ccg.hh"
 
 #include "BLI_array.hh"
-#include "BLI_array_utils.hh"
 #include "BLI_enumerable_thread_specific.hh"
 #include "BLI_task.hh"
-#include "BLI_virtual_array.hh"
 
 #include "editors/sculpt_paint/mesh_brush_common.hh"
 #include "editors/sculpt_paint/sculpt_automask.hh"
 #include "editors/sculpt_paint/sculpt_intern.hh"
 #include "editors/sculpt_paint/sculpt_smooth.hh"
 
-namespace blender::ed::sculpt_paint {
+#include "bmesh.hh"
+
+namespace blender::ed::sculpt_paint::brushes {
 
 inline namespace surface_smooth_cc {
 
@@ -33,7 +33,8 @@ struct LocalData {
   Vector<float3> positions;
   Vector<float> factors;
   Vector<float> distances;
-  Vector<Vector<int>> vert_neighbors;
+  Vector<int> neighbor_offsets;
+  Vector<int> neighbor_data;
   Vector<float3> laplacian_disp;
   Vector<float3> average_positions;
   Vector<float3> translations;
@@ -64,7 +65,7 @@ BLI_NOINLINE static void do_surface_smooth_brush_mesh(const Depsgraph &depsgraph
   const OffsetIndices faces = mesh.faces();
   const Span<int> corner_verts = mesh.corner_verts();
   const GroupedSpan<int> vert_to_face_map = mesh.vert_to_face_map();
-  const MeshAttributeData attribute_data(mesh.attributes());
+  const MeshAttributeData attribute_data(mesh);
 
   const PositionDeformData position_data(depsgraph, object);
   const Span<float3> vert_normals = bke::pbvh::vert_normals_eval(depsgraph, object);
@@ -110,18 +111,17 @@ BLI_NOINLINE static void do_surface_smooth_brush_mesh(const Depsgraph &depsgraph
       const OrigPositionData orig_data = orig_position_data_get_mesh(object, nodes[i]);
       const Span<float> factors = all_factors.as_span().slice(node_offsets[pos]);
 
-      tls.vert_neighbors.resize(verts.size());
-      calc_vert_neighbors(faces,
-                          corner_verts,
-                          vert_to_face_map,
-                          attribute_data.hide_poly,
-                          verts,
-                          tls.vert_neighbors);
+      const GroupedSpan<int> neighbors = calc_vert_neighbors(faces,
+                                                             corner_verts,
+                                                             vert_to_face_map,
+                                                             attribute_data.hide_poly,
+                                                             verts,
+                                                             tls.neighbor_offsets,
+                                                             tls.neighbor_data);
 
       tls.average_positions.resize(verts.size());
       const MutableSpan<float3> average_positions = tls.average_positions;
-      smooth::neighbor_data_average_mesh(
-          position_data.eval, tls.vert_neighbors, average_positions);
+      smooth::neighbor_data_average_mesh(position_data.eval, neighbors, average_positions);
 
       tls.laplacian_disp.resize(verts.size());
       const MutableSpan<float3> laplacian_disp = tls.laplacian_disp;
@@ -145,18 +145,18 @@ BLI_NOINLINE static void do_surface_smooth_brush_mesh(const Depsgraph &depsgraph
       const MutableSpan<float3> laplacian_disp = gather_data_mesh(
           all_laplacian_disp.as_span(), verts, tls.laplacian_disp);
 
-      tls.vert_neighbors.resize(verts.size());
-      calc_vert_neighbors(faces,
-                          corner_verts,
-                          vert_to_face_map,
-                          attribute_data.hide_poly,
-                          verts,
-                          tls.vert_neighbors);
+      const GroupedSpan<int> neighbors = calc_vert_neighbors(faces,
+                                                             corner_verts,
+                                                             vert_to_face_map,
+                                                             attribute_data.hide_poly,
+                                                             verts,
+                                                             tls.neighbor_offsets,
+                                                             tls.neighbor_data);
 
       tls.average_positions.resize(verts.size());
       const MutableSpan<float3> average_laplacian_disps = tls.average_positions;
       smooth::neighbor_data_average_mesh(
-          all_laplacian_disp.as_span(), tls.vert_neighbors, average_laplacian_disps);
+          all_laplacian_disp.as_span(), neighbors, average_laplacian_disps);
 
       tls.translations.resize(verts.size());
       const MutableSpan<float3> translations = tls.translations;
@@ -387,6 +387,13 @@ void do_surface_smooth_brush(const Depsgraph &depsgraph,
   bke::pbvh::Tree &pbvh = *bke::object::pbvh_get(object);
   const Brush &brush = *BKE_paint_brush_for_read(&sd.paint);
 
+  if (ss.cache->surface_smooth_laplacian_disp.is_empty()) {
+    BLI_assert_msg(SCULPT_stroke_is_first_brush_step(*ss.cache),
+                   "Should only be allocated on the first step");
+    ss.cache->surface_smooth_laplacian_disp = Array<float3>(SCULPT_vertex_count_get(object),
+                                                            float3(0));
+  }
+
   switch (pbvh.type()) {
     case bke::pbvh::Type::Mesh:
       do_surface_smooth_brush_mesh(
@@ -398,14 +405,14 @@ void do_surface_smooth_brush(const Depsgraph &depsgraph,
       break;
     }
     case bke::pbvh::Type::BMesh: {
-      BM_mesh_elem_index_ensure(ss.bm, BM_VERT);
+      vert_random_access_ensure(object);
       do_surface_smooth_brush_bmesh(
           depsgraph, sd, brush, node_mask, object, ss.cache->surface_smooth_laplacian_disp);
       break;
     }
   }
   pbvh.tag_positions_changed(node_mask);
-  bke::pbvh::update_bounds(depsgraph, object, pbvh);
+  pbvh.update_bounds(depsgraph, object);
 }
 
-}  // namespace blender::ed::sculpt_paint
+}  // namespace blender::ed::sculpt_paint::brushes

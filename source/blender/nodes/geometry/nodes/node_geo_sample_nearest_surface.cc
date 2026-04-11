@@ -9,7 +9,7 @@
 #include "NOD_rna_define.hh"
 #include "NOD_socket_search_link.hh"
 
-#include "UI_interface.hh"
+#include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
 #include "RNA_enum_types.hh"
@@ -26,7 +26,9 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   const bNode *node = b.node_or_null();
 
-  b.add_input<decl::Geometry>("Mesh").supported_type(GeometryComponent::Type::Mesh);
+  b.add_input<decl::Geometry>("Mesh")
+      .supported_type(GeometryComponent::Type::Mesh)
+      .description("Mesh to find the closest surface point on");
   if (node != nullptr) {
     const eCustomDataType data_type = eCustomDataType(node->custom1);
     b.add_input(data_type, "Value").hide_value().field_on_all();
@@ -36,8 +38,13 @@ static void node_declare(NodeDeclarationBuilder &b)
       .field_on_all()
       .description(
           "Splits the faces of the input mesh into groups which can be sampled individually");
-  b.add_input<decl::Vector>("Sample Position").implicit_field(implicit_field_inputs::position);
-  b.add_input<decl::Int>("Sample Group ID").hide_value().supports_field();
+  b.add_input<decl::Vector>("Sample Position")
+      .implicit_field(NODE_DEFAULT_INPUT_POSITION_FIELD)
+      .structure_type(StructureType::Dynamic);
+  b.add_input<decl::Int>("Sample Group ID")
+      .hide_value()
+      .supports_field()
+      .structure_type(StructureType::Dynamic);
 
   if (node != nullptr) {
     const eCustomDataType data_type = eCustomDataType(node->custom1);
@@ -51,7 +58,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "data_type", UI_ITEM_NONE, "", ICON_NONE);
+  layout->prop(ptr, "data_type", UI_ITEM_NONE, "", ICON_NONE);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
@@ -79,7 +86,7 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
 class SampleNearestSurfaceFunction : public mf::MultiFunction {
  private:
   GeometrySet source_;
-  Array<BVHTreeFromMesh> bvh_trees_;
+  Array<bke::BVHTreeFromMesh> bvh_trees_;
   VectorSet<int> group_indices_;
 
  public:
@@ -122,20 +129,14 @@ class SampleNearestSurfaceFunction : public mf::MultiFunction {
         [&](const IndexRange range) {
           for (const int group_i : range) {
             const IndexMask &group_mask = group_masks[group_i];
-            BVHTreeFromMesh &bvh = bvh_trees_[group_i];
-            BKE_bvhtree_from_mesh_tris_init(mesh, group_mask, bvh);
+            bvh_trees_[group_i] = bke::bvhtree_from_mesh_tris_init(mesh, group_mask);
           }
         },
         threading::individual_task_sizes(
             [&](const int group_i) { return group_masks[group_i].size(); }, mesh.faces_num));
   }
 
-  ~SampleNearestSurfaceFunction()
-  {
-    for (BVHTreeFromMesh &tree : bvh_trees_) {
-      free_bvhtree_from_mesh(&tree);
-    }
-  }
+  ~SampleNearestSurfaceFunction() override = default;
 
   void call(const IndexMask &mask, mf::Params params, mf::Context /*context*/) const override
   {
@@ -159,12 +160,15 @@ class SampleNearestSurfaceFunction : public mf::MultiFunction {
         }
         return;
       }
-      const BVHTreeFromMesh &bvh = bvh_trees_[group_index];
+      const bke::BVHTreeFromMesh &bvh = bvh_trees_[group_index];
       BVHTreeNearest nearest;
       nearest.dist_sq = FLT_MAX;
       nearest.index = -1;
-      BLI_bvhtree_find_nearest(
-          bvh.tree, position, &nearest, bvh.nearest_callback, const_cast<BVHTreeFromMesh *>(&bvh));
+      BLI_bvhtree_find_nearest(bvh.tree,
+                               position,
+                               &nearest,
+                               bvh.nearest_callback,
+                               const_cast<bke::BVHTreeFromMesh *>(&bvh));
       triangle_index[i] = nearest.index;
       sample_position[i] = nearest.co;
       if (!is_valid_span.is_empty()) {
@@ -199,26 +203,58 @@ static void node_geo_exec(GeoNodeExecParams params)
     return;
   }
 
-  auto nearest_op = FieldOperation::Create(
-      std::make_shared<SampleNearestSurfaceFunction>(geometry,
-                                                     params.extract_input<Field<int>>("Group ID")),
-      {params.extract_input<Field<float3>>("Sample Position"),
-       params.extract_input<Field<int>>("Sample Group ID")});
-  Field<int> triangle_indices(nearest_op, 0);
-  Field<float3> nearest_positions(nearest_op, 1);
-  Field<bool> is_valid(nearest_op, 2);
+  GField value = params.extract_input<GField>("Value");
+  Field<int> group_id_field = params.extract_input<Field<int>>("Group ID");
+  auto sample_position = params.extract_input<bke::SocketValueVariant>("Sample Position");
+  auto sample_group_id = params.extract_input<bke::SocketValueVariant>("Sample Group ID");
 
-  Field<float3> bary_weights = Field<float3>(FieldOperation::Create(
-      std::make_shared<bke::mesh_surface_sample::BaryWeightFromPositionFn>(geometry),
-      {nearest_positions, triangle_indices}));
+  std::string error_message;
 
-  GField field = params.extract_input<GField>("Value");
-  auto sample_op = FieldOperation::Create(
-      std::make_shared<bke::mesh_surface_sample::BaryWeightSampleFn>(geometry, std::move(field)),
-      {triangle_indices, bary_weights});
+  bke::SocketValueVariant triangle_index;
+  bke::SocketValueVariant nearest_positions;
+  bke::SocketValueVariant is_valid;
+  if (!execute_multi_function_on_value_variant(
+          std::make_shared<SampleNearestSurfaceFunction>(geometry, group_id_field),
+          {&sample_position, &sample_group_id},
+          {&triangle_index, &nearest_positions, &is_valid},
+          params.user_data(),
+          error_message))
+  {
+    params.set_default_remaining_outputs();
+    params.error_message_add(NodeWarningType::Error, std::move(error_message));
+    return;
+  }
 
-  params.set_output("Value", GField(sample_op));
-  params.set_output("Is Valid", is_valid);
+  bke::SocketValueVariant bary_weights;
+  bke::SocketValueVariant triangle_index_copy = triangle_index;
+  if (!execute_multi_function_on_value_variant(
+          std::make_shared<bke::mesh_surface_sample::BaryWeightFromPositionFn>(geometry),
+          {&nearest_positions, &triangle_index_copy},
+          {&bary_weights},
+          params.user_data(),
+          error_message))
+  {
+    params.set_default_remaining_outputs();
+    params.error_message_add(NodeWarningType::Error, std::move(error_message));
+    return;
+  }
+
+  bke::SocketValueVariant sample_value;
+  if (!execute_multi_function_on_value_variant(
+          std::make_shared<bke::mesh_surface_sample::BaryWeightSampleFn>(geometry,
+                                                                         std::move(value)),
+          {&triangle_index, &bary_weights},
+          {&sample_value},
+          params.user_data(),
+          error_message))
+  {
+    params.set_default_remaining_outputs();
+    params.error_message_add(NodeWarningType::Error, std::move(error_message));
+    return;
+  }
+
+  params.set_output("Value", std::move(sample_value));
+  params.set_output("Is Valid", std::move(is_valid));
 }
 
 static void node_rna(StructRNA *srna)
@@ -237,15 +273,19 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(
-      &ntype, GEO_NODE_SAMPLE_NEAREST_SURFACE, "Sample Nearest Surface", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeSampleNearestSurface", GEO_NODE_SAMPLE_NEAREST_SURFACE);
+  ntype.ui_name = "Sample Nearest Surface";
+  ntype.ui_description =
+      "Calculate the interpolated value of a mesh attribute on the closest point of its surface";
+  ntype.enum_name_legacy = "SAMPLE_NEAREST_SURFACE";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.initfunc = node_init;
   ntype.declare = node_declare;
-  blender::bke::node_type_size_preset(&ntype, blender::bke::eNodeSizePreset::Middle);
+  blender::bke::node_type_size_preset(ntype, blender::bke::eNodeSizePreset::Middle);
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
   ntype.gather_link_search_ops = node_gather_link_searches;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

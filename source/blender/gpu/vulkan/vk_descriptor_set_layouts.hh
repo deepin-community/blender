@@ -17,15 +17,17 @@
 
 #pragma once
 
-#include <mutex>
-
 #include "BLI_map.hh"
+#include "BLI_mutex.hh"
 #include "BLI_utility_mixins.hh"
 #include "BLI_vector.hh"
 
 #include "vk_common.hh"
 
 namespace blender::gpu {
+
+class VKDevice;
+
 /**
  * Key of descriptor set layout
  *
@@ -64,6 +66,25 @@ template<> struct DefaultHash<gpu::VKDescriptorSetLayoutInfo> {
 }  // namespace blender
 
 namespace blender::gpu {
+
+struct VKDescriptorBufferLayout {
+  /**
+   * Total size of the descriptor buffer.
+   *
+   * Size is aligned to
+   * VkPhysicalDeviceDescriptorBufferProperties.descriptorBufferOffsetAlignment.
+   */
+  VkDeviceSize size;
+
+  /**
+   * Offsets of each binding inside the buffer.
+   *
+   * Offsets are aligned to
+   * VkPhysicalDeviceDescriptorBufferProperties.descriptorBufferOffsetAlignment.
+   */
+  Vector<VkDeviceSize> binding_offsets;
+};
+
 /**
  * Registries of descriptor set layouts.
  */
@@ -75,13 +96,14 @@ class VKDescriptorSetLayouts : NonCopyable {
    * Map containing all created descriptor set layouts.
    */
   Map<VKDescriptorSetLayoutInfo, VkDescriptorSetLayout> vk_descriptor_set_layouts_;
+  Map<VkDescriptorSetLayout, VKDescriptorBufferLayout> descriptor_buffer_layouts_;
 
   /**
    * Reusable descriptor set layout create info.
    */
   VkDescriptorSetLayoutCreateInfo vk_descriptor_set_layout_create_info_;
   Vector<VkDescriptorSetLayoutBinding> vk_descriptor_set_layout_bindings_;
-  std::mutex mutex_;
+  Mutex mutex_;
 
  public:
   VKDescriptorSetLayouts();
@@ -95,7 +117,24 @@ class VKDescriptorSetLayouts : NonCopyable {
    */
   VkDescriptorSetLayout get_or_create(const VKDescriptorSetLayoutInfo &info,
                                       bool &r_created,
-                                      [[deprecated]] bool &r_needed);
+                                      bool &r_needed);
+
+  /**
+   * Return the descriptor buffer layout offsets and alignment for the given
+   * vk_descriptor_set_layout handle.
+   *
+   * A copy of the buffer layout is returned due to other threads can alter the location of the
+   * items.
+   *
+   * This function has undefined behavior when descriptor buffers extension isn't enabled on the
+   * VKDevice.
+   */
+  VKDescriptorBufferLayout descriptor_buffer_layout_get(
+      VkDescriptorSetLayout vk_descriptor_set_layout)
+  {
+    std::scoped_lock lock(mutex_);
+    return descriptor_buffer_layouts_.lookup(vk_descriptor_set_layout);
+  }
 
   /**
    * Free all descriptor set layouts.
@@ -114,6 +153,10 @@ class VKDescriptorSetLayouts : NonCopyable {
 
  private:
   void update_layout_bindings(const VKDescriptorSetLayoutInfo &info);
+  VKDescriptorBufferLayout create_descriptor_buffer_layout(
+      const VKDevice &device,
+      const VKDescriptorSetLayoutInfo &info,
+      VkDescriptorSetLayout vk_descriptor_set_layout) const;
 };
 
 }  // namespace blender::gpu

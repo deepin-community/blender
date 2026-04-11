@@ -8,7 +8,6 @@
 #include "sculpt_expand.hh"
 
 #include <cmath>
-#include <cstdlib>
 
 #include "MEM_guardedalloc.h"
 
@@ -16,7 +15,6 @@
 #include "BLI_bit_vector.hh"
 #include "BLI_linklist_stack.h"
 #include "BLI_math_vector.hh"
-#include "BLI_task.h"
 
 #include "DNA_brush_types.h"
 #include "DNA_object_types.h"
@@ -31,9 +29,11 @@
 #include "BKE_mesh.hh"
 #include "BKE_mesh_mapping.hh"
 #include "BKE_paint.hh"
-#include "BKE_pbvh_api.hh"
+#include "BKE_paint_bvh.hh"
 #include "BKE_report.hh"
 #include "BKE_subdiv_ccg.hh"
+
+#include "BLT_translation.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
@@ -199,7 +199,7 @@ static float falloff_value_vertex_get(const SculptSession &ss,
 
   float rgba[4];
   const float avg = BKE_brush_sample_tex_3d(
-      expand_cache.scene, brush, mtex, position, rgba, 0, ss.tex_pool);
+      expand_cache.paint, brush, mtex, position, rgba, 0, ss.tex_pool);
 
   const float distortion = (avg - 0.5f) * expand_cache.texture_distortion_strength *
                            expand_cache.max_vert_falloff;
@@ -514,7 +514,7 @@ static IndexMask boundary_from_enabled(Object &object,
     case bke::pbvh::Type::BMesh: {
       return IndexMask::from_predicate(enabled_mask, GrainSize(1024), memory, [&](const int vert) {
         BMVert *bm_vert = BM_vert_at_index(ss.bm, vert);
-        Vector<BMVert *, 64> neighbors;
+        BMeshNeighborVerts neighbors;
         for (const BMVert *neighbor : vert_neighbors_get_bmesh(*bm_vert, neighbors)) {
           if (!enabled_verts[BM_elem_index_get(neighbor)]) {
             return true;
@@ -574,8 +574,8 @@ Vector<int> find_symm_verts_mesh(const Depsgraph &depsgraph,
   const VArraySpan hide_vert = *attributes.lookup<bool>(".hide_vert", bke::AttrDomain::Point);
 
   const float3 location = positions[original_vert];
-  for (char symm_it = 1; symm_it <= symm; symm_it++) {
-    if (!SCULPT_is_symmetry_iteration_valid(symm_it, symm)) {
+  for (int symm_it = 1; symm_it <= symm; symm_it++) {
+    if (!is_symmetry_iteration_valid(symm_it, symm)) {
       continue;
     }
     const float3 symm_location = symmetry_flip(location, ePaintSymmetryFlags(symm_it));
@@ -607,8 +607,8 @@ Vector<int> find_symm_verts_grids(const Object &object,
   const CCGKey key = BKE_subdiv_ccg_key_top_level(subdiv_ccg);
   const Span<float3> positions = subdiv_ccg.positions;
   const float3 location = positions[original_vert];
-  for (char symm_it = 1; symm_it <= symm; symm_it++) {
-    if (!SCULPT_is_symmetry_iteration_valid(symm_it, symm)) {
+  for (int symm_it = 1; symm_it <= symm; symm_it++) {
+    if (!is_symmetry_iteration_valid(symm_it, symm)) {
       continue;
     }
     const float3 symm_location = symmetry_flip(location, ePaintSymmetryFlags(symm_it));
@@ -639,8 +639,8 @@ Vector<int> find_symm_verts_bmesh(const Object &object,
   BMesh &bm = *ss.bm;
   const BMVert *original_bm_vert = BM_vert_at_index(&bm, original_vert);
   const float3 location = original_bm_vert->co;
-  for (char symm_it = 1; symm_it <= symm; symm_it++) {
-    if (!SCULPT_is_symmetry_iteration_valid(symm_it, symm)) {
+  for (int symm_it = 1; symm_it <= symm; symm_it++) {
+    if (!is_symmetry_iteration_valid(symm_it, symm)) {
       continue;
     }
     const float3 symm_location = symmetry_flip(location, ePaintSymmetryFlags(symm_it));
@@ -883,8 +883,8 @@ static Array<float> normals_falloff_create(const Depsgraph &depsgraph,
       const float3 orig_normal = orig_vert->no;
       flood.add_initial(*ss.bm, find_symm_verts(depsgraph, ob, vert));
       flood.execute(ob, [&](BMVert *from_bm_vert, BMVert *to_bm_vert) {
-        const float3 &from_normal = from_bm_vert->no;
-        const float3 &to_normal = to_bm_vert->no;
+        const float3 from_normal = from_bm_vert->no;
+        const float3 to_normal = to_bm_vert->no;
         const int from_vert = BM_elem_index_get(from_bm_vert);
         const int to_vert = BM_elem_index_get(to_bm_vert);
         const float from_edge_factor = edge_factors[from_vert];
@@ -1553,14 +1553,14 @@ static void write_mask_data(Object &object, const Span<float> mask)
       attributes.remove(".sculpt_mask");
       attributes.add<float>(".sculpt_mask",
                             bke::AttrDomain::Point,
-                            bke::AttributeInitVArray(VArray<float>::ForSpan(mask)));
+                            bke::AttributeInitVArray(VArray<float>::from_span(mask)));
       bke::pbvh::update_mask_mesh(mesh, node_mask, pbvh);
       break;
     }
     case bke::pbvh::Type::BMesh: {
       BMesh &bm = *ss.bm;
       const int offset = CustomData_get_offset_named(&bm.vdata, CD_PROP_FLOAT, ".sculpt_mask");
-      BM_mesh_elem_table_ensure(&bm, BM_VERT);
+      vert_random_access_ensure(object);
       for (const int i : mask.index_range()) {
         BM_ELEM_CD_SET_FLOAT(BM_vert_at_index(&bm, i), offset, mask[i]);
       }
@@ -1614,6 +1614,8 @@ static void sculpt_expand_cancel(bContext *C, wmOperator * /*op*/)
 
   undo::push_end(ob);
   expand_cache_free(ss);
+
+  ED_workspace_status_text(C, nullptr);
 }
 
 /* Functions to update the sculpt mesh data. */
@@ -2026,8 +2028,8 @@ static void update_for_vert(bContext *C, Object &ob, const std::optional<int> ve
 static std::optional<int> target_vert_update_and_get(bContext *C, Object &ob, const float mval[2])
 {
   SculptSession &ss = *ob.sculpt;
-  SculptCursorGeometryInfo sgi;
-  if (SCULPT_cursor_geometry_info_update(C, &sgi, mval, false)) {
+  CursorGeometryInfo cgi;
+  if (cursor_geometry_info_update(C, &cgi, mval, false)) {
     return ss.active_vert_index();
   }
   return std::nullopt;
@@ -2162,8 +2164,8 @@ static void find_active_connected_components_from_vert(const Depsgraph &depsgrap
   const Vector<int> symm_verts = find_symm_verts(depsgraph, ob, initial_vertex);
 
   int valid_index = 0;
-  for (char symm_it = 0; symm_it <= symm; symm_it++) {
-    if (!SCULPT_is_symmetry_iteration_valid(symm_it, symm)) {
+  for (int symm_it = 0; symm_it <= symm; symm_it++) {
+    if (!is_symmetry_iteration_valid(symm_it, symm)) {
       continue;
     }
     expand_cache.active_connected_islands[symm_it] = islands::vert_id_get(ss,
@@ -2186,7 +2188,7 @@ static bool set_initial_components_for_mouse(bContext *C,
 
   std::optional<int> initial_vert = target_vert_update_and_get(C, ob, mval);
   if (!initial_vert) {
-    /* Cursor not over the mesh, for creating valid initial falloffs, fallback to the last active
+    /* Cursor not over the mesh, for creating valid initial falloffs, fall back to the last active
      * vertex in the sculpt session. */
     const int last_active_vert_index = ss.last_active_vert_index();
     /* It still may be the case that there is no last active vert in rare circumstances for
@@ -2254,7 +2256,7 @@ static void ensure_sculptsession_data(Object &ob)
 {
   SculptSession &ss = *ob.sculpt;
   islands::ensure_cache(ob);
-  SCULPT_vertex_random_access_ensure(ob);
+  vert_random_access_ensure(ob);
   boundary::ensure_boundary_info(ob);
   if (!ss.tex_pool) {
     ss.tex_pool = BKE_image_pool_new();
@@ -2289,7 +2291,71 @@ static int active_face_set_id_get(Object &object, Cache &expand_cache)
   return SCULPT_FACE_SET_NONE;
 }
 
-static int sculpt_expand_modal(bContext *C, wmOperator *op, const wmEvent *event)
+static void sculpt_expand_status(bContext *C, wmOperator *op, Cache *expand_cache)
+{
+  WorkspaceStatus status(C);
+
+  status.opmodal(IFACE_("Confirm"), op->type, SCULPT_EXPAND_MODAL_CONFIRM);
+  status.opmodal(IFACE_("Cancel"), op->type, SCULPT_EXPAND_MODAL_CANCEL);
+  status.opmodal(IFACE_("Invert"), op->type, SCULPT_EXPAND_MODAL_INVERT, expand_cache->invert);
+  status.opmodal(IFACE_("Snap"), op->type, SCULPT_EXPAND_MODAL_SNAP_TOGGLE, expand_cache->snap);
+  status.opmodal(IFACE_("Move"), op->type, SCULPT_EXPAND_MODAL_MOVE_TOGGLE, expand_cache->move);
+  status.opmodal(
+      IFACE_("Preserve"), op->type, SCULPT_EXPAND_MODAL_PRESERVE_TOGGLE, expand_cache->preserve);
+
+  if (expand_cache->target != TargetType::FaceSets) {
+    status.opmodal(IFACE_("Falloff Gradient"),
+                   op->type,
+                   SCULPT_EXPAND_MODAL_GRADIENT_TOGGLE,
+                   expand_cache->falloff_gradient);
+    status.opmodal(IFACE_("Brush Gradient"),
+                   op->type,
+                   SCULPT_EXPAND_MODAL_BRUSH_GRADIENT_TOGGLE,
+                   expand_cache->brush_gradient);
+  }
+
+  if (ELEM(expand_cache->falloff_type,
+           FalloffType::Geodesic,
+           FalloffType::Topology,
+           FalloffType::TopologyNormals,
+           FalloffType::Sphere))
+  {
+    status.item(IFACE_("Falloff:"), 0);
+    status.opmodal(IFACE_("Geodesic"),
+                   op->type,
+                   SCULPT_EXPAND_MODAL_FALLOFF_GEODESIC,
+                   expand_cache->falloff_type == FalloffType::Geodesic);
+    status.opmodal(IFACE_("Topology"),
+                   op->type,
+                   SCULPT_EXPAND_MODAL_FALLOFF_TOPOLOGY,
+                   expand_cache->falloff_type == FalloffType::Topology);
+    status.opmodal(IFACE_("Diagonals"),
+                   op->type,
+                   SCULPT_EXPAND_MODAL_FALLOFF_TOPOLOGY_DIAGONALS,
+                   expand_cache->falloff_type == FalloffType::TopologyNormals);
+    status.opmodal(IFACE_("Spherical"),
+                   op->type,
+                   SCULPT_EXPAND_MODAL_FALLOFF_SPHERICAL,
+                   expand_cache->falloff_type == FalloffType::Sphere);
+  }
+
+  status.opmodal({}, op->type, SCULPT_EXPAND_MODAL_LOOP_COUNT_INCREASE);
+  status.item("/", 0);
+  status.separator(-1.2f);
+  status.opmodal(IFACE_("Loop Count"), op->type, SCULPT_EXPAND_MODAL_LOOP_COUNT_DECREASE);
+
+  status.opmodal(IFACE_("Geodesic Step"), op->type, SCULPT_EXPAND_MODAL_RECURSION_STEP_GEODESIC);
+  status.opmodal(IFACE_("Topology Step"), op->type, SCULPT_EXPAND_MODAL_RECURSION_STEP_TOPOLOGY);
+
+  const MTex *mask_tex = BKE_brush_mask_texture_get(expand_cache->brush, OB_MODE_SCULPT);
+  if (mask_tex->tex) {
+    status.opmodal({}, op->type, SCULPT_EXPAND_MODAL_TEXTURE_DISTORTION_INCREASE);
+    status.opmodal(
+        IFACE_("Texture Distortion"), op->type, SCULPT_EXPAND_MODAL_TEXTURE_DISTORTION_DECREASE);
+  }
+}
+
+static wmOperatorStatus sculpt_expand_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   Object &ob = *CTX_data_active_object(C);
   SculptSession &ss = *ob.sculpt;
@@ -2474,6 +2540,8 @@ static int sculpt_expand_modal(bContext *C, wmOperator *op, const wmEvent *event
   /* Update the sculpt data with the current state of the #Cache. */
   update_for_vert(C, ob, target_expand_vertex);
 
+  sculpt_expand_status(C, op, &expand_cache);
+
   return OPERATOR_RUNNING_MODAL;
 }
 
@@ -2574,14 +2642,13 @@ static void cache_initial_config_set(bContext *C, wmOperator *op, Cache &expand_
   expand_cache.brush_gradient = false;
 
   /* Texture and color data from the active Brush. */
-  Scene &scene = *CTX_data_scene(C);
   const Paint *paint = BKE_paint_get_active_from_context(C);
   const Sculpt &sd = *CTX_data_tool_settings(C)->sculpt;
+  expand_cache.paint = paint;
   expand_cache.brush = BKE_paint_brush_for_read(&sd.paint);
-  BKE_curvemapping_init(expand_cache.brush->curve);
+  BKE_curvemapping_init(expand_cache.brush->curve_distance_falloff);
   copy_v4_fl(expand_cache.fill_color, 1.0f);
-  copy_v3_v3(expand_cache.fill_color, BKE_brush_color_get(&scene, paint, expand_cache.brush));
-  IMB_colormanagement_srgb_to_scene_linear_v3(expand_cache.fill_color, expand_cache.fill_color);
+  copy_v3_v3(expand_cache.fill_color, BKE_brush_color_get(paint, expand_cache.brush));
 
   expand_cache.scene = CTX_data_scene(C);
   expand_cache.texture_distortion_strength = 0.0f;
@@ -2652,7 +2719,7 @@ static bool any_nonzero_mask(const Object &object)
   return false;
 }
 
-static int sculpt_expand_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus sculpt_expand_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   const Scene &scene = *CTX_data_scene(C);
   Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
@@ -2779,7 +2846,7 @@ static int sculpt_expand_invoke(bContext *C, wmOperator *op, const wmEvent *even
     }
     case bke::pbvh::Type::BMesh: {
       BMesh &bm = *ob.sculpt->bm;
-      BM_mesh_elem_table_ensure(&bm, BM_VERT);
+      vert_random_access_ensure(ob);
       if (boundary::vert_is_boundary(BM_vert_at_index(&bm, initial_vert))) {
         falloff_type = FalloffType::BoundaryTopology;
       }
@@ -2794,6 +2861,8 @@ static int sculpt_expand_invoke(bContext *C, wmOperator *op, const wmEvent *even
 
   /* Initial mesh data update, resets all target data in the sculpt mesh. */
   update_for_vert(C, ob, initial_vert);
+
+  sculpt_expand_status(C, op, ss.expand_cache);
 
   WM_event_add_modal_handler(C, op);
   return OPERATOR_RUNNING_MODAL;

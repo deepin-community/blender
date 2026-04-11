@@ -15,6 +15,8 @@
 #include "GPU_index_buffer.hh"
 #include "GPU_vertex_buffer.hh"
 
+namespace blender::ed::vse {
+
 struct ColorVertex {
   blender::float2 pos;
   blender::ColorTheme4b color;
@@ -42,8 +44,8 @@ SeqQuadsBatch::SeqQuadsBatch()
 
   GPUVertFormat format;
   GPU_vertformat_clear(&format);
-  GPU_vertformat_attr_add(&format, "pos", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
-  GPU_vertformat_attr_add(&format, "color", GPU_COMP_U8, 4, GPU_FETCH_INT_TO_FLOAT_UNIT);
+  GPU_vertformat_attr_add(&format, "pos", blender::gpu::VertAttrType::SFLOAT_32_32);
+  GPU_vertformat_attr_add(&format, "color", blender::gpu::VertAttrType::UNORM_8_8_8_8);
 
   vbo_quads = GPU_vertbuf_create_with_format_ex(format, GPU_USAGE_STREAM);
   GPU_vertbuf_data_alloc(*vbo_quads, MAX_QUADS * 4);
@@ -169,3 +171,5 @@ void SeqQuadsBatch::add_line(
 
   lines_num++;
 }
+
+}  // namespace blender::ed::vse

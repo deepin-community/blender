@@ -24,7 +24,7 @@
 
 #include "CLG_log.h"
 
-static CLG_LogRef LOG = {"bke.anim"};
+static CLG_LogRef LOG = {"anim"};
 
 /* ******************************************************************** */
 /* Curve Paths - for curve deforms and/or curve following */
@@ -85,7 +85,7 @@ void BKE_anim_path_calc_data(Object *ob)
    * In this case either calculate a single length (for a cyclic) curve or nothing.
    * While not useful, it's harmless too. */
   const int seg_size = get_bevlist_seg_array_size(bl);
-  float *len_data = (float *)MEM_mallocN(sizeof(float) * seg_size, "calcpathdist");
+  float *len_data = MEM_malloc_arrayN<float>(size_t(seg_size), "calcpathdist");
   ob->runtime->curve_cache->anim_path_accum_length = len_data;
 
   BevPoint *bp_arr = bl->bevpoints;
@@ -184,7 +184,16 @@ static bool binary_search_anim_path(const float *accum_len_arr,
   int cur_idx = 0, cur_base = 0;
   int cur_step = seg_size - 1;
 
+  /* Special case, for a single segment accessing the `right_len`
+   * would be an invalid index, see: #132976. */
+  if (UNLIKELY(seg_size == 1)) {
+    *r_idx = 0;
+    *r_frac = goal_len / accum_len_arr[0];
+    return true;
+  }
+
   while (true) {
+    BLI_assert(cur_idx + 1 < seg_size);
     cur_idx = cur_base + cur_step / 2;
     left_len = accum_len_arr[cur_idx];
     right_len = accum_len_arr[cur_idx + 1];

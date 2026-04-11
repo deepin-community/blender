@@ -10,6 +10,8 @@
 
 #include <memory>
 
+#include "DNA_listBase.h"
+
 #include "BLI_function_ref.hh"
 
 #include "RNA_types.hh"
@@ -36,6 +38,7 @@ struct bPoseChannel;
 struct View2D;
 struct wmKeyConfig;
 struct wmOperatorType;
+struct WorkSpace;
 
 namespace blender::bke::outliner::treehash {
 class TreeHash;
@@ -138,7 +141,7 @@ struct TreeElementIcon {
         ID_CV, \
         ID_PT, \
         ID_VO, \
-        ID_GP) || /* Only in 'blendfile' mode ... :/ */ \
+        ID_GP) || /* Only in blend-file mode ... :/ */ \
    ELEM(GS((_id)->name), \
         ID_SCR, \
         ID_WM, \
@@ -233,9 +236,13 @@ enum eOLSetState {
  * Also so we can have one place to assign these variables.
  */
 struct TreeViewContext {
+  /* Workspace. */
+  WorkSpace *workspace;
+
   /* Scene level. */
   Scene *scene;
   ViewLayer *view_layer;
+  LayerCollection *layer_collection;
 
   /* Object level. */
   /** Avoid `BKE_view_layer_active_object_get` everywhere. */
@@ -272,6 +279,7 @@ void outliner_free_tree_element(TreeElement *element, ListBase *parent_subtree);
  * Main entry point for building the tree data-structure that the outliner represents.
  */
 void outliner_build_tree(Main *mainvar,
+                         WorkSpace *workspace,
                          Scene *scene,
                          ViewLayer *view_layer,
                          SpaceOutliner *space_outliner,
@@ -322,7 +330,7 @@ int tree_element_id_type_to_index(TreeElement *te);
  * Generic call for non-id data to make active in UI
  */
 void tree_element_type_active_set(bContext *C,
-                                  const TreeViewContext *tvc,
+                                  const TreeViewContext &tvc,
                                   TreeElement *te,
                                   TreeStoreElem *tselem,
                                   eOLSetState set,
@@ -330,19 +338,18 @@ void tree_element_type_active_set(bContext *C,
 /**
  * Generic call for non-id data to check the active state in UI.
  */
-eOLDrawState tree_element_type_active_state_get(const bContext *C,
-                                                const TreeViewContext *tvc,
+eOLDrawState tree_element_type_active_state_get(const TreeViewContext &tvc,
                                                 const TreeElement *te,
                                                 const TreeStoreElem *tselem);
 /**
  * Generic call for ID data check or make/check active in UI.
  */
 void tree_element_activate(bContext *C,
-                           const TreeViewContext *tvc,
+                           const TreeViewContext &tvc,
                            TreeElement *te,
                            eOLSetState set,
                            bool handle_all_types);
-eOLDrawState tree_element_active_state_get(const TreeViewContext *tvc,
+eOLDrawState tree_element_active_state_get(const TreeViewContext &tvc,
                                            const TreeElement *te,
                                            const TreeStoreElem *tselem);
 
@@ -374,7 +381,10 @@ bool outliner_is_co_within_mode_column(SpaceOutliner *space_outliner, const floa
 /**
  * Toggle the item's interaction mode if supported.
  */
-void outliner_item_mode_toggle(bContext *C, TreeViewContext *tvc, TreeElement *te, bool do_extend);
+void outliner_item_mode_toggle(bContext *C,
+                               const TreeViewContext &tvc,
+                               TreeElement *te,
+                               bool do_extend);
 
 /* `outliner_edit.cc` */
 using outliner_operation_fn = blender::FunctionRef<void(bContext *C,
@@ -480,6 +490,7 @@ void OUTLINER_OT_lib_relocate(wmOperatorType *ot);
 void OUTLINER_OT_lib_reload(wmOperatorType *ot);
 
 void OUTLINER_OT_id_delete(wmOperatorType *ot);
+void OUTLINER_OT_id_linked_relocate(wmOperatorType *ot);
 
 void OUTLINER_OT_show_one_level(wmOperatorType *ot);
 void OUTLINER_OT_show_active(wmOperatorType *ot);
@@ -665,7 +676,9 @@ void outliner_tag_redraw_avoid_rebuild_on_open_change(const SpaceOutliner *space
 /**
  * If outliner is dirty sync selection from view layer and sequencer.
  */
-void outliner_sync_selection(const bContext *C, SpaceOutliner *space_outliner);
+void outliner_sync_selection(const bContext *C,
+                             const TreeViewContext &tvc,
+                             SpaceOutliner *space_outliner);
 
 /* `outliner_context.cc` */
 

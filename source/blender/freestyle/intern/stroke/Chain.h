@@ -50,7 +50,7 @@ class Chain : public Curve {
   /** Destructor. */
   virtual ~Chain()
   {
-    // only the last splitted deletes this id
+    // only the last split deletes this id
     if (_splittingId) {
       if (*_splittingId == _Id) {
         delete _splittingId;
@@ -90,9 +90,7 @@ class Chain : public Curve {
     return _splittingId;
   }
 
-#ifdef WITH_CXX_GUARDEDALLOC
   MEM_CXX_CLASS_ALLOC_FUNCS("Freestyle:Chain")
-#endif
 };
 
 } /* namespace Freestyle */
